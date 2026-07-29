@@ -167,6 +167,22 @@ class TransactionGrpcServiceTest {
     }
 
     @Test
+    void getTransactionShouldIncludeMerchantIdWhenPresent() {
+        UUID txId = UUID.randomUUID();
+        Transaction tx = buildTransaction(txId, Instant.now());
+        tx.setMerchantId("merchant-001");
+        when(transactionService.getTransaction(txId.toString())).thenReturn(Optional.of(tx));
+
+        transactionGrpcService.getTransaction(
+                GetTransactionRequest.newBuilder().setTransactionId(txId.toString()).build(),
+                getResponseObserver);
+
+        ArgumentCaptor<GetTransactionResponse> captor = ArgumentCaptor.forClass(GetTransactionResponse.class);
+        verify(getResponseObserver).onNext(captor.capture());
+        assertThat(captor.getValue().getMerchantId()).isEqualTo("merchant-001");
+    }
+
+    @Test
     void getTransactionShouldReturnNotFoundForUnknownId() {
         UUID unknown = UUID.randomUUID();
         when(transactionService.getTransaction(unknown.toString())).thenReturn(Optional.empty());
@@ -298,7 +314,7 @@ class TransactionGrpcServiceTest {
 
     @Test
     void shouldReturnInternalErrorWhenServiceThrows() {
-        when(transactionService.initiateTransaction(any(), any(), any(), any()))
+        when(transactionService.initiateTransaction(any(), any(), any(), any(), any()))
                 .thenThrow(new RuntimeException("Vault down"));
 
         InitiateTransactionRequest request = InitiateTransactionRequest.newBuilder()

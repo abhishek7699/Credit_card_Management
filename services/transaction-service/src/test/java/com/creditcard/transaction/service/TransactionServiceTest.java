@@ -49,7 +49,7 @@ class TransactionServiceTest {
         Transaction savedTx = buildSavedTransaction();
         when(transactionRepository.save(any())).thenReturn(savedTx);
 
-        transactionService.initiateTransaction(rawPan, "Jane Doe", new BigDecimal("50.00"), "USD");
+        transactionService.initiateTransaction(rawPan, "Jane Doe", new BigDecimal("50.00"), "USD", "merchant-001");
 
         verify(tokenizationService).tokenize(rawPan);
     }
@@ -61,7 +61,7 @@ class TransactionServiceTest {
         Transaction savedTx = buildSavedTransaction();
         when(transactionRepository.save(any())).thenReturn(savedTx);
 
-        transactionService.initiateTransaction("4321432143214321", "John Smith", new BigDecimal("100.00"), "EUR");
+        transactionService.initiateTransaction("4321432143214321", "John Smith", new BigDecimal("100.00"), "EUR", "merchant-001");
 
         ArgumentCaptor<Transaction> captor = ArgumentCaptor.forClass(Transaction.class);
         verify(transactionRepository).save(captor.capture());
@@ -76,13 +76,26 @@ class TransactionServiceTest {
     }
 
     @Test
+    void shouldSetMerchantIdNullWhenBlank() {
+        when(tokenizationService.tokenize(any()))
+                .thenReturn(new TokenResult("vault:v1:token", "****-****-****-0001"));
+        when(transactionRepository.save(any())).thenReturn(buildSavedTransaction());
+
+        transactionService.initiateTransaction("4111111111111111", "Jane Doe", new BigDecimal("10.00"), "USD", "");
+
+        ArgumentCaptor<Transaction> captor = ArgumentCaptor.forClass(Transaction.class);
+        verify(transactionRepository).save(captor.capture());
+        assertThat(captor.getValue().getMerchantId()).isNull();
+    }
+
+    @Test
     void savedEntityShouldNotContainRawPan() {
         String rawPan = "4111111111111111";
         when(tokenizationService.tokenize(rawPan))
                 .thenReturn(new TokenResult("vault:v1:opaque", "****-****-****-1111"));
         when(transactionRepository.save(any())).thenReturn(buildSavedTransaction());
 
-        transactionService.initiateTransaction(rawPan, "Jane Doe", new BigDecimal("10.00"), "USD");
+        transactionService.initiateTransaction(rawPan, "Jane Doe", new BigDecimal("10.00"), "USD", "merchant-001");
 
         ArgumentCaptor<Transaction> captor = ArgumentCaptor.forClass(Transaction.class);
         verify(transactionRepository).save(captor.capture());
@@ -98,7 +111,7 @@ class TransactionServiceTest {
         Transaction savedTx = buildSavedTransaction();
         when(transactionRepository.save(any())).thenReturn(savedTx);
 
-        transactionService.initiateTransaction("4999999999999999", "Alice", new BigDecimal("25.00"), "GBP");
+        transactionService.initiateTransaction("4999999999999999", "Alice", new BigDecimal("25.00"), "GBP", "merchant-001");
 
         ArgumentCaptor<TransactionInitiatedEvent> eventCaptor = ArgumentCaptor.forClass(TransactionInitiatedEvent.class);
         verify(kafkaTemplate).send(eq("transaction.initiated"), any(String.class), eventCaptor.capture());
@@ -117,7 +130,7 @@ class TransactionServiceTest {
                 .thenReturn(new TokenResult("vault:v1:opaque", "****-****-****-1111"));
         when(transactionRepository.save(any())).thenReturn(buildSavedTransaction());
 
-        transactionService.initiateTransaction(rawPan, "Jane Doe", new BigDecimal("10.00"), "USD");
+        transactionService.initiateTransaction(rawPan, "Jane Doe", new BigDecimal("10.00"), "USD", "merchant-001");
 
         ArgumentCaptor<TransactionInitiatedEvent> eventCaptor = ArgumentCaptor.forClass(TransactionInitiatedEvent.class);
         verify(kafkaTemplate).send(any(), any(), eventCaptor.capture());
@@ -134,7 +147,7 @@ class TransactionServiceTest {
         Transaction savedTx = buildSavedTransaction();
         when(transactionRepository.save(any())).thenReturn(savedTx);
 
-        UUID result = transactionService.initiateTransaction("4000000000000000", "X", new BigDecimal("1.00"), "USD");
+        UUID result = transactionService.initiateTransaction("4000000000000000", "X", new BigDecimal("1.00"), "USD", "merchant-001");
 
         assertThat(result).isEqualTo(savedTx.getId());
     }
@@ -145,7 +158,7 @@ class TransactionServiceTest {
                 .thenThrow(new RuntimeException("Vault unavailable"));
 
         assertThatThrownBy(() ->
-                transactionService.initiateTransaction("4111111111111111", "Jane", new BigDecimal("10.00"), "USD"))
+                transactionService.initiateTransaction("4111111111111111", "Jane", new BigDecimal("10.00"), "USD", "merchant-001"))
                 .isInstanceOf(RuntimeException.class);
 
         verify(transactionRepository, never()).save(any());
