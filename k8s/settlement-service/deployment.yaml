@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: settlement-service
+  namespace: credit-card
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: settlement-service
+  template:
+    metadata:
+      labels:
+        app: settlement-service
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+        - name: settlement-service
+          image: settlement-service:latest
+          ports:
+            - containerPort: 8080
+              name: http
+            - containerPort: 8085
+              name: management
+          envFrom:
+            - secretRef:
+                name: settlement-service-secrets
+          env:
+            - name: SETTLEMENT_INTERCHANGE_FEE_RATE
+              value: "0.02"
+            - name: SETTLEMENT_BATCH_CRON
+              value: "0 59 23 * * *"
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8085
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8085
+            initialDelaySeconds: 15
+            periodSeconds: 5
+            failureThreshold: 3

@@ -1,0 +1,205 @@
+services:
+
+  # ── Infrastructure ────────────────────────────────────────────────────────
+
+  cockroachdb:
+    image: cockroachdb/cockroach:v23.2.0
+    command: start-single-node --insecure
+    ports:
+      - "26257:26257"
+      - "8080:8080"
+    volumes:
+      - cockroach-data:/cockroach/cockroach-data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health?ready=1"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+      start_period: 30s
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.0
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+    ports:
+      - "2181:2181"
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    ports:
+      - "9092:9092"
+    healthcheck:
+      test: ["CMD", "kafka-topics", "--bootstrap-server", "kafka:9092", "--list"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+
+  vault:
+    image: hashicorp/vault:1.16
+    cap_add:
+      - IPC_LOCK
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: dev-root-token
+      VAULT_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
+    ports:
+      - "8200:8200"
+    healthcheck:
+      test: ["CMD", "vault", "status"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ── Microservices ─────────────────────────────────────────────────────────
+
+  transaction-service:
+    build:
+      context: .
+      dockerfile: services/transaction-service/Dockerfile
+    depends_on:
+      cockroachdb:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      vault:
+        condition: service_healthy
+    ports:
+      - "9090:9090"
+      - "8081:8081"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://cockroachdb:26257/defaultdb?sslmode=disable
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD: ""
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      VAULT_ADDR: http://vault:8200
+      VAULT_TOKEN: dev-root-token
+      SPRING_VAULT_HOST: vault
+      SPRING_VAULT_PORT: 8200
+      SPRING_VAULT_SCHEME: http
+      SPRING_VAULT_TOKEN: dev-root-token
+
+  authorization-service:
+    build:
+      context: .
+      dockerfile: services/authorization-service/Dockerfile
+    depends_on:
+      cockroachdb:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8082:8082"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://cockroachdb:26257/defaultdb?sslmode=disable
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD: ""
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+
+  fraud-detection-service:
+    build:
+      context: .
+      dockerfile: services/fraud-detection-service/Dockerfile
+    depends_on:
+      cockroachdb:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8083:8083"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://cockroachdb:26257/defaultdb?sslmode=disable
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD: ""
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+
+  settlement-service:
+    build:
+      context: .
+      dockerfile: services/settlement-service/Dockerfile
+    depends_on:
+      cockroachdb:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8089:8080"
+      - "8085:8085"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://cockroachdb:26257/defaultdb?sslmode=disable
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD: ""
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      SETTLEMENT_INTERCHANGE_FEE_RATE: "0.02"
+      SETTLEMENT_BATCH_CRON: "0 59 23 * * *"
+
+  notification-service:
+    build:
+      context: .
+      dockerfile: services/notification-service/Dockerfile
+    depends_on:
+      cockroachdb:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8084:8084"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://cockroachdb:26257/defaultdb?sslmode=disable
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD: ""
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+
+  reporting-service:
+    build:
+      context: .
+      dockerfile: services/reporting-service/Dockerfile
+    depends_on:
+      cockroachdb:
+        condition: service_healthy
+    ports:
+      - "8086:8086"
+      - "8091:8091"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://cockroachdb:26257/defaultdb?sslmode=disable
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD: ""
+
+  api-gateway:
+    build:
+      context: .
+      dockerfile: services/api-gateway/Dockerfile
+    depends_on:
+      redis:
+        condition: service_healthy
+      transaction-service:
+        condition: service_started
+      reporting-service:
+        condition: service_started
+    ports:
+      - "8087:8080"
+      - "8088:8090"
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      AUTH_SERVICE_JWKS_URI: http://auth-service:9000/.well-known/jwks.json
+      TRANSACTION_SERVICE_GRPC_ADDRESS: static://transaction-service:9090
+      REPORTING_SERVICE_URL: http://reporting-service:8086
+
+volumes:
+  cockroach-data:

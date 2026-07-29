@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+    <springProperty scope="context" name="appName" source="spring.application.name" defaultValue="transaction-service"/>
+
+    <!-- Safety-net: deny any log event whose message contains 13-19 consecutive digits (PAN pattern) -->
+    <turboFilter class="com.creditcard.transaction.config.logging.PanMaskingFilter"/>
+
+    <!-- Structured JSON console appender — includes traceId/spanId from MDC -->
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+            <includeMdcKeyName>traceId</includeMdcKeyName>
+            <includeMdcKeyName>spanId</includeMdcKeyName>
+            <customFields>{"service":"${appName}"}</customFields>
+        </encoder>
+    </appender>
+
+    <!-- Audit appender: records financial state transitions (PENDING/AUTHORIZED/DECLINED/FAILED) -->
+    <appender name="AUDIT_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>logs/audit.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <fileNamePattern>logs/audit.%d{yyyy-MM-dd}.log</fileNamePattern>
+            <maxHistory>90</maxHistory>
+        </rollingPolicy>
+        <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+            <customFields>{"service":"${appName}","log_type":"audit"}</customFields>
+        </encoder>
+    </appender>
+
+    <!-- Audit logger: used by TransactionService for state-transition events -->
+    <logger name="AUDIT" level="INFO" additivity="false">
+        <appender-ref ref="AUDIT_FILE"/>
+        <appender-ref ref="CONSOLE"/>
+    </logger>
+
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+    </root>
+
+    <!-- Suppress noisy framework logs in production -->
+    <logger name="org.hibernate.SQL" level="WARN"/>
+    <logger name="org.apache.kafka" level="WARN"/>
+    <logger name="io.grpc" level="WARN"/>
+</configuration>

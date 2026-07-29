@@ -1,0 +1,75 @@
+# Gradle
+.gradle/
+build/
+out/
+*.jar
+*.war
+*.ear
+*.class
+!gradle-wrapper.jar
+
+# Spring Boot
+spring-boot-app.log
+
+# IntelliJ IDEA
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# Eclipse / STS
+.classpath
+.project
+.settings/
+bin/
+
+# VS Code
+.vscode/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Generated proto stubs (never committed — Principle VII)
+**/build/generated/source/proto/
+
+# Environment / secrets (never committed)
+.env
+.env.*
+application-local.yml
+application-secret.yml
+application-secrets.yml
+**/src/main/resources/application-local.yml
+**/src/main/resources/application-secrets.yml
+**/src/main/resources/application-secret.yml
+*-credentials.yml
+*-credentials.json
+*.p12
+*.jks
+*.pem
+*.key
+
+# Vault dev token files
+.vault-token
+vault-data/
+
+# CockroachDB local data
+cockroach-data/
+
+# Kafka local data
+kafka-data/
+zookeeper-data/
+
+# Docker volumes and runtime data
+docker-volumes/
+volumes/
+redis-data/
+
+# Test coverage reports (generated, not source)
+**/build/reports/
+
+# Logs
+logs/
+*.log
+*.log.*

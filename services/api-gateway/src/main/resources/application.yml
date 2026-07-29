@@ -1,0 +1,65 @@
+server:
+  port: 8080
+
+management:
+  server:
+    port: 8090
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: always
+      probes:
+        enabled: true
+  health:
+    redis:
+      enabled: true
+    circuitbreakers:
+      enabled: true
+
+spring:
+  application:
+    name: api-gateway
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          jwks-uri: ${AUTH_SERVICE_JWKS_URI:http://auth-service:9000/.well-known/jwks.json}
+  cloud:
+    gateway:
+      # Routes are registered programmatically in RouteConfig.java
+      default-filters: []
+
+grpc:
+  client:
+    transaction-service:
+      address: ${TRANSACTION_SERVICE_GRPC_ADDRESS:static://transaction-service:9090}
+      negotiation-type: plaintext
+
+resilience4j:
+  circuitbreaker:
+    instances:
+      transaction-service-cb:
+        slidingWindowSize: 10
+        failureRateThreshold: 50
+        waitDurationInOpenState: 30s
+        permittedNumberOfCallsInHalfOpenState: 3
+        registerHealthIndicator: true
+      reporting-service-cb:
+        slidingWindowSize: 10
+        failureRateThreshold: 50
+        waitDurationInOpenState: 30s
+        permittedNumberOfCallsInHalfOpenState: 3
+        registerHealthIndicator: true
+
+logging:
+  level:
+    root: INFO
+    com.creditcard: INFO
+    io.github.resilience4j: WARN

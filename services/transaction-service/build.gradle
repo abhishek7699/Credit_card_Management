@@ -1,0 +1,156 @@
+plugins {
+    id 'java'
+    id 'org.springframework.boot' version '3.2.5'
+    id 'io.spring.dependency-management' version '1.1.4'
+    id 'com.google.protobuf' version '0.9.4'
+    id 'jacoco'
+}
+
+group = 'com.creditcard'
+version = '0.0.1-SNAPSHOT'
+
+ext {
+    grpcVersion        = '1.63.0'
+    protobufVersion    = '3.25.3'
+    lognetGrpcVersion  = '3.1.0.RELEASE'
+    springVaultVersion = '3.1.1'
+    testcontainersVersion = '1.19.7'
+}
+
+dependencies {
+    // Spring Boot core
+    implementation 'org.springframework.boot:spring-boot-starter'
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    implementation 'org.springframework.boot:spring-boot-starter-aop'
+
+    // Spring Kafka
+    implementation 'org.springframework.kafka:spring-kafka'
+
+    // Spring Vault Core (for HashiCorp Vault Transit Secrets Engine)
+    implementation "org.springframework.vault:spring-vault-core:${springVaultVersion}"
+
+    // Spring Retry (CockroachDB serialization error SQLSTATE 40001 retries)
+    implementation 'org.springframework.retry:spring-retry'
+
+    // gRPC — LogNet Spring Boot 3.x starter
+    implementation "net.devh:grpc-spring-boot-starter:${lognetGrpcVersion}"
+    implementation "io.grpc:grpc-protobuf:${grpcVersion}"
+    implementation "io.grpc:grpc-stub:${grpcVersion}"
+    implementation "com.google.protobuf:protobuf-java:${protobufVersion}"
+
+    // Jakarta annotations (required by gRPC generated stubs via LogNet starter)
+    compileOnly 'jakarta.annotation:jakarta.annotation-api'
+    // javax.annotation-api required by protoc-gen-grpc-java generated @javax.annotation.Generated
+    compileOnly 'javax.annotation:javax.annotation-api:1.3.2'
+
+    // Database — CockroachDB uses PostgreSQL wire protocol
+    runtimeOnly 'org.postgresql:postgresql'
+
+    // Flyway database migrations
+    implementation 'org.flywaydb:flyway-core'
+
+    // Micrometer distributed tracing (propagates trace ID in gRPC metadata + Kafka headers)
+    implementation 'io.micrometer:micrometer-tracing-bridge-brave'
+    implementation 'io.zipkin.reporter2:zipkin-reporter-brave'
+
+    // Structured JSON logging
+    implementation 'net.logstash.logback:logstash-logback-encoder:7.4'
+
+    // ── Test dependencies ──────────────────────────────────────────────────────
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'org.springframework.kafka:spring-kafka-test'
+    testImplementation "org.testcontainers:postgresql:${testcontainersVersion}"
+    testImplementation "org.testcontainers:kafka:${testcontainersVersion}"
+    testImplementation "org.testcontainers:testcontainers:${testcontainersVersion}"
+    testImplementation "org.testcontainers:junit-jupiter:${testcontainersVersion}"
+    testImplementation 'org.mockito:mockito-core'
+    testImplementation "io.grpc:grpc-testing:${grpcVersion}"
+    testImplementation 'jakarta.annotation:jakarta.annotation-api'
+}
+
+// ── Protobuf plugin — reads proto files from repo root proto/ directory ──────
+protobuf {
+    protoc {
+        artifact = "com.google.protobuf:protoc:${protobufVersion}"
+    }
+    plugins {
+        grpc {
+            artifact = "io.grpc:protoc-gen-grpc-java:${grpcVersion}"
+        }
+    }
+    generateProtoTasks {
+        all()*.plugins {
+            grpc {}
+        }
+    }
+}
+
+sourceSets {
+    main {
+        proto {
+            // Authoritative proto location per Constitution Principle VII
+            srcDir "${rootProject.projectDir}/proto"
+        }
+    }
+}
+
+// ── JaCoCo — 100% instruction + branch coverage gate (Constitution Principle II) ─
+jacoco {
+    toolVersion = '0.8.11'
+}
+
+jacocoTestReport {
+    dependsOn test
+    reports {
+        xml.required = true
+        html.required = true
+    }
+    // Exclude generated proto stubs and the bootstrap main class from coverage
+    afterEvaluate {
+        classDirectories.setFrom(files(classDirectories.files.collect {
+            fileTree(dir: it, exclude: [
+                'com/creditcard/transaction/grpc/v1/**',
+                'com/creditcard/transaction/TransactionServiceApplication.class'
+            ])
+        }))
+    }
+}
+
+jacocoTestCoverageVerification {
+    dependsOn jacocoTestReport
+    afterEvaluate {
+        classDirectories.setFrom(files(classDirectories.files.collect {
+            fileTree(dir: it, exclude: [
+                'com/creditcard/transaction/grpc/v1/**',
+                'com/creditcard/transaction/TransactionServiceApplication.class'
+            ])
+        }))
+    }
+    violationRules {
+        rule {
+            excludes = [
+                'com.creditcard.transaction.grpc.v1.*',
+                'com.creditcard.transaction.TransactionServiceApplication'
+            ]
+            limit {
+                counter = 'INSTRUCTION'
+                minimum = 1.0
+            }
+            limit {
+                counter = 'BRANCH'
+                minimum = 1.0
+            }
+        }
+    }
+}
+
+test {
+    useJUnitPlatform()
+    finalizedBy jacocoTestReport
+}
+
+// Running `./gradlew check` also enforces the coverage gate
+check {
+    dependsOn jacocoTestCoverageVerification
+}

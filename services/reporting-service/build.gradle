@@ -1,0 +1,92 @@
+plugins {
+    id 'java'
+    id 'org.springframework.boot' version '3.2.5'
+    id 'io.spring.dependency-management' version '1.1.4'
+    id 'jacoco'
+}
+
+group = 'com.creditcard'
+version = '0.0.1-SNAPSHOT'
+
+ext {
+    testcontainersVersion = '1.19.7'
+}
+
+dependencies {
+    // Spring Boot — Web + JPA + Actuator + Validation
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
+
+    // Database — CockroachDB uses PostgreSQL wire protocol
+    runtimeOnly 'org.postgresql:postgresql'
+
+    // Jackson JSR-310 module for Instant/LocalDate serialization
+    implementation 'com.fasterxml.jackson.datatype:jackson-datatype-jsr310'
+
+    // Structured JSON logging
+    implementation 'net.logstash.logback:logstash-logback-encoder:7.4'
+
+    // ── Test dependencies ──────────────────────────────────────────────────────
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation "org.testcontainers:postgresql:${testcontainersVersion}"
+    testImplementation "org.testcontainers:testcontainers:${testcontainersVersion}"
+    testImplementation "org.testcontainers:junit-jupiter:${testcontainersVersion}"
+    testImplementation 'org.mockito:mockito-core'
+}
+
+// ── JaCoCo — 100% instruction + branch coverage gate ──────────────────────────
+jacoco {
+    toolVersion = '0.8.11'
+}
+
+jacocoTestReport {
+    dependsOn test
+    reports {
+        xml.required = true
+        html.required = true
+    }
+    afterEvaluate {
+        classDirectories.setFrom(files(classDirectories.files.collect {
+            fileTree(dir: it, exclude: [
+                'com/creditcard/reporting/ReportingServiceApplication.class'
+            ])
+        }))
+    }
+}
+
+jacocoTestCoverageVerification {
+    dependsOn jacocoTestReport
+    afterEvaluate {
+        classDirectories.setFrom(files(classDirectories.files.collect {
+            fileTree(dir: it, exclude: [
+                'com/creditcard/reporting/ReportingServiceApplication.class'
+            ])
+        }))
+    }
+    violationRules {
+        rule {
+            excludes = [
+                'com.creditcard.reporting.ReportingServiceApplication'
+            ]
+            limit {
+                counter = 'INSTRUCTION'
+                minimum = 1.0
+            }
+            limit {
+                counter = 'BRANCH'
+                minimum = 1.0
+            }
+        }
+    }
+}
+
+test {
+    useJUnitPlatform()
+    finalizedBy jacocoTestReport
+}
+
+check {
+    dependsOn jacocoTestCoverageVerification
+}

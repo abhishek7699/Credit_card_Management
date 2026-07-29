@@ -1,0 +1,37 @@
+management:
+  server:
+    port:  # null = use same port as main server (not a separate management port)
+  health:
+    circuitbreakers:
+      enabled: false  # Prevent open circuits from marking health as DOWN during tests
+
+spring:
+  data:
+    redis:
+      host: ${TEST_REDIS_HOST:localhost}
+      port: ${TEST_REDIS_PORT:6379}
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          jwks-uri: ${TEST_JWKS_URI:http://localhost:8089/.well-known/jwks.json}
+
+grpc:
+  client:
+    transaction-service:
+      address: in-process:transaction-test
+      negotiation-type: plaintext
+
+resilience4j:
+  circuitbreaker:
+    instances:
+      transaction-service-cb:
+        waitDurationInOpenState: 1s
+        slidingWindowSize: 5
+        failureRateThreshold: 60
+        permittedNumberOfCallsInHalfOpenState: 2
+      reporting-service-cb:
+        waitDurationInOpenState: 1s
+        slidingWindowSize: 5
+        failureRateThreshold: 60
+        permittedNumberOfCallsInHalfOpenState: 2

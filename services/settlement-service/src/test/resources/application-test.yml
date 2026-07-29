@@ -1,0 +1,12 @@
+spring:
+  flyway:
+    enabled: true
+  jpa:
+    hibernate:
+      ddl-auto: none
+
+settlement:
+  interchange-fee-rate: 0.02
+  batch:
+    chunk-size: 10
+    cron: "0 59 23 * * *"

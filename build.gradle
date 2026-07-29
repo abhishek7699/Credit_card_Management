@@ -1,0 +1,19 @@
+// Root build file — shared conventions for all subprojects
+// Individual service dependencies are declared in their own build.gradle files
+
+subprojects {
+    repositories {
+        mavenCentral()
+    }
+
+    // Enforce Java 17 across all subprojects
+    plugins.withType(JavaPlugin) {
+        java {
+            sourceCompatibility = JavaVersion.VERSION_17
+            targetCompatibility = JavaVersion.VERSION_17
+        }
+        test {
+            useJUnitPlatform()
+        }
+    }
+}

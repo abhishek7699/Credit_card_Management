@@ -1,0 +1,16 @@
+rootProject.name = 'credit-card-payment-gateway'
+
+// Phase 1 — transaction-service (complete)
+// Phase 2 — authorization-service (complete)
+// Phase 3 — fraud-detection-service (complete)
+// Phase 4 — notification-service (complete)
+// Phase 5 — settlement-service (complete)
+// Phase 6 — reporting-service (complete)
+// Phase 7 — api-gateway (active)
+include ':services:transaction-service'
+include ':services:authorization-service'
+include ':services:fraud-detection-service'
+include ':services:notification-service'
+include ':services:settlement-service'
+include ':services:reporting-service'
+include ':services:api-gateway'

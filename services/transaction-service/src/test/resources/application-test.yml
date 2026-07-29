@@ -1,0 +1,33 @@
+# Test profile — used by @SpringBootTest and @DataJpaTest
+# Testcontainers overrides datasource/kafka via @DynamicPropertySource
+
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:26257/defaultdb?sslmode=disable
+    username: root
+    password: ''
+  kafka:
+    bootstrap-servers: localhost:9092
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: false
+  flyway:
+    enabled: false
+
+vault:
+  host: localhost
+  port: 8200
+  scheme: http
+  token: test-token
+  transit:
+    key-name: test-card-pan-key
+
+grpc:
+  server:
+    port: 0
+
+logging:
+  level:
+    root: WARN
+    com.creditcard: DEBUG

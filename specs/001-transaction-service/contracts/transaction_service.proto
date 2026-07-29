@@ -1,0 +1,110 @@
+// transaction_service.proto
+// Proto-First contract for the transaction-service gRPC interface (Principle VII).
+// This file is the authoritative contract. Implementation MUST NOT begin before
+// this file is reviewed and approved.
+//
+// Production location: proto/v1/transaction_service.proto (repository root)
+// This copy in specs/001-transaction-service/contracts/ is the design-phase artifact.
+//
+// Generated stubs: produced by Gradle com.google.protobuf plugin.
+// Stubs are NOT committed to the repository.
+
+syntax = "proto3";
+
+package transaction.v1;
+
+option java_package = "com.creditcard.transaction.grpc.v1";
+option java_outer_classname = "TransactionServiceProto";
+option java_multiple_files = true;
+
+// TransactionService: gRPC service exposed by transaction-service to the api-gateway.
+// All calls originate from the api-gateway (Principle V — external REST terminated at
+// gateway; internal sync communication via gRPC only).
+service TransactionService {
+
+  // InitiateTransaction: Accepts a card payment request, tokenizes the card number
+  // via HashiCorp Vault, persists the transaction as PENDING, publishes a
+  // TransactionInitiated event, and returns the transaction ID.
+  // The raw card number, CVV, and expiry are NEVER stored or forwarded downstream.
+  rpc InitiateTransaction(InitiateTransactionRequest) returns (InitiateTransactionResponse);
+
+  // GetTransaction: Retrieves the current state of a transaction by its ID.
+  // Returns masked card number and current status only — never the card token.
+  rpc GetTransaction(GetTransactionRequest) returns (GetTransactionResponse);
+}
+
+// InitiateTransactionRequest: Contains all card payment details as submitted by
+// the external client via the api-gateway.
+// SECURITY: card_number, cvv, card_expiry are cleartext in transit — this call
+// MUST travel over mTLS between api-gateway and transaction-service (Principle I).
+// These fields are discarded by the transaction-service immediately after Vault tokenization.
+message InitiateTransactionRequest {
+  // card_number: Raw PAN (Primary Account Number). Tokenized immediately on receipt.
+  // Format: 13-19 digit string (no spaces or dashes). Discarded after Vault call.
+  string card_number = 1;
+
+  // card_expiry: Card expiry date. Format: MM/YY (e.g., "12/26").
+  // Forwarded to Vault for context; discarded after Vault call. Never stored.
+  string card_expiry = 2;
+
+  // cvv: Card Verification Value. 3 or 4 digits.
+  // Used for authorization context only; discarded immediately after Vault call. Never stored.
+  string cvv = 3;
+
+  // cardholder_name: Name as it appears on the card.
+  string cardholder_name = 4;
+
+  // amount: Payment amount as a decimal string to avoid floating-point precision loss.
+  // Examples: "19.99", "100.00", "0.50"
+  string amount = 5;
+
+  // currency_code: ISO 4217 3-letter currency code. Examples: "USD", "EUR", "GBP".
+  string currency_code = 6;
+}
+
+// InitiateTransactionResponse: Returned immediately after the transaction is persisted
+// as PENDING and the downstream event is published.
+message InitiateTransactionResponse {
+  // transaction_id: UUID of the newly created transaction. Caller uses this to poll
+  // or receive callbacks about the transaction outcome.
+  string transaction_id = 1;
+
+  // status: Always "PENDING" for a newly created transaction.
+  string status = 2;
+}
+
+// GetTransactionRequest: Lookup a transaction by its UUID.
+message GetTransactionRequest {
+  // transaction_id: UUID of the transaction to retrieve.
+  string transaction_id = 1;
+}
+
+// GetTransactionResponse: Current state of the transaction.
+// SECURITY: card_token is intentionally NOT included — callers have no need for it.
+// masked_card_number is the only card-related field returned.
+message GetTransactionResponse {
+  // transaction_id: UUID of the transaction.
+  string transaction_id = 1;
+
+  // masked_card_number: Display-safe representation. Format: ****-****-****-XXXX.
+  // Example: "****-****-****-1234"
+  string masked_card_number = 2;
+
+  // cardholder_name: Name as submitted on the original payment request.
+  string cardholder_name = 3;
+
+  // amount: Payment amount as decimal string. Matches what was submitted.
+  string amount = 4;
+
+  // currency_code: ISO 4217 3-letter currency code.
+  string currency_code = 5;
+
+  // status: Current transaction status. One of: PENDING, AUTHORIZED, DECLINED, FAILED.
+  string status = 6;
+
+  // created_at: ISO-8601 timestamp of transaction creation.
+  string created_at = 7;
+
+  // updated_at: ISO-8601 timestamp of last status change.
+  string updated_at = 8;
+}
