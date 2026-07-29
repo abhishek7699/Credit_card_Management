@@ -52,9 +52,10 @@ services:
       - "8200:8200"
     healthcheck:
       test: ["CMD", "vault", "status"]
-      interval: 10s
+      interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 15
+      start_period: 30s
 
   redis:
     image: redis:7-alpine

@@ -56,6 +56,10 @@ jobs:
       - name: Start services
         run: docker compose up -d
 
+      - name: Dump Vault logs on startup failure
+        if: failure()
+        run: docker compose logs vault
+
       # ── 6. Wait for all 7 services to become healthy ─────────────────────────
       - name: Wait for services to become healthy
         timeout-minutes: 3
