@@ -37,6 +37,8 @@ spring:
   flyway:
     enabled: true
     locations: classpath:db/migration
+    schemas: fraud_detection_service
+    create-schemas: true
 
 management:
   server:

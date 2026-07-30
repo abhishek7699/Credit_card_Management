@@ -85,7 +85,7 @@ services:
       - "9090:9090"
       - "8081:8081"
     environment:
-      SPRING_DATASOURCE_URL: jdbc:postgresql://cockroachdb:26257/defaultdb?sslmode=disable
+      SPRING_DATASOURCE_URL: jdbc:postgresql://cockroachdb:26257/defaultdb?sslmode=disable&currentSchema=transaction_service
       SPRING_DATASOURCE_USERNAME: root
       SPRING_DATASOURCE_PASSWORD: ""
       SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
@@ -108,7 +108,7 @@ services:
     ports:
       - "8082:8082"
     environment:
-      SPRING_DATASOURCE_URL: jdbc:postgresql://cockroachdb:26257/defaultdb?sslmode=disable
+      SPRING_DATASOURCE_URL: jdbc:postgresql://cockroachdb:26257/defaultdb?sslmode=disable&currentSchema=authorization_service
       SPRING_DATASOURCE_USERNAME: root
       SPRING_DATASOURCE_PASSWORD: ""
       SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
@@ -125,7 +125,7 @@ services:
     ports:
       - "8083:8083"
     environment:
-      SPRING_DATASOURCE_URL: jdbc:postgresql://cockroachdb:26257/defaultdb?sslmode=disable
+      SPRING_DATASOURCE_URL: jdbc:postgresql://cockroachdb:26257/defaultdb?sslmode=disable&currentSchema=fraud_detection_service
       SPRING_DATASOURCE_USERNAME: root
       SPRING_DATASOURCE_PASSWORD: ""
       SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
@@ -143,7 +143,7 @@ services:
       - "8089:8080"
       - "8085:8085"
     environment:
-      SPRING_DATASOURCE_URL: jdbc:postgresql://cockroachdb:26257/defaultdb?sslmode=disable
+      SPRING_DATASOURCE_URL: jdbc:postgresql://cockroachdb:26257/defaultdb?sslmode=disable&currentSchema=settlement_service
       SPRING_DATASOURCE_USERNAME: root
       SPRING_DATASOURCE_PASSWORD: ""
       SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
@@ -162,7 +162,7 @@ services:
     ports:
       - "8084:8084"
     environment:
-      SPRING_DATASOURCE_URL: jdbc:postgresql://cockroachdb:26257/defaultdb?sslmode=disable
+      SPRING_DATASOURCE_URL: jdbc:postgresql://cockroachdb:26257/defaultdb?sslmode=disable&currentSchema=notification_service
       SPRING_DATASOURCE_USERNAME: root
       SPRING_DATASOURCE_PASSWORD: ""
       SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
@@ -178,7 +178,7 @@ services:
       - "8086:8086"
       - "8091:8091"
     environment:
-      SPRING_DATASOURCE_URL: jdbc:postgresql://cockroachdb:26257/defaultdb?sslmode=disable
+      SPRING_DATASOURCE_URL: jdbc:postgresql://cockroachdb:26257/defaultdb?sslmode=disable&currentSchema=settlement_service
       SPRING_DATASOURCE_USERNAME: root
       SPRING_DATASOURCE_PASSWORD: ""
 

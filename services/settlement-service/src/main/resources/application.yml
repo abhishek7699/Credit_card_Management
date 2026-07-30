@@ -37,6 +37,8 @@ spring:
   flyway:
     enabled: true
     locations: classpath:db/migration
+    schemas: settlement_service
+    create-schemas: true
 
 server:
   port: 8080

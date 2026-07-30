@@ -32,6 +32,8 @@ spring:
   flyway:
     enabled: true
     locations: classpath:db/migration
+    schemas: notification_service
+    create-schemas: true
 
 management:
   server:

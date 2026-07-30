@@ -15,7 +15,10 @@ spring:
       hibernate.dialect: org.hibernate.dialect.PostgreSQLDialect
       hibernate.jdbc.time_zone: UTC
   flyway:
-    enabled: false
+    enabled: true
+    locations: classpath:db/migration
+    schemas: reporting_service
+    create-schemas: true
 
 server:
   port: 8086
