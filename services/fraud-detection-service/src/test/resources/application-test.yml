@@ -1,6 +1,8 @@
 spring:
   flyway:
     enabled: true
+    schemas: public
+    create-schemas: false
   jpa:
     hibernate:
       ddl-auto: none

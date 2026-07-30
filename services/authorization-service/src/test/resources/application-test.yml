@@ -5,6 +5,8 @@ spring:
     show-sql: false
   flyway:
     enabled: true
+    schemas: public
+    create-schemas: false
   kafka:
     consumer:
       auto-offset-reset: earliest
