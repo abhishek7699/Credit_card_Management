@@ -4,7 +4,7 @@ CREATE TABLE IF NOT EXISTS transactions (
     masked_card_number VARCHAR(19)   NOT NULL,
     cardholder_name    VARCHAR(255)  NOT NULL,
     amount             DECIMAL(15,2) NOT NULL CHECK (amount > 0),
-    currency_code      CHAR(3)       NOT NULL,
+    currency_code      VARCHAR(3)    NOT NULL,
     status             VARCHAR(20)   NOT NULL DEFAULT 'PENDING',
     created_at         TIMESTAMPTZ   NOT NULL DEFAULT now(),
     updated_at         TIMESTAMPTZ   NOT NULL DEFAULT now(),

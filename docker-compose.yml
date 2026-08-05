@@ -4,12 +4,10 @@ services:
 
   cockroachdb:
     image: cockroachdb/cockroach:v23.2.0
-    command: start-single-node --insecure
+    command: start-single-node --insecure --store=type=mem,size=0.25
     ports:
       - "26257:26257"
       - "8080:8080"
-    volumes:
-      - cockroach-data:/cockroach/cockroach-data
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health?ready=1"]
       interval: 5s
@@ -37,9 +35,10 @@ services:
       - "9092:9092"
     healthcheck:
       test: ["CMD", "kafka-topics", "--bootstrap-server", "kafka:9092", "--list"]
-      interval: 10s
+      interval: 5s
       timeout: 10s
-      retries: 5
+      retries: 15
+      start_period: 30s
 
   vault:
     image: hashicorp/vault:1.16
@@ -174,6 +173,8 @@ services:
     depends_on:
       cockroachdb:
         condition: service_healthy
+      settlement-service:
+        condition: service_started
     ports:
       - "8086:8086"
       - "8091:8091"
@@ -203,5 +204,3 @@ services:
       TRANSACTION_SERVICE_GRPC_ADDRESS: static://transaction-service:9090
       REPORTING_SERVICE_URL: http://reporting-service:8086
 
-volumes:
-  cockroach-data:

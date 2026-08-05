@@ -3,7 +3,7 @@ CREATE TABLE transaction_records (
     transaction_id  UUID          NOT NULL UNIQUE,
     card_token      VARCHAR(512)  NOT NULL,
     amount          DECIMAL(15,4) NOT NULL,
-    currency_code   CHAR(3)       NOT NULL,
+    currency_code   VARCHAR(3)    NOT NULL,
     occurred_at     TIMESTAMPTZ   NOT NULL
 );
 

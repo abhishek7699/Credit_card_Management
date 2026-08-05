@@ -3,7 +3,7 @@ CREATE TABLE authorization_records (
     transaction_id   UUID          NOT NULL,
     card_token       VARCHAR(512)  NOT NULL,
     requested_amount DECIMAL(15,4) NOT NULL,
-    currency_code    CHAR(3)       NOT NULL,
+    currency_code    VARCHAR(3)    NOT NULL,
     outcome          VARCHAR(20)   NOT NULL,
     reason_code      VARCHAR(50),
     decided_at       TIMESTAMPTZ   NOT NULL DEFAULT now(),

@@ -4,7 +4,7 @@ CREATE TABLE card_accounts (
     status           VARCHAR(20)   NOT NULL DEFAULT 'ACTIVE',
     credit_limit     DECIMAL(15,4) NOT NULL,
     available_credit DECIMAL(15,4) NOT NULL,
-    currency_code    CHAR(3)       NOT NULL,
+    currency_code    VARCHAR(3)    NOT NULL,
     created_at       TIMESTAMPTZ   NOT NULL DEFAULT now(),
     updated_at       TIMESTAMPTZ   NOT NULL DEFAULT now(),
     version          BIGINT        NOT NULL DEFAULT 0,
