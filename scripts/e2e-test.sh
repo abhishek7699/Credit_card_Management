@@ -19,7 +19,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COMPOSE_FILE="${REPO_ROOT}/docker-compose.yml"
 PROTO_DIR="${REPO_ROOT}/proto"
 
-AUTH_CONTAINER="e2e-auth-mock"
+AUTH_CONTAINER="auth-service"
 AUTH_MOCK_PORT=9000
 AUTH_NETWORK="credit_card_default"   # adjust if compose project name differs
 
