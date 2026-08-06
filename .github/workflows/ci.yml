@@ -113,6 +113,11 @@ jobs:
           chmod +x scripts/e2e-test.sh
           bash scripts/e2e-test.sh
 
+      # ── Diagnostic logs on e2e failure ───────────────────────────────────────
+      - name: Dump api-gateway and transaction-service logs on e2e failure
+        if: failure()
+        run: docker compose logs api-gateway transaction-service --tail=100
+
       # ── 8. Tear down (always runs — success or failure) ───────────────────────
       - name: Tear down
         if: always()
