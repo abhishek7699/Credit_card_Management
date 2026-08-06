@@ -296,6 +296,9 @@ step4_submit_payment() {
 
   if [[ "$http_code" != "201" ]]; then
     fail "Step 4 — Expected 201, got ${http_code}. Body: ${body}"
+    echo ""
+    info "── Diagnostic logs (api-gateway + transaction-service, last 150 lines) ──"
+    docker compose -f "${COMPOSE_FILE}" logs api-gateway transaction-service --tail=150
     return 1
   fi
 
