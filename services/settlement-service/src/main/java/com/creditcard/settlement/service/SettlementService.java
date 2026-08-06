@@ -48,7 +48,7 @@ public class SettlementService {
         SettlementBatch batch = new SettlementBatch();
         batch.setBatchId(batchId);
         batch.setTriggeredBy(triggeredBy);
-        settlementBatchRepository.save(batch);
+        batch = settlementBatchRepository.save(batch);
 
         JobParameters params = new JobParametersBuilder()
                 .addString("batchId", batchId)

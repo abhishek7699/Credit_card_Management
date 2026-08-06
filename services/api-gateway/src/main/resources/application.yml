@@ -30,7 +30,7 @@ spring:
     oauth2:
       resourceserver:
         jwt:
-          jwks-uri: ${AUTH_SERVICE_JWKS_URI:http://auth-service:9000/.well-known/jwks.json}
+          jwk-set-uri: ${AUTH_SERVICE_JWKS_URI:http://auth-service:9000/.well-known/jwks.json}
   cloud:
     gateway:
       # Routes are registered programmatically in RouteConfig.java

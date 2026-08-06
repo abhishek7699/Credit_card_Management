@@ -2,7 +2,7 @@ CREATE TABLE merchant_settlements (
     id                      UUID          NOT NULL DEFAULT gen_random_uuid(),
     batch_id                VARCHAR(100)  NOT NULL,
     merchant_id             VARCHAR(100)  NOT NULL,
-    transaction_count       INT           NOT NULL,
+    transaction_count       INT4          NOT NULL,
     gross_amount            DECIMAL(15,2) NOT NULL,
     total_interchange_fee   DECIMAL(15,2) NOT NULL,
     net_settlement_amount   DECIMAL(15,2) NOT NULL,

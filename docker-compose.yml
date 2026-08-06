@@ -4,7 +4,12 @@ services:
 
   cockroachdb:
     image: cockroachdb/cockroach:v23.2.0
-    command: start-single-node --insecure --store=type=mem,size=0.25
+    command:
+      - start-single-node
+      - --insecure
+      - "--store=type=mem,size=640MiB"
+      - "--max-sql-memory=128MiB"
+      - "--log={file-defaults: {dir: /tmp}}"
     ports:
       - "26257:26257"
       - "8080:8080"
@@ -84,6 +89,7 @@ services:
       - "9090:9090"
       - "8081:8081"
     environment:
+      JAVA_TOOL_OPTIONS: "-Xmx256m -XX:MaxMetaspaceSize=128m"
       SPRING_DATASOURCE_URL: jdbc:postgresql://cockroachdb:26257/defaultdb?sslmode=disable&currentSchema=transaction_service
       SPRING_DATASOURCE_USERNAME: root
       SPRING_DATASOURCE_PASSWORD: ""
@@ -107,6 +113,7 @@ services:
     ports:
       - "8082:8082"
     environment:
+      JAVA_TOOL_OPTIONS: "-Xmx256m -XX:MaxMetaspaceSize=128m"
       SPRING_DATASOURCE_URL: jdbc:postgresql://cockroachdb:26257/defaultdb?sslmode=disable&currentSchema=authorization_service
       SPRING_DATASOURCE_USERNAME: root
       SPRING_DATASOURCE_PASSWORD: ""
@@ -124,6 +131,7 @@ services:
     ports:
       - "8083:8083"
     environment:
+      JAVA_TOOL_OPTIONS: "-Xmx256m -XX:MaxMetaspaceSize=128m"
       SPRING_DATASOURCE_URL: jdbc:postgresql://cockroachdb:26257/defaultdb?sslmode=disable&currentSchema=fraud_detection_service
       SPRING_DATASOURCE_USERNAME: root
       SPRING_DATASOURCE_PASSWORD: ""
@@ -142,6 +150,7 @@ services:
       - "8089:8080"
       - "8085:8085"
     environment:
+      JAVA_TOOL_OPTIONS: "-Xmx256m -XX:MaxMetaspaceSize=128m"
       SPRING_DATASOURCE_URL: jdbc:postgresql://cockroachdb:26257/defaultdb?sslmode=disable&currentSchema=settlement_service
       SPRING_DATASOURCE_USERNAME: root
       SPRING_DATASOURCE_PASSWORD: ""
@@ -161,6 +170,7 @@ services:
     ports:
       - "8084:8084"
     environment:
+      JAVA_TOOL_OPTIONS: "-Xmx256m -XX:MaxMetaspaceSize=128m"
       SPRING_DATASOURCE_URL: jdbc:postgresql://cockroachdb:26257/defaultdb?sslmode=disable&currentSchema=notification_service
       SPRING_DATASOURCE_USERNAME: root
       SPRING_DATASOURCE_PASSWORD: ""
@@ -179,6 +189,7 @@ services:
       - "8086:8086"
       - "8091:8091"
     environment:
+      JAVA_TOOL_OPTIONS: "-Xmx256m -XX:MaxMetaspaceSize=128m"
       SPRING_DATASOURCE_URL: jdbc:postgresql://cockroachdb:26257/defaultdb?sslmode=disable&currentSchema=settlement_service
       SPRING_DATASOURCE_USERNAME: root
       SPRING_DATASOURCE_PASSWORD: ""
@@ -198,6 +209,7 @@ services:
       - "8087:8080"
       - "8088:8090"
     environment:
+      JAVA_TOOL_OPTIONS: "-Xmx256m -XX:MaxMetaspaceSize=128m"
       REDIS_HOST: redis
       REDIS_PORT: 6379
       AUTH_SERVICE_JWKS_URI: http://auth-service:9000/.well-known/jwks.json
