@@ -1,4 +1,7 @@
 name: CI
+# Builds all seven microservices, enforces 100% JaCoCo instruction+branch coverage,
+# builds Docker images, starts the full compose stack, and runs end-to-end integration
+# tests covering payment submission, rate limiting, circuit breaking, and settlement.
 
 on:
   push:
