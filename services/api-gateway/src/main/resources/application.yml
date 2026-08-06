@@ -48,14 +48,16 @@ resilience4j:
       transaction-service-cb:
         slidingWindowSize: 10
         failureRateThreshold: 50
-        waitDurationInOpenState: 30s
+        waitDurationInOpenState: 10s
         permittedNumberOfCallsInHalfOpenState: 3
+        automaticTransitionFromOpenToHalfOpenEnabled: true
         registerHealthIndicator: true
       reporting-service-cb:
         slidingWindowSize: 10
         failureRateThreshold: 50
-        waitDurationInOpenState: 30s
+        waitDurationInOpenState: 10s
         permittedNumberOfCallsInHalfOpenState: 3
+        automaticTransitionFromOpenToHalfOpenEnabled: true
         registerHealthIndicator: true
 
 logging:

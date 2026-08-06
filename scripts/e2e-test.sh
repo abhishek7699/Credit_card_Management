@@ -537,6 +537,15 @@ main() {
   step1_start_services
   step2_health_checks
 
+  # Allow 15 s for the transaction-service circuit breaker to recover.
+  # grpc-spring-boot-starter probes the gRPC channel during startup; those
+  # UNAVAILABLE errors accumulate as CB failures while transaction-service is
+  # initialising. With waitDurationInOpenState=10s the CB moves to HALF_OPEN
+  # automatically, so by the time Step 4 fires the first probe request
+  # succeeds and the CB closes immediately.
+  info "Waiting 15s for circuit breaker cooldown after service startup"
+  sleep 15
+
   setup_auth_mock
 
   step3_obtain_jwt
