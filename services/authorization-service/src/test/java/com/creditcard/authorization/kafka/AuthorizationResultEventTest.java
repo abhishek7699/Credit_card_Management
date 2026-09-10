@@ -4,6 +4,7 @@ import com.creditcard.authorization.domain.ReasonCode;
 import com.creditcard.authorization.kafka.event.AuthorizationResultEvent;
 import org.junit.jupiter.api.Test;
 
+import java.time.Instant;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -11,16 +12,18 @@ import static org.assertj.core.api.Assertions.assertThat;
 class AuthorizationResultEventTest {
 
     @Test
-    void shouldCreateAuthorizedEvent() {
+    void shouldCreateAuthorizedEventWithEnvelopeAndPayload() {
         UUID txId = UUID.randomUUID();
         AuthorizationResultEvent event = AuthorizationResultEvent.authorized(txId, "vault:v1:tok");
 
         assertThat(event.getEventType()).isEqualTo("TransactionAuthorized");
-        assertThat(event.getTransactionId()).isEqualTo(txId);
-        assertThat(event.getCardToken()).isEqualTo("vault:v1:tok");
-        assertThat(event.getReasonCode()).isNull();
+        assertThat(event.getSourceService()).isEqualTo("authorization-service");
         assertThat(event.getEventId()).isNotNull();
         assertThat(event.getOccurredAt()).isNotNull();
+        assertThat(event.getPayload().getTransactionId()).isEqualTo(txId);
+        assertThat(event.getPayload().getCardToken()).isEqualTo("vault:v1:tok");
+        assertThat(event.getPayload().getOutcome()).isEqualTo("AUTHORIZED");
+        assertThat(event.getPayload().getReasonCode()).isNull();
     }
 
     @Test
@@ -29,7 +32,8 @@ class AuthorizationResultEventTest {
         AuthorizationResultEvent event = AuthorizationResultEvent.declined(txId, "vault:v1:tok", ReasonCode.INSUFFICIENT_CREDIT);
 
         assertThat(event.getEventType()).isEqualTo("TransactionDeclined");
-        assertThat(event.getReasonCode()).isEqualTo(ReasonCode.INSUFFICIENT_CREDIT.name());
+        assertThat(event.getPayload().getOutcome()).isEqualTo("DECLINED");
+        assertThat(event.getPayload().getReasonCode()).isEqualTo(ReasonCode.INSUFFICIENT_CREDIT.name());
     }
 
     @Test
@@ -38,21 +42,37 @@ class AuthorizationResultEventTest {
         AuthorizationResultEvent event = AuthorizationResultEvent.failed(txId, "vault:v1:tok", ReasonCode.INTERNAL_ERROR);
 
         assertThat(event.getEventType()).isEqualTo("TransactionFailed");
-        assertThat(event.getReasonCode()).isEqualTo(ReasonCode.INTERNAL_ERROR.name());
+        assertThat(event.getPayload().getOutcome()).isEqualTo("FAILED");
+        assertThat(event.getPayload().getReasonCode()).isEqualTo(ReasonCode.INTERNAL_ERROR.name());
     }
 
     @Test
-    void shouldSupportGettersAndSetters() {
+    void shouldSupportEnvelopeGettersAndSetters() {
         AuthorizationResultEvent event = new AuthorizationResultEvent();
-        UUID txId = UUID.randomUUID();
+        Instant now = Instant.now();
 
         event.setEventId("id-1");
         event.setEventType("TransactionAuthorized");
-        event.setTransactionId(txId);
-        event.setCardToken("vault:v1:tok");
-        event.setReasonCode(null);
+        event.setSourceService("authorization-service");
+        event.setTraceId("trace-1");
+        event.setOccurredAt(now);
+
+        AuthorizationResultEvent.Payload payload = new AuthorizationResultEvent.Payload();
+        UUID txId = UUID.randomUUID();
+        payload.setTransactionId(txId);
+        payload.setCardToken("vault:v1:tok");
+        payload.setOutcome("AUTHORIZED");
+        payload.setReasonCode("NONE");
+        event.setPayload(payload);
 
         assertThat(event.getEventId()).isEqualTo("id-1");
-        assertThat(event.getTransactionId()).isEqualTo(txId);
+        assertThat(event.getEventType()).isEqualTo("TransactionAuthorized");
+        assertThat(event.getSourceService()).isEqualTo("authorization-service");
+        assertThat(event.getTraceId()).isEqualTo("trace-1");
+        assertThat(event.getOccurredAt()).isEqualTo(now);
+        assertThat(event.getPayload().getTransactionId()).isEqualTo(txId);
+        assertThat(event.getPayload().getCardToken()).isEqualTo("vault:v1:tok");
+        assertThat(event.getPayload().getOutcome()).isEqualTo("AUTHORIZED");
+        assertThat(event.getPayload().getReasonCode()).isEqualTo("NONE");
     }
 }

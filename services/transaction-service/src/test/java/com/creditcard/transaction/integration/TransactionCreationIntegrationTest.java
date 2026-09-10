@@ -25,8 +25,7 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.vault.core.VaultTemplate;
 import org.springframework.vault.core.VaultTransitOperations;
-import org.springframework.vault.support.Ciphertext;
-import org.springframework.vault.support.Plaintext;
+import org.springframework.vault.support.VaultTransitContext;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -76,8 +75,8 @@ class TransactionCreationIntegrationTest {
     void shouldCreatePendingTransactionWithVaultTokenAndPublishKafkaEvent() {
         VaultTransitOperations transitOps = mock(VaultTransitOperations.class);
         when(vaultTemplate.opsForTransit()).thenReturn(transitOps);
-        when(transitOps.encrypt(anyString(), any(Plaintext.class)))
-                .thenReturn(Ciphertext.of("vault:v1:test-ciphertext-abc123"));
+        when(transitOps.encrypt(anyString(), any(byte[].class), any(VaultTransitContext.class)))
+                .thenReturn("vault:v1:test-ciphertext-abc123");
 
         AtomicReference<InitiateTransactionResponse> responseRef = new AtomicReference<>();
         StreamObserver<InitiateTransactionResponse> observer = new StreamObserver<>() {
@@ -142,7 +141,7 @@ class TransactionCreationIntegrationTest {
     void shouldNotCreateTransactionWhenVaultIsUnavailable() {
         VaultTransitOperations transitOps = mock(VaultTransitOperations.class);
         when(vaultTemplate.opsForTransit()).thenReturn(transitOps);
-        when(transitOps.encrypt(anyString(), any(Plaintext.class)))
+        when(transitOps.encrypt(anyString(), any(byte[].class), any(VaultTransitContext.class)))
                 .thenThrow(new RuntimeException("Vault connection refused"));
 
         long countBefore = transactionRepository.count();

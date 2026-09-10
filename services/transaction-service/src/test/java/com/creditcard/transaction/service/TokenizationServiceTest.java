@@ -6,11 +6,10 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.vault.VaultException;
 import org.springframework.vault.core.VaultTemplate;
 import org.springframework.vault.core.VaultTransitOperations;
-import org.springframework.vault.support.Ciphertext;
-import org.springframework.vault.support.Plaintext;
-import org.springframework.vault.VaultException;
+import org.springframework.vault.support.VaultTransitContext;
 
 import java.nio.charset.StandardCharsets;
 
@@ -39,22 +38,40 @@ class TokenizationServiceTest {
     }
 
     @Test
-    void shouldCallVaultEncryptWithRawPan() {
+    void shouldCallVaultConvergentEncryptWithRawPanAndFixedContext() {
         String rawPan = "4111111111111111";
-        when(transitOperations.encrypt(eq("card-pan-key"), any(Plaintext.class)))
-                .thenReturn(Ciphertext.of("vault:v1:ABCdef123"));
+        when(transitOperations.encrypt(eq("card-pan-key"), any(byte[].class), any(VaultTransitContext.class)))
+                .thenReturn("vault:v1:ABCdef123");
 
         tokenizationService.tokenize(rawPan);
 
-        ArgumentCaptor<Plaintext> captor = ArgumentCaptor.forClass(Plaintext.class);
-        verify(transitOperations).encrypt(eq("card-pan-key"), captor.capture());
-        assertThat(new String(captor.getValue().getPlaintext(), StandardCharsets.UTF_8)).isEqualTo(rawPan);
+        ArgumentCaptor<byte[]> plaintextCaptor = ArgumentCaptor.forClass(byte[].class);
+        ArgumentCaptor<VaultTransitContext> contextCaptor = ArgumentCaptor.forClass(VaultTransitContext.class);
+        verify(transitOperations).encrypt(eq("card-pan-key"), plaintextCaptor.capture(), contextCaptor.capture());
+        assertThat(new String(plaintextCaptor.getValue(), StandardCharsets.UTF_8)).isEqualTo(rawPan);
+        assertThat(new String(contextCaptor.getValue().getContext(), StandardCharsets.UTF_8))
+                .isEqualTo("credit-card-pan");
+    }
+
+    @Test
+    void shouldUseTheSameContextAcrossCallsSoTokenizationIsDeterministic() {
+        when(transitOperations.encrypt(eq("card-pan-key"), any(byte[].class), any(VaultTransitContext.class)))
+                .thenReturn("vault:v1:x");
+
+        tokenizationService.tokenize("4111111111111111");
+        tokenizationService.tokenize("4111111111111111");
+
+        ArgumentCaptor<VaultTransitContext> contextCaptor = ArgumentCaptor.forClass(VaultTransitContext.class);
+        verify(transitOperations, org.mockito.Mockito.times(2))
+                .encrypt(eq("card-pan-key"), any(byte[].class), contextCaptor.capture());
+        assertThat(contextCaptor.getAllValues().get(0).getContext())
+                .isEqualTo(contextCaptor.getAllValues().get(1).getContext());
     }
 
     @Test
     void shouldReturnVaultCiphertextAsToken() {
-        when(transitOperations.encrypt(eq("card-pan-key"), any(Plaintext.class)))
-                .thenReturn(Ciphertext.of("vault:v1:ABCdef123XYZ"));
+        when(transitOperations.encrypt(eq("card-pan-key"), any(byte[].class), any(VaultTransitContext.class)))
+                .thenReturn("vault:v1:ABCdef123XYZ");
 
         TokenResult result = tokenizationService.tokenize("4111111111111111");
 
@@ -64,7 +81,8 @@ class TokenizationServiceTest {
 
     @Test
     void shouldMaskAllButLastFourDigits() {
-        when(transitOperations.encrypt(any(String.class), any(Plaintext.class))).thenReturn(Ciphertext.of("vault:v1:xyz"));
+        when(transitOperations.encrypt(any(String.class), any(byte[].class), any(VaultTransitContext.class)))
+                .thenReturn("vault:v1:xyz");
 
         TokenResult result = tokenizationService.tokenize("4111111111111234");
 
@@ -75,7 +93,8 @@ class TokenizationServiceTest {
     @Test
     void tokenResultShouldNotContainRawPan() {
         String rawPan = "4111111111111111";
-        when(transitOperations.encrypt(any(String.class), any(Plaintext.class))).thenReturn(Ciphertext.of("vault:v1:xyz"));
+        when(transitOperations.encrypt(any(String.class), any(byte[].class), any(VaultTransitContext.class)))
+                .thenReturn("vault:v1:xyz");
 
         TokenResult result = tokenizationService.tokenize(rawPan);
 
@@ -85,7 +104,8 @@ class TokenizationServiceTest {
 
     @Test
     void shouldPropagateVaultExceptionWhenVaultUnavailable() {
-        when(transitOperations.encrypt(any(String.class), any(Plaintext.class))).thenThrow(new VaultException("Vault unavailable"));
+        when(transitOperations.encrypt(any(String.class), any(byte[].class), any(VaultTransitContext.class)))
+                .thenThrow(new VaultException("Vault unavailable"));
 
         assertThatThrownBy(() -> tokenizationService.tokenize("4111111111111111"))
                 .isInstanceOf(VaultException.class);

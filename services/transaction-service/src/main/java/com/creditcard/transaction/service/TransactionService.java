@@ -96,6 +96,7 @@ public class TransactionService {
         payload.setCardholderName(tx.getCardholderName());
         payload.setAmount(tx.getAmount());
         payload.setCurrencyCode(tx.getCurrencyCode());
+        payload.setMerchantId(tx.getMerchantId());
 
         return new TransactionInitiatedEvent(null, payload);
     }

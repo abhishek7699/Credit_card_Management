@@ -39,47 +39,48 @@ public class AuthorizationService {
         backoff = @Backoff(delay = 50, multiplier = 2, maxDelay = 500)
     )
     public AuthorizationResultEvent authorize(TransactionInitiatedEvent event) {
-        Optional<CardAccount> accountOpt = cardAccountRepository.findByCardToken(event.getCardToken());
+        TransactionInitiatedEvent.Payload payload = event.getPayload();
+        Optional<CardAccount> accountOpt = cardAccountRepository.findByCardToken(payload.getCardToken());
 
         if (accountOpt.isEmpty()) {
-            return persistAndReturn(event, AuthorizationOutcome.DECLINED, ReasonCode.INVALID_CARD);
+            return persistAndReturn(payload, AuthorizationOutcome.DECLINED, ReasonCode.INVALID_CARD);
         }
 
         CardAccount account = accountOpt.get();
 
         if (!account.getStatus().isActive()) {
-            return persistAndReturn(event, AuthorizationOutcome.DECLINED, ReasonCode.CARD_NOT_ACTIVE);
+            return persistAndReturn(payload, AuthorizationOutcome.DECLINED, ReasonCode.CARD_NOT_ACTIVE);
         }
 
-        if (account.getAvailableCredit().compareTo(event.getAmount()) < 0) {
-            return persistAndReturn(event, AuthorizationOutcome.DECLINED, ReasonCode.INSUFFICIENT_CREDIT);
+        if (account.getAvailableCredit().compareTo(payload.getAmount()) < 0) {
+            return persistAndReturn(payload, AuthorizationOutcome.DECLINED, ReasonCode.INSUFFICIENT_CREDIT);
         }
 
-        account.setAvailableCredit(account.getAvailableCredit().subtract(event.getAmount()));
+        account.setAvailableCredit(account.getAvailableCredit().subtract(payload.getAmount()));
         cardAccountRepository.save(account);
 
-        return persistAndReturn(event, AuthorizationOutcome.AUTHORIZED, null);
+        return persistAndReturn(payload, AuthorizationOutcome.AUTHORIZED, null);
     }
 
     AuthorizationResultEvent persistAndReturn(
-            TransactionInitiatedEvent event,
+            TransactionInitiatedEvent.Payload payload,
             AuthorizationOutcome outcome,
             ReasonCode reasonCode) {
 
         AuthorizationRecord record = new AuthorizationRecord();
-        record.setTransactionId(event.getTransactionId());
-        record.setCardToken(event.getCardToken());
-        record.setRequestedAmount(event.getAmount());
-        record.setCurrencyCode(event.getCurrencyCode());
+        record.setTransactionId(payload.getTransactionId());
+        record.setCardToken(payload.getCardToken());
+        record.setRequestedAmount(payload.getAmount());
+        record.setCurrencyCode(payload.getCurrencyCode());
         record.setOutcome(outcome);
         record.setReasonCode(reasonCode);
         record.setDecidedAt(Instant.now());
         authorizationRecordRepository.save(record);
 
         return switch (outcome) {
-            case AUTHORIZED -> AuthorizationResultEvent.authorized(event.getTransactionId(), event.getCardToken());
-            case DECLINED -> AuthorizationResultEvent.declined(event.getTransactionId(), event.getCardToken(), reasonCode);
-            case FAILED -> AuthorizationResultEvent.failed(event.getTransactionId(), event.getCardToken(), reasonCode);
+            case AUTHORIZED -> AuthorizationResultEvent.authorized(payload.getTransactionId(), payload.getCardToken());
+            case DECLINED -> AuthorizationResultEvent.declined(payload.getTransactionId(), payload.getCardToken(), reasonCode);
+            case FAILED -> AuthorizationResultEvent.failed(payload.getTransactionId(), payload.getCardToken(), reasonCode);
         };
     }
 }

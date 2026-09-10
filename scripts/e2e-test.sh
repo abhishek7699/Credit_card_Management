@@ -85,6 +85,42 @@ step2_health_checks() {
   [[ $ok -eq 1 ]] && pass "Step 2 — All services healthy"
 }
 
+# ── Card-account seed ─────────────────────────────────────────────────────────
+# authorization-service authorizes by looking up card_accounts by the Vault card
+# token. The transit key is convergent+derived, so encrypting the test PAN with
+# the same context that transaction-service uses yields the exact token that will
+# be on the event — seed a matching ACTIVE row with ample credit.
+CARD_PAN="4111111111111111"
+CARD_CONTEXT="credit-card-pan"
+
+seed_card_account() {
+  info "Seeding authorization_service.card_accounts for the e2e test card"
+
+  local pan_b64 ctx_b64 ciphertext
+  pan_b64=$(printf '%s' "${CARD_PAN}" | base64 | tr -d '\n')
+  ctx_b64=$(printf '%s' "${CARD_CONTEXT}" | base64 | tr -d '\n')
+
+  ciphertext=$(curl -sf -X POST \
+    -H "X-Vault-Token: dev-root-token" \
+    -d "{\"plaintext\":\"${pan_b64}\",\"context\":\"${ctx_b64}\"}" \
+    "http://localhost:8200/v1/transit/encrypt/card-pan-key" 2>/dev/null \
+    | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['ciphertext'])" 2>/dev/null || echo "")
+
+  if [[ -z "$ciphertext" ]]; then
+    fail "Card seed — could not obtain a deterministic card token from Vault"
+    return 1
+  fi
+
+  docker compose -f "${COMPOSE_FILE}" exec -T cockroachdb \
+    cockroach sql --insecure --database=defaultdb -e \
+    "INSERT INTO authorization_service.card_accounts
+       (card_token, status, credit_limit, available_credit, currency_code)
+     VALUES ('${ciphertext}', 'ACTIVE', 100000.0000, 100000.0000, 'USD')
+     ON CONFLICT (card_token) DO NOTHING;" >/dev/null
+
+  info "Card account seeded (token ${ciphertext:0:20}…)"
+}
+
 # ── Auth-service mock ─────────────────────────────────────────────────────────
 # Generates an RSA key pair, serves JWKS on port 9000, and issues JWTs.
 # The api-gateway's application.yml must point jwk-set-uri to http://auth-service:9000/oauth2/jwks
@@ -99,24 +135,26 @@ setup_auth_mock() {
   openssl genrsa -out "${key_dir}/private.pem" 2048 2>/dev/null
   openssl rsa -in "${key_dir}/private.pem" -pubout -out "${key_dir}/public.pem" 2>/dev/null
 
-  # Build a minimal JWKS from the public key using Python
-  python3 - "${key_dir}/private.pem" "${key_dir}" <<'PYEOF'
-import sys, json, base64, struct
+  # Build a minimal JWKS from the RSA key. The `cryptography` package is not
+  # present on the host (nor on the CI runner), so run the generation inside a
+  # throwaway Python container with `cryptography` pip-installed. This keeps the
+  # harness hermetic — no host pip state — and behaves identically on developer
+  # machines (incl. PEP-668 macOS) and CI. `cryptography` ships manylinux
+  # wheels, so the install is download-only (~5-10 s), no toolchain required.
+  cat > "${key_dir}/gen_jwks.py" <<'PYEOF'
+import sys, json, base64
 from cryptography.hazmat.primitives.serialization import load_pem_private_key
-from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey
 
 pem_path = sys.argv[1]
-out_dir   = sys.argv[2]
+out_dir  = sys.argv[2]
 
 with open(pem_path, "rb") as f:
     priv = load_pem_private_key(f.read(), password=None)
 
-pub = priv.public_key()
-pub_nums = pub.public_key().public_numbers() if hasattr(pub, 'public_key') else pub.public_numbers()
+pub_nums = priv.public_key().public_numbers()
 
 def to_b64(n):
-    length = (n.bit_length() + 7) // 8
-    raw = n.to_bytes(length, "big")
+    raw = n.to_bytes((n.bit_length() + 7) // 8, "big")
     return base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
 
 jwk = {
@@ -127,48 +165,19 @@ jwk = {
     "n": to_b64(pub_nums.n),
     "e": to_b64(pub_nums.e),
 }
-jwks = {"keys": [jwk]}
 
 with open(f"{out_dir}/jwks.json", "w") as f:
-    json.dump(jwks, f)
+    json.dump({"keys": [jwk]}, f)
 print("JWKS written")
 PYEOF
 
-  # Fallback if cryptography library unavailable: use openssl text output
+  docker run --rm -v "${key_dir}:/data" python:3.11-slim \
+    sh -c 'pip install --quiet --disable-pip-version-check --root-user-action=ignore cryptography \
+           && python3 /data/gen_jwks.py /data/private.pem /data'
+
   if [[ ! -f "${key_dir}/jwks.json" ]]; then
-    info "cryptography lib unavailable — using openssl modulus extraction"
-    python3 - "${key_dir}/private.pem" "${key_dir}" <<'PYEOF2'
-import sys, json, base64, subprocess
-
-pem_path = sys.argv[1]
-out_dir   = sys.argv[2]
-
-# Extract modulus and exponent via openssl text
-text = subprocess.check_output(["openssl", "rsa", "-in", pem_path, "-text", "-noout"], stderr=subprocess.DEVNULL).decode()
-lines = text.split("\n")
-modulus_hex = ""
-in_mod = False
-for line in lines:
-    if "modulus" in line.lower() or "Modulus" in line:
-        in_mod = True
-        continue
-    if in_mod:
-        if line.startswith(" ") or line.startswith("\t"):
-            modulus_hex += line.strip().replace(":", "")
-        else:
-            break
-
-n_bytes = bytes.fromhex(modulus_hex.lstrip("00"))
-e_bytes = (65537).to_bytes(3, "big")
-
-def b64(b):
-    return base64.urlsafe_b64encode(b).rstrip(b"=").decode()
-
-jwk = {"kty":"RSA","kid":"e2e-key-1","use":"sig","alg":"RS256","n":b64(n_bytes),"e":b64(e_bytes)}
-with open(f"{out_dir}/jwks.json","w") as f:
-    json.dump({"keys":[jwk]}, f)
-print("JWKS written (openssl path)")
-PYEOF2
+    fail "Auth-service mock — JWKS generation failed"
+    return 1
   fi
 
   # Store key path for JWT generation later
@@ -292,7 +301,7 @@ step4_submit_payment() {
     2>/dev/null)
 
   http_code=$(echo "$resp" | tail -1)
-  body=$(echo "$resp" | head -n -1)
+  body=$(echo "$resp" | sed '$d')
 
   if [[ "$http_code" != "201" ]]; then
     fail "Step 4 — Expected 201, got ${http_code}. Body: ${body}"
@@ -323,7 +332,7 @@ step5_poll_status() {
       "http://localhost:${GW_PORT}/api/v1/transactions/${TXN_ID}" \
       -H "Authorization: Bearer ${MERCHANT_JWT}" 2>/dev/null)
     http_code=$(echo "$resp" | tail -1)
-    body=$(echo "$resp" | head -n -1)
+    body=$(echo "$resp" | sed '$d')
 
     if [[ "$http_code" == "200" ]]; then
       status=$(echo "$body" | python3 -c "import sys,json; print(json.load(sys.stdin).get('status',''))" 2>/dev/null || echo "")
@@ -409,7 +418,7 @@ step8_circuit_breaker() {
       -d '{"cardNumber":"4111111111111111","cardExpiry":"12/27","cvv":"123","cardholderName":"CB Test","amount":"1.00","currencyCode":"USD"}' \
       2>/dev/null)
     http_code=$(echo "$resp" | tail -1)
-    body=$(echo "$resp" | head -n -1)
+    body=$(echo "$resp" | sed '$d')
 
     if [[ "$http_code" == "503" ]]; then
       # Verify fallback body
@@ -440,10 +449,10 @@ step9_reporting_query() {
 
   local resp http_code body
   resp=$(curl -s -w '\n%{http_code}' \
-    "http://localhost:${REPORT_PORT}/api/v1/reporting/transactions/${TXN_ID}" \
+    "http://localhost:${REPORT_PORT}/internal/reporting/transactions/${TXN_ID}" \
     -H "Authorization: Bearer ${ADMIN_JWT}" 2>/dev/null)
   http_code=$(echo "$resp" | tail -1)
-  body=$(echo "$resp" | head -n -1)
+  body=$(echo "$resp" | sed '$d')
 
   if [[ "$http_code" == "200" ]]; then
     # Verify masked card number (no raw PAN)
@@ -479,10 +488,10 @@ step10_settlement() {
   while [[ $elapsed -lt $max ]]; do
     local resp http_code body
     resp=$(curl -s -w '\n%{http_code}' \
-      "http://localhost:${REPORT_PORT}/api/v1/reporting/transactions/${TXN_ID}" \
+      "http://localhost:${REPORT_PORT}/internal/reporting/transactions/${TXN_ID}" \
       -H "Authorization: Bearer ${ADMIN_JWT}" 2>/dev/null)
     http_code=$(echo "$resp" | tail -1)
-    body=$(echo "$resp" | head -n -1)
+    body=$(echo "$resp" | sed '$d')
 
     if [[ "$http_code" == "200" ]]; then
       final_status=$(echo "$body" | python3 -c "import sys,json; print(json.load(sys.stdin).get('status',''))" 2>/dev/null || echo "")
@@ -546,6 +555,7 @@ main() {
   info "Waiting 15s for circuit breaker cooldown after service startup"
   sleep 15
 
+  seed_card_account
   setup_auth_mock
 
   step3_obtain_jwt

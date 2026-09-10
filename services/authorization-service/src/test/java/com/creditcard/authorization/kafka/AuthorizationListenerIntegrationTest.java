@@ -3,6 +3,7 @@ package com.creditcard.authorization.kafka;
 import com.creditcard.authorization.domain.CardAccount;
 import com.creditcard.authorization.domain.CardAccountStatus;
 import com.creditcard.authorization.kafka.event.AuthorizationResultEvent;
+import com.creditcard.authorization.kafka.event.TransactionAuthorizedEvent;
 import com.creditcard.authorization.kafka.event.TransactionInitiatedEvent;
 import com.creditcard.authorization.repository.AuthorizationRecordRepository;
 import com.creditcard.authorization.repository.CardAccountRepository;
@@ -37,6 +38,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -48,7 +50,7 @@ import static org.awaitility.Awaitility.await;
 @SpringBootTest
 @EmbeddedKafka(
     partitions = 1,
-    topics = {"transaction.initiated", "transaction.status.updated"},
+    topics = {"transaction.initiated", "transaction.status.updated", "transaction.authorized"},
     bootstrapServersProperty = "spring.kafka.bootstrap-servers"
 )
 @Testcontainers
@@ -94,22 +96,26 @@ class AuthorizationListenerIntegrationTest {
     private String brokers;
 
     private KafkaConsumer<String, AuthorizationResultEvent> resultConsumer;
+    private KafkaConsumer<String, TransactionAuthorizedEvent> authorizedConsumer;
 
     @BeforeEach
     void setUp() {
-        resultConsumer = buildResultConsumer();
+        resultConsumer = buildConsumer(AuthorizationResultEvent.class);
         resultConsumer.subscribe(List.of("transaction.status.updated"));
+        authorizedConsumer = buildConsumer(TransactionAuthorizedEvent.class);
+        authorizedConsumer.subscribe(List.of("transaction.authorized"));
     }
 
     @AfterEach
     void tearDown() {
         resultConsumer.close();
+        authorizedConsumer.close();
         authorizationRecordRepository.deleteAll();
         cardAccountRepository.deleteAll();
     }
 
     @Test
-    void shouldAuthorizeWhenCardActiveAndCreditSufficient() throws Exception {
+    void shouldAuthorizeAndPublishTransactionAuthorizedWhenCardActiveAndCreditSufficient() throws Exception {
         String token = "vault:v1:token-auth-" + UUID.randomUUID();
         UUID txId = UUID.randomUUID();
         String eventId = UUID.randomUUID().toString();
@@ -117,13 +123,23 @@ class AuthorizationListenerIntegrationTest {
         cardAccountRepository.save(buildAccount(token, CardAccountStatus.ACTIVE, "500.00"));
 
         initiatedKafkaTemplate.send("transaction.initiated", txId.toString(),
-                buildEvent(eventId, txId, token, "100.00")).get(5, TimeUnit.SECONDS);
+                buildEvent(eventId, txId, token, "100.00", "merchant-42")).get(5, TimeUnit.SECONDS);
 
         await().atMost(10, TimeUnit.SECONDS).untilAsserted(() -> {
-            AuthorizationResultEvent result = pollForResult(txId);
+            AuthorizationResultEvent result = poll(resultConsumer, txId);
             assertThat(result).isNotNull();
             assertThat(result.getEventType()).isEqualTo("TransactionAuthorized");
-            assertThat(result.getTransactionId()).isEqualTo(txId);
+            assertThat(result.getPayload().getTransactionId()).isEqualTo(txId);
+        });
+
+        await().atMost(10, TimeUnit.SECONDS).untilAsserted(() -> {
+            TransactionAuthorizedEvent authorized = poll(authorizedConsumer, txId);
+            assertThat(authorized).isNotNull();
+            assertThat(authorized.getEventType()).isEqualTo("TransactionAuthorized");
+            assertThat(authorized.getPayload().getMerchantId()).isEqualTo("merchant-42");
+            assertThat(authorized.getPayload().getMaskedCardNumber()).isEqualTo("****-****-****-1111");
+            assertThat(authorized.getPayload().getAmount()).isEqualByComparingTo("100.00");
+            assertThat(authorized.getPayload().getAuthorizedAt()).isNotNull();
         });
 
         await().atMost(5, TimeUnit.SECONDS).untilAsserted(() -> {
@@ -133,21 +149,23 @@ class AuthorizationListenerIntegrationTest {
     }
 
     @Test
-    void shouldDeclineWhenInsufficientCredit() throws Exception {
+    void shouldDeclineWithoutPublishingTransactionAuthorizedWhenInsufficientCredit() throws Exception {
         String token = "vault:v1:token-decline-" + UUID.randomUUID();
         UUID txId = UUID.randomUUID();
 
         cardAccountRepository.save(buildAccount(token, CardAccountStatus.ACTIVE, "50.00"));
 
         initiatedKafkaTemplate.send("transaction.initiated", txId.toString(),
-                buildEvent(UUID.randomUUID().toString(), txId, token, "100.00")).get(5, TimeUnit.SECONDS);
+                buildEvent(UUID.randomUUID().toString(), txId, token, "100.00", "m")).get(5, TimeUnit.SECONDS);
 
         await().atMost(10, TimeUnit.SECONDS).untilAsserted(() -> {
-            AuthorizationResultEvent result = pollForResult(txId);
+            AuthorizationResultEvent result = poll(resultConsumer, txId);
             assertThat(result).isNotNull();
             assertThat(result.getEventType()).isEqualTo("TransactionDeclined");
-            assertThat(result.getReasonCode()).isEqualTo("INSUFFICIENT_CREDIT");
+            assertThat(result.getPayload().getReasonCode()).isEqualTo("INSUFFICIENT_CREDIT");
         });
+
+        assertThat(poll(authorizedConsumer, txId)).isNull();
     }
 
     @Test
@@ -158,13 +176,13 @@ class AuthorizationListenerIntegrationTest {
         cardAccountRepository.save(buildAccount(token, CardAccountStatus.BLOCKED, "1000.00"));
 
         initiatedKafkaTemplate.send("transaction.initiated", txId.toString(),
-                buildEvent(UUID.randomUUID().toString(), txId, token, "100.00")).get(5, TimeUnit.SECONDS);
+                buildEvent(UUID.randomUUID().toString(), txId, token, "100.00", "m")).get(5, TimeUnit.SECONDS);
 
         await().atMost(10, TimeUnit.SECONDS).untilAsserted(() -> {
-            AuthorizationResultEvent result = pollForResult(txId);
+            AuthorizationResultEvent result = poll(resultConsumer, txId);
             assertThat(result).isNotNull();
             assertThat(result.getEventType()).isEqualTo("TransactionDeclined");
-            assertThat(result.getReasonCode()).isEqualTo("CARD_NOT_ACTIVE");
+            assertThat(result.getPayload().getReasonCode()).isEqualTo("CARD_NOT_ACTIVE");
         });
     }
 
@@ -173,21 +191,20 @@ class AuthorizationListenerIntegrationTest {
         UUID txId = UUID.randomUUID();
 
         initiatedKafkaTemplate.send("transaction.initiated", txId.toString(),
-                buildEvent(UUID.randomUUID().toString(), txId, "vault:v1:unknown-token", "100.00"))
+                buildEvent(UUID.randomUUID().toString(), txId, "vault:v1:unknown-token", "100.00", "m"))
                 .get(5, TimeUnit.SECONDS);
 
         await().atMost(10, TimeUnit.SECONDS).untilAsserted(() -> {
-            AuthorizationResultEvent result = pollForResult(txId);
+            AuthorizationResultEvent result = poll(resultConsumer, txId);
             assertThat(result).isNotNull();
             assertThat(result.getEventType()).isEqualTo("TransactionDeclined");
-            assertThat(result.getReasonCode()).isEqualTo("INVALID_CARD");
+            assertThat(result.getPayload().getReasonCode()).isEqualTo("INVALID_CARD");
         });
     }
 
-    private AuthorizationResultEvent pollForResult(UUID txId) {
-        ConsumerRecords<String, AuthorizationResultEvent> records =
-                resultConsumer.poll(Duration.ofMillis(500));
-        for (ConsumerRecord<String, AuthorizationResultEvent> record : records) {
+    private <T> T poll(KafkaConsumer<String, T> consumer, UUID txId) {
+        ConsumerRecords<String, T> records = consumer.poll(Duration.ofMillis(500));
+        for (ConsumerRecord<String, T> record : records) {
             if (txId.toString().equals(record.key())) {
                 return record.value();
             }
@@ -195,17 +212,16 @@ class AuthorizationListenerIntegrationTest {
         return null;
     }
 
-    private KafkaConsumer<String, AuthorizationResultEvent> buildResultConsumer() {
-        Map<String, Object> props = Map.of(
-            ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, brokers != null ? brokers : "localhost:9092",
-            ConsumerConfig.GROUP_ID_CONFIG, "test-result-consumer-" + UUID.randomUUID(),
-            ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest",
-            ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class,
-            ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, JsonDeserializer.class,
-            JsonDeserializer.TRUSTED_PACKAGES, "com.creditcard.*",
-            JsonDeserializer.VALUE_DEFAULT_TYPE, AuthorizationResultEvent.class.getName(),
-            JsonDeserializer.USE_TYPE_INFO_HEADERS, false
-        );
+    private <T> KafkaConsumer<String, T> buildConsumer(Class<T> valueType) {
+        Map<String, Object> props = new HashMap<>();
+        props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, brokers != null ? brokers : "localhost:9092");
+        props.put(ConsumerConfig.GROUP_ID_CONFIG, "test-consumer-" + UUID.randomUUID());
+        props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+        props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
+        props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, JsonDeserializer.class);
+        props.put(JsonDeserializer.TRUSTED_PACKAGES, "com.creditcard.*");
+        props.put(JsonDeserializer.VALUE_DEFAULT_TYPE, valueType.getName());
+        props.put(JsonDeserializer.USE_TYPE_INFO_HEADERS, false);
         return new KafkaConsumer<>(props);
     }
 
@@ -219,15 +235,21 @@ class AuthorizationListenerIntegrationTest {
         return account;
     }
 
-    private TransactionInitiatedEvent buildEvent(String eventId, UUID txId, String token, String amount) {
+    private TransactionInitiatedEvent buildEvent(String eventId, UUID txId, String token, String amount, String merchantId) {
         TransactionInitiatedEvent event = new TransactionInitiatedEvent();
         event.setEventId(eventId);
         event.setEventType("TransactionInitiated");
-        event.setTransactionId(txId);
-        event.setCardToken(token);
-        event.setAmount(new BigDecimal(amount));
-        event.setCurrencyCode("USD");
+        event.setSourceService("transaction-service");
         event.setOccurredAt(Instant.now());
+        TransactionInitiatedEvent.Payload payload = new TransactionInitiatedEvent.Payload();
+        payload.setTransactionId(txId);
+        payload.setCardToken(token);
+        payload.setMaskedCardNumber("****-****-****-1111");
+        payload.setCardholderName("Jane Smith");
+        payload.setAmount(new BigDecimal(amount));
+        payload.setCurrencyCode("USD");
+        payload.setMerchantId(merchantId);
+        event.setPayload(payload);
         return event;
     }
 }

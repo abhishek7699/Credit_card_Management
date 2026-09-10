@@ -62,6 +62,12 @@ public class ReportingService {
         return toPagedResponse(page);
     }
 
+    public TransactionResponse getTransaction(String transactionId) {
+        return txRepository.findById(transactionId)
+                .map(this::mapToTransactionResponse)
+                .orElseThrow(() -> new ResourceNotFoundException("Transaction not found: " + transactionId));
+    }
+
     private Specification<SettlementTransaction> buildTransactionSpec(
             String cardToken, String merchantId, Instant from, Instant to, String status) {
 

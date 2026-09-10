@@ -71,6 +71,33 @@ class ReportingControllerTest {
     }
 
     @Test
+    void getTransactionById_found_returns200() throws Exception {
+        TransactionResponse tx = new TransactionResponse();
+        tx.setTransactionId("tx-77");
+        tx.setMaskedCardNumber("****-****-****-1111");
+        tx.setStatus("AUTHORIZED");
+
+        when(reportingService.getTransaction("tx-77")).thenReturn(tx);
+
+        mockMvc.perform(get("/internal/reporting/transactions/tx-77")
+                        .accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.transactionId").value("tx-77"))
+                .andExpect(jsonPath("$.maskedCardNumber").value("****-****-****-1111"))
+                .andExpect(jsonPath("$.status").value("AUTHORIZED"));
+    }
+
+    @Test
+    void getTransactionById_notFound_returns404() throws Exception {
+        when(reportingService.getTransaction("ghost"))
+                .thenThrow(new ResourceNotFoundException("Transaction not found: ghost"));
+
+        mockMvc.perform(get("/internal/reporting/transactions/ghost"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error", containsString("ghost")));
+    }
+
+    @Test
     void getTransactions_servicethrowsInvalidDateRange_returns400() throws Exception {
         when(reportingService.getTransactions(any(), any(), any(), any(), any(), any(Pageable.class)))
                 .thenThrow(new InvalidDateRangeException("Date range exceeds maximum of 90 days"));

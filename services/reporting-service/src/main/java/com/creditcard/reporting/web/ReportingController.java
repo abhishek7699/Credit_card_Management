@@ -27,6 +27,11 @@ public class ReportingController {
 
     // ── US1: Transaction History ───────────────────────────────────────────────
 
+    @GetMapping("/transactions/{id}")
+    public ResponseEntity<TransactionResponse> getTransaction(@PathVariable String id) {
+        return ResponseEntity.ok(reportingService.getTransaction(id));
+    }
+
     @GetMapping("/transactions")
     public ResponseEntity<PagedResponse<TransactionResponse>> getTransactions(
             @RequestParam(required = false) String cardToken,

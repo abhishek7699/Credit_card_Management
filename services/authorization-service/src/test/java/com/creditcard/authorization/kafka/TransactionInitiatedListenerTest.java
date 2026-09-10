@@ -2,6 +2,7 @@ package com.creditcard.authorization.kafka;
 
 import com.creditcard.authorization.domain.ReasonCode;
 import com.creditcard.authorization.kafka.event.AuthorizationResultEvent;
+import com.creditcard.authorization.kafka.event.TransactionAuthorizedEvent;
 import com.creditcard.authorization.kafka.event.TransactionInitiatedEvent;
 import com.creditcard.authorization.service.AuthorizationService;
 import com.creditcard.authorization.service.IdempotencyService;
@@ -30,6 +31,9 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class TransactionInitiatedListenerTest {
 
+    private static final String RESULT_TOPIC = "transaction.status.updated";
+    private static final String AUTHORIZED_TOPIC = "transaction.authorized";
+
     @Mock
     private AuthorizationService authorizationService;
 
@@ -37,7 +41,7 @@ class TransactionInitiatedListenerTest {
     private IdempotencyService idempotencyService;
 
     @Mock
-    private KafkaTemplate<String, AuthorizationResultEvent> kafkaTemplate;
+    private KafkaTemplate<String, Object> kafkaTemplate;
 
     @Mock
     private Acknowledgment acknowledgment;
@@ -46,38 +50,60 @@ class TransactionInitiatedListenerTest {
     private TransactionInitiatedListener listener;
 
     @Test
-    void shouldProcessEventAndPublishResultAndAck() {
-        TransactionInitiatedEvent event = buildEvent("evt-001", UUID.randomUUID(), "vault:v1:tok", "100.00");
-        String idempotencyKey = "auth:TransactionInitiated:evt-001";
-        AuthorizationResultEvent result = AuthorizationResultEvent.authorized(event.getTransactionId(), event.getCardToken());
+    void shouldPublishResultAndAuthorizedEventAndAckOnAuthorizedOutcome() {
+        UUID txId = UUID.randomUUID();
+        TransactionInitiatedEvent event = buildEvent("evt-001", txId, "vault:v1:tok", "100.00", "merchant-9");
+        AuthorizationResultEvent result = AuthorizationResultEvent.authorized(txId, "vault:v1:tok");
 
-        when(idempotencyService.buildKey("TransactionInitiated", "evt-001")).thenReturn(idempotencyKey);
-        when(idempotencyService.isDuplicate(idempotencyKey)).thenReturn(false);
+        when(idempotencyService.buildKey("TransactionInitiated", "evt-001")).thenReturn("auth:TransactionInitiated:evt-001");
+        when(idempotencyService.isDuplicate("auth:TransactionInitiated:evt-001")).thenReturn(false);
         when(authorizationService.authorize(event)).thenReturn(result);
 
-        ConsumerRecord<String, TransactionInitiatedEvent> record = new ConsumerRecord<>(
-                "transaction.initiated", 0, 0L, event.getTransactionId().toString(), event);
+        listener.onMessage(record(event, txId.toString(), 0L), acknowledgment);
 
-        listener.onMessage(record, acknowledgment);
+        ArgumentCaptor<Object> resultCaptor = ArgumentCaptor.forClass(Object.class);
+        verify(kafkaTemplate).send(eq(RESULT_TOPIC), eq(txId.toString()), resultCaptor.capture());
+        assertThat(((AuthorizationResultEvent) resultCaptor.getValue()).getEventType()).isEqualTo("TransactionAuthorized");
 
-        ArgumentCaptor<AuthorizationResultEvent> captor = ArgumentCaptor.forClass(AuthorizationResultEvent.class);
-        verify(kafkaTemplate).send(eq("transaction.status.updated"), eq(event.getTransactionId().toString()), captor.capture());
-        assertThat(captor.getValue().getEventType()).isEqualTo("TransactionAuthorized");
+        ArgumentCaptor<Object> authCaptor = ArgumentCaptor.forClass(Object.class);
+        verify(kafkaTemplate).send(eq(AUTHORIZED_TOPIC), eq(txId.toString()), authCaptor.capture());
+        TransactionAuthorizedEvent authorized = (TransactionAuthorizedEvent) authCaptor.getValue();
+        assertThat(authorized.getEventType()).isEqualTo("TransactionAuthorized");
+        assertThat(authorized.getSourceService()).isEqualTo("authorization-service");
+        assertThat(authorized.getPayload().getTransactionId()).isEqualTo(txId);
+        assertThat(authorized.getPayload().getMerchantId()).isEqualTo("merchant-9");
+        assertThat(authorized.getPayload().getMaskedCardNumber()).isEqualTo("****-****-****-1111");
+        assertThat(authorized.getPayload().getAmount()).isEqualByComparingTo("100.00");
+        assertThat(authorized.getPayload().getAuthorizedAt()).isNotNull();
+        verify(acknowledgment).acknowledge();
+    }
+
+    @Test
+    void shouldPublishOnlyResultOnDeclinedOutcome() {
+        UUID txId = UUID.randomUUID();
+        TransactionInitiatedEvent event = buildEvent("evt-dec", txId, "vault:v1:tok", "100.00", "merchant-1");
+        AuthorizationResultEvent result = AuthorizationResultEvent.declined(txId, "vault:v1:tok", ReasonCode.INVALID_CARD);
+
+        when(idempotencyService.buildKey("TransactionInitiated", "evt-dec")).thenReturn("k");
+        when(idempotencyService.isDuplicate("k")).thenReturn(false);
+        when(authorizationService.authorize(event)).thenReturn(result);
+
+        listener.onMessage(record(event, txId.toString(), 1L), acknowledgment);
+
+        verify(kafkaTemplate).send(eq(RESULT_TOPIC), eq(txId.toString()), any());
+        verify(kafkaTemplate, never()).send(eq(AUTHORIZED_TOPIC), anyString(), any());
         verify(acknowledgment).acknowledge();
     }
 
     @Test
     void shouldSkipDuplicateEventAndAck() {
-        TransactionInitiatedEvent event = buildEvent("evt-dup", UUID.randomUUID(), "vault:v1:tok", "50.00");
-        String idempotencyKey = "auth:TransactionInitiated:evt-dup";
+        UUID txId = UUID.randomUUID();
+        TransactionInitiatedEvent event = buildEvent("evt-dup", txId, "vault:v1:tok", "50.00", "m");
 
-        when(idempotencyService.buildKey("TransactionInitiated", "evt-dup")).thenReturn(idempotencyKey);
-        when(idempotencyService.isDuplicate(idempotencyKey)).thenReturn(true);
+        when(idempotencyService.buildKey("TransactionInitiated", "evt-dup")).thenReturn("k");
+        when(idempotencyService.isDuplicate("k")).thenReturn(true);
 
-        ConsumerRecord<String, TransactionInitiatedEvent> record = new ConsumerRecord<>(
-                "transaction.initiated", 0, 1L, event.getTransactionId().toString(), event);
-
-        listener.onMessage(record, acknowledgment);
+        listener.onMessage(record(event, txId.toString(), 2L), acknowledgment);
 
         verify(authorizationService, never()).authorize(any());
         verify(kafkaTemplate, never()).send(anyString(), anyString(), any());
@@ -86,97 +112,106 @@ class TransactionInitiatedListenerTest {
 
     @Test
     void shouldPublishFailedEventAndAckWhenAuthorizationThrows() {
-        TransactionInitiatedEvent event = buildEvent("evt-err", UUID.randomUUID(), "vault:v1:tok", "100.00");
-        String idempotencyKey = "auth:TransactionInitiated:evt-err";
+        UUID txId = UUID.randomUUID();
+        TransactionInitiatedEvent event = buildEvent("evt-err", txId, "vault:v1:tok", "100.00", "m");
 
-        when(idempotencyService.buildKey("TransactionInitiated", "evt-err")).thenReturn(idempotencyKey);
-        when(idempotencyService.isDuplicate(idempotencyKey)).thenReturn(false);
+        when(idempotencyService.buildKey("TransactionInitiated", "evt-err")).thenReturn("k");
+        when(idempotencyService.isDuplicate("k")).thenReturn(false);
         when(authorizationService.authorize(event)).thenThrow(new RuntimeException("DB error"));
 
-        ConsumerRecord<String, TransactionInitiatedEvent> record = new ConsumerRecord<>(
-                "transaction.initiated", 0, 2L, event.getTransactionId().toString(), event);
+        listener.onMessage(record(event, txId.toString(), 3L), acknowledgment);
 
-        listener.onMessage(record, acknowledgment);
-
-        ArgumentCaptor<AuthorizationResultEvent> captor = ArgumentCaptor.forClass(AuthorizationResultEvent.class);
-        verify(kafkaTemplate).send(eq("transaction.status.updated"), eq(event.getTransactionId().toString()), captor.capture());
-        assertThat(captor.getValue().getEventType()).isEqualTo("TransactionFailed");
-        assertThat(captor.getValue().getReasonCode()).isEqualTo(ReasonCode.INTERNAL_ERROR.name());
+        ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
+        verify(kafkaTemplate).send(eq(RESULT_TOPIC), eq(txId.toString()), captor.capture());
+        AuthorizationResultEvent failed = (AuthorizationResultEvent) captor.getValue();
+        assertThat(failed.getEventType()).isEqualTo("TransactionFailed");
+        assertThat(failed.getPayload().getReasonCode()).isEqualTo(ReasonCode.INTERNAL_ERROR.name());
         verify(acknowledgment).acknowledge();
     }
 
     @Test
-    void shouldPublishFailedAndAckWhenEventPayloadIsNull() {
-        ConsumerRecord<String, TransactionInitiatedEvent> record = new ConsumerRecord<>(
-                "transaction.initiated", 0, 3L, "some-key", null);
+    void shouldPublishFailedAndAckWhenEventIsNull() {
+        listener.onMessage(record(null, "some-key", 4L), acknowledgment);
 
-        listener.onMessage(record, acknowledgment);
-
-        ArgumentCaptor<AuthorizationResultEvent> captor = ArgumentCaptor.forClass(AuthorizationResultEvent.class);
-        verify(kafkaTemplate).send(eq("transaction.status.updated"), anyString(), captor.capture());
-        assertThat(captor.getValue().getEventType()).isEqualTo("TransactionFailed");
-        assertThat(captor.getValue().getReasonCode()).isEqualTo(ReasonCode.INVALID_EVENT_PAYLOAD.name());
+        ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
+        verify(kafkaTemplate).send(eq(RESULT_TOPIC), anyString(), captor.capture());
+        assertThat(((AuthorizationResultEvent) captor.getValue()).getPayload().getReasonCode())
+                .isEqualTo(ReasonCode.INVALID_EVENT_PAYLOAD.name());
         verify(acknowledgment).acknowledge();
     }
 
     @Test
-    void shouldUseKeyAsTransactionIdWhenPayloadNullAndKeyIsValidUuid() {
-        UUID validUuid = UUID.randomUUID();
-        ConsumerRecord<String, TransactionInitiatedEvent> record = new ConsumerRecord<>(
-                "transaction.initiated", 0, 4L, validUuid.toString(), null);
-
-        listener.onMessage(record, acknowledgment);
-
-        ArgumentCaptor<AuthorizationResultEvent> captor = ArgumentCaptor.forClass(AuthorizationResultEvent.class);
-        verify(kafkaTemplate).send(eq("transaction.status.updated"), eq(validUuid.toString()), captor.capture());
-        assertThat(captor.getValue().getEventType()).isEqualTo("TransactionFailed");
-        assertThat(captor.getValue().getTransactionId()).isEqualTo(validUuid);
-        verify(acknowledgment).acknowledge();
-    }
-
-    @Test
-    void shouldPublishFailedAndAckWhenEventHasNullTransactionId() {
+    void shouldPublishFailedAndAckWhenPayloadIsNull() {
         TransactionInitiatedEvent event = new TransactionInitiatedEvent();
-        // transactionId intentionally left null
-        event.setEventId("evt-null-tx");
+        event.setEventId("evt-np");
         event.setEventType("TransactionInitiated");
-        event.setCardToken("vault:v1:tok");
+        // payload intentionally left null
 
-        ConsumerRecord<String, TransactionInitiatedEvent> record = new ConsumerRecord<>(
-                "transaction.initiated", 0, 5L, UUID.randomUUID().toString(), event);
+        listener.onMessage(record(event, UUID.randomUUID().toString(), 5L), acknowledgment);
 
-        listener.onMessage(record, acknowledgment);
-
-        ArgumentCaptor<AuthorizationResultEvent> captor = ArgumentCaptor.forClass(AuthorizationResultEvent.class);
-        verify(kafkaTemplate).send(eq("transaction.status.updated"), anyString(), captor.capture());
-        assertThat(captor.getValue().getEventType()).isEqualTo("TransactionFailed");
-        assertThat(captor.getValue().getReasonCode()).isEqualTo(ReasonCode.INVALID_EVENT_PAYLOAD.name());
+        ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
+        verify(kafkaTemplate).send(eq(RESULT_TOPIC), anyString(), captor.capture());
+        assertThat(((AuthorizationResultEvent) captor.getValue()).getEventType()).isEqualTo("TransactionFailed");
         verify(acknowledgment).acknowledge();
     }
 
     @Test
-    void shouldGenerateRandomIdWhenPayloadNullAndKeyIsNull() {
-        ConsumerRecord<String, TransactionInitiatedEvent> record = new ConsumerRecord<>(
-                "transaction.initiated", 0, 6L, null, null);
+    void shouldPublishFailedAndAckWhenPayloadTransactionIdIsNull() {
+        TransactionInitiatedEvent event = new TransactionInitiatedEvent();
+        event.setEventId("evt-nt");
+        TransactionInitiatedEvent.Payload payload = new TransactionInitiatedEvent.Payload();
+        payload.setCardToken("vault:v1:tok");
+        event.setPayload(payload);
 
-        listener.onMessage(record, acknowledgment);
+        listener.onMessage(record(event, UUID.randomUUID().toString(), 6L), acknowledgment);
 
-        ArgumentCaptor<AuthorizationResultEvent> captor = ArgumentCaptor.forClass(AuthorizationResultEvent.class);
-        verify(kafkaTemplate).send(eq("transaction.status.updated"), anyString(), captor.capture());
-        assertThat(captor.getValue().getEventType()).isEqualTo("TransactionFailed");
-        assertThat(captor.getValue().getReasonCode()).isEqualTo(ReasonCode.INVALID_EVENT_PAYLOAD.name());
+        ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
+        verify(kafkaTemplate).send(eq(RESULT_TOPIC), anyString(), captor.capture());
+        assertThat(((AuthorizationResultEvent) captor.getValue()).getPayload().getReasonCode())
+                .isEqualTo(ReasonCode.INVALID_EVENT_PAYLOAD.name());
         verify(acknowledgment).acknowledge();
     }
 
-    private TransactionInitiatedEvent buildEvent(String eventId, UUID txId, String token, String amount) {
+    @Test
+    void shouldUseKeyAsTransactionIdWhenEventNullAndKeyIsValidUuid() {
+        UUID validUuid = UUID.randomUUID();
+
+        listener.onMessage(record(null, validUuid.toString(), 7L), acknowledgment);
+
+        ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
+        verify(kafkaTemplate).send(eq(RESULT_TOPIC), eq(validUuid.toString()), captor.capture());
+        assertThat(((AuthorizationResultEvent) captor.getValue()).getPayload().getTransactionId()).isEqualTo(validUuid);
+        verify(acknowledgment).acknowledge();
+    }
+
+    @Test
+    void shouldGenerateRandomIdWhenEventNullAndKeyIsNull() {
+        listener.onMessage(record(null, null, 8L), acknowledgment);
+
+        ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
+        verify(kafkaTemplate).send(eq(RESULT_TOPIC), anyString(), captor.capture());
+        assertThat(((AuthorizationResultEvent) captor.getValue()).getEventType()).isEqualTo("TransactionFailed");
+        verify(acknowledgment).acknowledge();
+    }
+
+    private ConsumerRecord<String, TransactionInitiatedEvent> record(TransactionInitiatedEvent event, String key, long offset) {
+        return new ConsumerRecord<>("transaction.initiated", 0, offset, key, event);
+    }
+
+    private TransactionInitiatedEvent buildEvent(String eventId, UUID txId, String token, String amount, String merchantId) {
         TransactionInitiatedEvent event = new TransactionInitiatedEvent();
         event.setEventId(eventId);
         event.setEventType("TransactionInitiated");
-        event.setTransactionId(txId);
-        event.setCardToken(token);
-        event.setAmount(new BigDecimal(amount));
-        event.setCurrencyCode("USD");
         event.setOccurredAt(Instant.now());
+        TransactionInitiatedEvent.Payload payload = new TransactionInitiatedEvent.Payload();
+        payload.setTransactionId(txId);
+        payload.setCardToken(token);
+        payload.setMaskedCardNumber("****-****-****-1111");
+        payload.setCardholderName("Jane Smith");
+        payload.setAmount(new BigDecimal(amount));
+        payload.setCurrencyCode("USD");
+        payload.setMerchantId(merchantId);
+        event.setPayload(payload);
         return event;
     }
 }

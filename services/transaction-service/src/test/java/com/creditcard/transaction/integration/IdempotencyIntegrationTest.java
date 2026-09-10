@@ -20,8 +20,7 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.vault.core.VaultTemplate;
 import org.springframework.vault.core.VaultTransitOperations;
-import org.springframework.vault.support.Ciphertext;
-import org.springframework.vault.support.Plaintext;
+import org.springframework.vault.support.VaultTransitContext;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -79,8 +78,8 @@ class IdempotencyIntegrationTest {
     private UUID createPendingTransaction() {
         VaultTransitOperations transitOps = mock(VaultTransitOperations.class);
         when(vaultTemplate.opsForTransit()).thenReturn(transitOps);
-        when(transitOps.encrypt(anyString(), any(Plaintext.class)))
-                .thenReturn(Ciphertext.of("vault:v1:test-token"));
+        when(transitOps.encrypt(anyString(), any(byte[].class), any(VaultTransitContext.class)))
+                .thenReturn("vault:v1:test-token");
 
         AtomicReference<UUID> txId = new AtomicReference<>();
         transactionGrpcService.initiateTransaction(

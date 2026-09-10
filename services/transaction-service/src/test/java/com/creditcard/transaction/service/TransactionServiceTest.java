@@ -121,6 +121,7 @@ class TransactionServiceTest {
         assertThat(event.getPayload().getTransactionId()).isEqualTo(savedTx.getId().toString());
         assertThat(event.getPayload().getCardToken()).startsWith("vault:");
         assertThat(event.getPayload().getMaskedCardNumber()).matches("\\*{4}-\\*{4}-\\*{4}-\\d{4}");
+        assertThat(event.getPayload().getMerchantId()).isEqualTo("merchant-001");
     }
 
     @Test
@@ -298,6 +299,7 @@ class TransactionServiceTest {
         tx.setCardholderName("Jane Doe");
         tx.setAmount(new BigDecimal("50.00"));
         tx.setCurrencyCode("USD");
+        tx.setMerchantId("merchant-001");
         tx.setStatus(TransactionStatus.PENDING);
         return tx;
     }

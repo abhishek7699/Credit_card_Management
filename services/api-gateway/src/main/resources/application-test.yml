@@ -22,6 +22,12 @@ grpc:
       address: in-process:transaction-test
       negotiation-type: plaintext
 
+gateway:
+  grpc:
+    warmup:
+      timeout: 1ms  # single probe then exit — no background polling during tests
+      poll-interval: 1ms
+
 resilience4j:
   circuitbreaker:
     instances:

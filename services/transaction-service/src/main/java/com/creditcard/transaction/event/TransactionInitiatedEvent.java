@@ -47,11 +47,15 @@ public class TransactionInitiatedEvent {
         private String cardholderName;
         private BigDecimal amount;
         private String currencyCode;
+        private String merchantId;
 
         public Payload() {}
 
         public String getTransactionId() { return transactionId; }
         public void setTransactionId(String transactionId) { this.transactionId = transactionId; }
+
+        public String getMerchantId() { return merchantId; }
+        public void setMerchantId(String merchantId) { this.merchantId = merchantId; }
 
         public String getCardToken() { return cardToken; }
         public void setCardToken(String cardToken) { this.cardToken = cardToken; }

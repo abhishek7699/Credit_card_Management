@@ -17,7 +17,6 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
-import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -48,7 +47,8 @@ class AuthorizationServiceTest {
         AuthorizationResultEvent result = authorizationService.authorize(buildEvent("vault:v1:tok", "100.00"));
 
         assertThat(result.getEventType()).isEqualTo("TransactionAuthorized");
-        assertThat(result.getReasonCode()).isNull();
+        assertThat(result.getPayload().getOutcome()).isEqualTo("AUTHORIZED");
+        assertThat(result.getPayload().getReasonCode()).isNull();
 
         ArgumentCaptor<CardAccount> accountCaptor = ArgumentCaptor.forClass(CardAccount.class);
         verify(cardAccountRepository).save(accountCaptor.capture());
@@ -75,7 +75,7 @@ class AuthorizationServiceTest {
         AuthorizationResultEvent result = authorizationService.authorize(buildEvent("vault:v1:tok", "100.00"));
 
         assertThat(result.getEventType()).isEqualTo("TransactionDeclined");
-        assertThat(result.getReasonCode()).isEqualTo(ReasonCode.INSUFFICIENT_CREDIT.name());
+        assertThat(result.getPayload().getReasonCode()).isEqualTo(ReasonCode.INSUFFICIENT_CREDIT.name());
         verify(cardAccountRepository, never()).save(any());
     }
 
@@ -88,7 +88,7 @@ class AuthorizationServiceTest {
         AuthorizationResultEvent result = authorizationService.authorize(buildEvent("vault:v1:tok", "100.00"));
 
         assertThat(result.getEventType()).isEqualTo("TransactionDeclined");
-        assertThat(result.getReasonCode()).isEqualTo(ReasonCode.CARD_NOT_ACTIVE.name());
+        assertThat(result.getPayload().getReasonCode()).isEqualTo(ReasonCode.CARD_NOT_ACTIVE.name());
         verify(cardAccountRepository, never()).save(any());
     }
 
@@ -101,22 +101,22 @@ class AuthorizationServiceTest {
         AuthorizationResultEvent result = authorizationService.authorize(buildEvent("vault:v1:tok", "100.00"));
 
         assertThat(result.getEventType()).isEqualTo("TransactionDeclined");
-        assertThat(result.getReasonCode()).isEqualTo(ReasonCode.CARD_NOT_ACTIVE.name());
+        assertThat(result.getPayload().getReasonCode()).isEqualTo(ReasonCode.CARD_NOT_ACTIVE.name());
     }
 
     @Test
     void shouldReturnFailedEventForFailedOutcome() {
         UUID txId = UUID.randomUUID();
         TransactionInitiatedEvent event = buildEvent("vault:v1:tok", "100.00");
-        event.setTransactionId(txId);
+        event.getPayload().setTransactionId(txId);
         when(authorizationRecordRepository.save(any())).thenAnswer(i -> i.getArgument(0));
 
         AuthorizationResultEvent result = authorizationService.persistAndReturn(
-                event, AuthorizationOutcome.FAILED, ReasonCode.INTERNAL_ERROR);
+                event.getPayload(), AuthorizationOutcome.FAILED, ReasonCode.INTERNAL_ERROR);
 
         assertThat(result.getEventType()).isEqualTo("TransactionFailed");
-        assertThat(result.getReasonCode()).isEqualTo(ReasonCode.INTERNAL_ERROR.name());
-        assertThat(result.getTransactionId()).isEqualTo(txId);
+        assertThat(result.getPayload().getReasonCode()).isEqualTo(ReasonCode.INTERNAL_ERROR.name());
+        assertThat(result.getPayload().getTransactionId()).isEqualTo(txId);
     }
 
     @Test
@@ -127,7 +127,7 @@ class AuthorizationServiceTest {
         AuthorizationResultEvent result = authorizationService.authorize(buildEvent("vault:v1:unknown", "100.00"));
 
         assertThat(result.getEventType()).isEqualTo("TransactionDeclined");
-        assertThat(result.getReasonCode()).isEqualTo(ReasonCode.INVALID_CARD.name());
+        assertThat(result.getPayload().getReasonCode()).isEqualTo(ReasonCode.INVALID_CARD.name());
         verify(cardAccountRepository, never()).save(any());
     }
 
@@ -145,11 +145,15 @@ class AuthorizationServiceTest {
         TransactionInitiatedEvent event = new TransactionInitiatedEvent();
         event.setEventId(UUID.randomUUID().toString());
         event.setEventType("TransactionInitiated");
-        event.setTransactionId(UUID.randomUUID());
-        event.setCardToken(token);
-        event.setAmount(new BigDecimal(amount));
-        event.setCurrencyCode("USD");
-        event.setOccurredAt(Instant.now());
+        TransactionInitiatedEvent.Payload payload = new TransactionInitiatedEvent.Payload();
+        payload.setTransactionId(UUID.randomUUID());
+        payload.setCardToken(token);
+        payload.setMaskedCardNumber("****-****-****-1111");
+        payload.setCardholderName("Jane Smith");
+        payload.setAmount(new BigDecimal(amount));
+        payload.setCurrencyCode("USD");
+        payload.setMerchantId("merchant-1");
+        event.setPayload(payload);
         return event;
     }
 }

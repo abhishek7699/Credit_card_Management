@@ -41,6 +41,16 @@ grpc:
     transaction-service:
       address: ${TRANSACTION_SERVICE_GRPC_ADDRESS:static://transaction-service:9090}
       negotiation-type: plaintext
+      enable-keep-alive: true
+      keep-alive-without-calls: true
+      keep-alive-time: 30s
+      keep-alive-timeout: 5s
+
+gateway:
+  grpc:
+    warmup:
+      timeout: 120s
+      poll-interval: 2s
 
 resilience4j:
   circuitbreaker:

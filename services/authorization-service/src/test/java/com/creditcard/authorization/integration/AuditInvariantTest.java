@@ -55,7 +55,7 @@ import static org.awaitility.Awaitility.await;
 @SpringBootTest
 @EmbeddedKafka(
     partitions = 1,
-    topics = {"transaction.initiated", "transaction.status.updated"},
+    topics = {"transaction.initiated", "transaction.status.updated", "transaction.authorized"},
     bootstrapServersProperty = "spring.kafka.bootstrap-servers"
 )
 @Testcontainers
@@ -223,11 +223,17 @@ class AuditInvariantTest {
         TransactionInitiatedEvent event = new TransactionInitiatedEvent();
         event.setEventId(eventId);
         event.setEventType("TransactionInitiated");
-        event.setTransactionId(txId);
-        event.setCardToken(token);
-        event.setAmount(new BigDecimal(amount));
-        event.setCurrencyCode("USD");
+        event.setSourceService("transaction-service");
         event.setOccurredAt(Instant.now());
+        TransactionInitiatedEvent.Payload payload = new TransactionInitiatedEvent.Payload();
+        payload.setTransactionId(txId);
+        payload.setCardToken(token);
+        payload.setMaskedCardNumber("****-****-****-1111");
+        payload.setCardholderName("Jane Smith");
+        payload.setAmount(new BigDecimal(amount));
+        payload.setCurrencyCode("USD");
+        payload.setMerchantId("merchant-audit");
+        event.setPayload(payload);
         return event;
     }
 }

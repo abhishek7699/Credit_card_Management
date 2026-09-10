@@ -53,10 +53,28 @@ services:
       VAULT_DEV_ROOT_TOKEN_ID: dev-root-token
       VAULT_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
       VAULT_ADDR: http://127.0.0.1:8200
+      VAULT_TOKEN: dev-root-token
     ports:
       - "8200:8200"
+    # Start the dev server, then provision the transit secrets engine and the
+    # card-pan-key encryption key that transaction-service's TokenizationService
+    # requires (see specs/001-transaction-service/research.md). The key is
+    # convergent + derived so the same PAN + context always yields the same
+    # ciphertext — authorization-service uses the card token as a lookup key and
+    # the e2e harness seeds a matching card_accounts row. The dev server is
+    # in-memory, so this must run on every container start.
+    command:
+      - sh
+      - -c
+      - |
+        vault server -dev -dev-listen-address=0.0.0.0:8200 &
+        until vault status >/dev/null 2>&1; do sleep 1; done
+        vault secrets enable transit 2>/dev/null || true
+        vault write transit/keys/card-pan-key type=aes256-gcm96 convergent_encryption=true derived=true
+        wait
     healthcheck:
-      test: ["CMD", "vault", "status"]
+      # Healthy only once the transit key exists, so dependents wait for provisioning.
+      test: ["CMD", "sh", "-c", "vault status >/dev/null 2>&1 && vault read transit/keys/card-pan-key >/dev/null 2>&1"]
       interval: 5s
       timeout: 5s
       retries: 15

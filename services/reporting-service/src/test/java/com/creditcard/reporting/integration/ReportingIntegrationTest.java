@@ -87,6 +87,29 @@ class ReportingIntegrationTest {
     }
 
     @Test
+    void getTransactionById_found_returns200WithMaskedCard() {
+        saveTx("tx-byid", "tok-card-Z", "merchant-001", "99.99", "AUTHORIZED",
+                Instant.parse("2026-06-01T10:00:00Z"));
+
+        ResponseEntity<TransactionResponse> response =
+                restTemplate.getForEntity(base() + "/transactions/tx-byid", TransactionResponse.class);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody().getTransactionId()).isEqualTo("tx-byid");
+        assertThat(response.getBody().getMaskedCardNumber()).isEqualTo("4111-****-****-1111");
+        assertThat(response.getBody().getStatus()).isEqualTo("AUTHORIZED");
+    }
+
+    @Test
+    void getTransactionById_notFound_returns404() {
+        ResponseEntity<String> response =
+                restTemplate.getForEntity(base() + "/transactions/does-not-exist", String.class);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(response.getBody()).contains("does-not-exist");
+    }
+
+    @Test
     void scenario_1_2_filterByMerchantId_returnsOnlyThatMerchant() {
         saveTx("tx-m1a", "tok-1", "merchant-001", "100.00", "AUTHORIZED",
                 Instant.parse("2026-06-01T10:00:00Z"));

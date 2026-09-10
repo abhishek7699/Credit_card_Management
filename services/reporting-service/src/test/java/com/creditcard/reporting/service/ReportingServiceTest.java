@@ -87,6 +87,32 @@ class ReportingServiceTest {
     }
 
     @Test
+    void getTransaction_found_returnsMappedResponse() {
+        SettlementTransaction tx = new SettlementTransaction();
+        tx.setTransactionId("tx-77");
+        tx.setMaskedCardNumber("****-****-****-1111");
+        tx.setStatus("AUTHORIZED");
+        tx.setMerchantId("merchant-1");
+        tx.setAmount(new BigDecimal("99.99"));
+        when(txRepository.findById("tx-77")).thenReturn(Optional.of(tx));
+
+        TransactionResponse response = reportingService.getTransaction("tx-77");
+
+        assertThat(response.getTransactionId()).isEqualTo("tx-77");
+        assertThat(response.getMaskedCardNumber()).isEqualTo("****-****-****-1111");
+        assertThat(response.getStatus()).isEqualTo("AUTHORIZED");
+    }
+
+    @Test
+    void getTransaction_notFound_throwsResourceNotFoundException() {
+        when(txRepository.findById("ghost")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> reportingService.getTransaction("ghost"))
+                .isInstanceOf(ResourceNotFoundException.class)
+                .hasMessageContaining("ghost");
+    }
+
+    @Test
     void getTransactions_within90Days_doesNotThrow() {
         Instant from = Instant.parse("2026-04-01T00:00:00Z");
         Instant to = Instant.parse("2026-06-01T00:00:00Z"); // 61 days — valid

@@ -1,7 +1,10 @@
 package com.creditcard.transaction.event;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+
 import java.time.Instant;
 
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class StatusUpdateEvent {
 
     private String eventId;
@@ -31,6 +34,7 @@ public class StatusUpdateEvent {
     public Payload getPayload() { return payload; }
     public void setPayload(Payload payload) { this.payload = payload; }
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     public static class Payload {
         private String transactionId;
         private String reason;
