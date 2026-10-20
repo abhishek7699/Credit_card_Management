@@ -122,9 +122,14 @@ class TransactionNotificationIntegrationTest {
         TransactionStatusEvent e = new TransactionStatusEvent();
         e.setEventId(eventId);
         e.setEventType("TransactionAuthorized");
-        e.setTransactionId(UUID.randomUUID().toString());
-        e.setCardToken(CARD_TOKEN);
+        e.setSourceService("authorization-service");
         e.setOccurredAt(Instant.now());
+
+        TransactionStatusEvent.Payload payload = new TransactionStatusEvent.Payload();
+        payload.setTransactionId(UUID.randomUUID().toString());
+        payload.setCardToken(CARD_TOKEN);
+        payload.setOutcome("AUTHORIZED");
+        e.setPayload(payload);
         return e;
     }
 
@@ -159,10 +164,14 @@ class TransactionNotificationIntegrationTest {
         TransactionStatusEvent event = new TransactionStatusEvent();
         event.setEventId(UUID.randomUUID().toString());
         event.setEventType("TransactionDeclined");
-        event.setTransactionId(UUID.randomUUID().toString());
-        event.setCardToken(CARD_TOKEN);
-        event.setReasonCode("INSUFFICIENT_CREDIT");
         event.setOccurredAt(Instant.now());
+
+        TransactionStatusEvent.Payload payload = new TransactionStatusEvent.Payload();
+        payload.setTransactionId(UUID.randomUUID().toString());
+        payload.setCardToken(CARD_TOKEN);
+        payload.setOutcome("DECLINED");
+        payload.setReasonCode("INSUFFICIENT_CREDIT");
+        event.setPayload(payload);
 
         txStatusKafkaTemplate.send("transaction.status.updated", event).get();
 

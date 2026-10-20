@@ -9,7 +9,6 @@ import com.creditcard.frauddetection.repository.TransactionRecordRepository;
 import com.creditcard.frauddetection.rules.FraudRule;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.slf4j.MDC;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -44,12 +43,14 @@ public class FraudDetectionService {
                 .map(Optional::get)
                 .collect(Collectors.toList());
 
+        TransactionInitiatedEvent.Payload payload = event.getPayload();
+
         TransactionRecord record = new TransactionRecord();
         record.setId(UUID.randomUUID());
-        record.setTransactionId(event.getTransactionId());
-        record.setCardToken(event.getCardToken());
-        record.setAmount(event.getAmount());
-        record.setCurrencyCode(event.getCurrencyCode());
+        record.setTransactionId(payload.getTransactionId());
+        record.setCardToken(payload.getCardToken());
+        record.setAmount(payload.getAmount());
+        record.setCurrencyCode(payload.getCurrencyCode());
         record.setOccurredAt(event.getOccurredAt());
         transactionRecordRepository.save(record);
 
@@ -59,21 +60,21 @@ public class FraudDetectionService {
 
         FraudAlert alert = new FraudAlert();
         alert.setId(UUID.randomUUID());
-        alert.setTransactionId(event.getTransactionId());
-        alert.setCardToken(event.getCardToken());
-        alert.setAmount(event.getAmount());
-        alert.setCurrencyCode(event.getCurrencyCode());
+        alert.setTransactionId(payload.getTransactionId());
+        alert.setCardToken(payload.getCardToken());
+        alert.setAmount(payload.getAmount());
+        alert.setCurrencyCode(payload.getCurrencyCode());
         alert.setTriggeredRules(triggered);
         alert.setDetectedAt(Instant.now());
         FraudAlert saved = fraudAlertRepository.save(alert);
 
         return Optional.of(FraudAlertRaisedEvent.of(
                 saved.getId(),
-                event.getTransactionId(),
-                event.getCardToken(),
+                payload.getTransactionId(),
+                payload.getCardToken(),
                 triggered,
                 saved.getDetectedAt(),
-                MDC.get("traceId")
+                event.getTraceId()
         ));
     }
 

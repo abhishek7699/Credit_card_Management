@@ -11,14 +11,23 @@
 
 ## Consumed Event Schema
 
+The event is an envelope with the business fields nested under `payload`, matching the
+contract authorization-service's `AuthorizationResultEvent` actually publishes (see
+specs/002-authorization-service/contracts/kafka-events.md):
+
 ```json
 {
   "eventId": "string (UUID as string)",
   "eventType": "string — one of: TransactionAuthorized | TransactionDeclined | TransactionFailed",
-  "transactionId": "string (UUID)",
-  "cardToken": "string (opaque vault token, never a raw PAN)",
-  "reasonCode": "string | null — null when eventType=TransactionAuthorized; e.g., INSUFFICIENT_CREDIT, INVALID_CARD, CARD_NOT_ACTIVE when declined/failed",
-  "occurredAt": "ISO-8601 timestamp"
+  "sourceService": "string — always \"authorization-service\"",
+  "traceId": "string | null — Micrometer trace ID",
+  "occurredAt": "ISO-8601 timestamp",
+  "payload": {
+    "transactionId": "string (UUID)",
+    "cardToken": "string (opaque vault token, never a raw PAN)",
+    "outcome": "string — one of: AUTHORIZED | DECLINED | FAILED",
+    "reasonCode": "string | null — null when outcome=AUTHORIZED; e.g., INSUFFICIENT_CREDIT, INVALID_CARD, CARD_NOT_ACTIVE when declined/failed"
+  }
 }
 ```
 
@@ -27,10 +36,15 @@
 {
   "eventId": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
   "eventType": "TransactionAuthorized",
-  "transactionId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-  "cardToken": "vault:v1:tok_abc123",
-  "reasonCode": null,
-  "occurredAt": "2026-06-12T14:30:00Z"
+  "sourceService": "authorization-service",
+  "traceId": "64c6f34a2b8e4d9f",
+  "occurredAt": "2026-06-12T14:30:00Z",
+  "payload": {
+    "transactionId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+    "cardToken": "vault:v1:tok_abc123",
+    "outcome": "AUTHORIZED",
+    "reasonCode": null
+  }
 }
 ```
 
@@ -39,10 +53,15 @@
 {
   "eventId": "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
   "eventType": "TransactionDeclined",
-  "transactionId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-  "cardToken": "vault:v1:tok_abc123",
-  "reasonCode": "INSUFFICIENT_CREDIT",
-  "occurredAt": "2026-06-12T14:30:01Z"
+  "sourceService": "authorization-service",
+  "traceId": "64c6f34a2b8e4d9f",
+  "occurredAt": "2026-06-12T14:30:01Z",
+  "payload": {
+    "transactionId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+    "cardToken": "vault:v1:tok_abc123",
+    "outcome": "DECLINED",
+    "reasonCode": "INSUFFICIENT_CREDIT"
+  }
 }
 ```
 
@@ -50,7 +69,8 @@
 
 ## Idempotency Key
 
-Format: `notif:{eventType}:{eventId}`
+Format: `notif:{eventType}:{eventId}` — both fields stay top-level envelope fields, so this
+key is unaffected by the envelope shape.
 
 Example: `notif:TransactionAuthorized:f47ac10b-58cc-4372-a567-0e02b2c3d479`
 
@@ -58,7 +78,8 @@ Example: `notif:TransactionAuthorized:f47ac10b-58cc-4372-a567-0e02b2c3d479`
 
 ## Processing Rules
 
-1. If `eventId` or `transactionId` is null → discard, log WARN, ack offset, no record created.
+1. If `eventId` is null, or `payload` is null, or `payload.transactionId` is null →
+   discard, log WARN, ack offset, no record created.
 2. Check `processed_events` for the idempotency key. If found → skip, ack offset.
 3. Look up `CardholderContact` by `cardToken`. If not found → ack offset, log WARN, no notification.
 4. If `transaction_notifications_enabled = false` → ack offset, no notification (transaction events only; fraud alerts bypass this).

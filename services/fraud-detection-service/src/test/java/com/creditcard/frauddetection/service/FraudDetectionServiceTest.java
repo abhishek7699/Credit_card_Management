@@ -134,11 +134,16 @@ class FraudDetectionServiceTest {
         TransactionInitiatedEvent event = new TransactionInitiatedEvent();
         event.setEventId(UUID.randomUUID().toString());
         event.setEventType("TransactionInitiated");
-        event.setTransactionId(UUID.randomUUID());
-        event.setCardToken("vault:v1:tok");
-        event.setAmount(new BigDecimal("100.00"));
-        event.setCurrencyCode("USD");
+        event.setSourceService("transaction-service");
+        event.setTraceId("trace-001");
         event.setOccurredAt(Instant.now());
+
+        TransactionInitiatedEvent.Payload payload = new TransactionInitiatedEvent.Payload();
+        payload.setTransactionId(UUID.randomUUID());
+        payload.setCardToken("vault:v1:tok");
+        payload.setAmount(new BigDecimal("100.00"));
+        payload.setCurrencyCode("USD");
+        event.setPayload(payload);
         return event;
     }
 }

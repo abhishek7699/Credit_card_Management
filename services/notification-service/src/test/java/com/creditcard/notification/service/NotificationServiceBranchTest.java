@@ -59,7 +59,9 @@ class NotificationServiceBranchTest {
         NotificationService svc = service();
         TransactionStatusEvent event = new TransactionStatusEvent();
         event.setEventId(null);
-        event.setTransactionId("tx-001");
+        TransactionStatusEvent.Payload payload = new TransactionStatusEvent.Payload();
+        payload.setTransactionId("tx-001");
+        event.setPayload(payload);
 
         svc.processTransactionEvent(event);
 
@@ -67,11 +69,26 @@ class NotificationServiceBranchTest {
     }
 
     @Test
-    void txEvent_nullTransactionId_discarded() {
+    void txEvent_nullPayload_discarded() {
         NotificationService svc = service();
         TransactionStatusEvent event = new TransactionStatusEvent();
         event.setEventId("e-001");
-        event.setTransactionId(null);
+        // payload intentionally left unset — this is the exact shape produced when a
+        // flat (pre-envelope) consumer binds an enveloped message.
+
+        svc.processTransactionEvent(event);
+
+        verify(processedEventRepo, never()).insertIfAbsent(anyString());
+    }
+
+    @Test
+    void txEvent_payloadTransactionIdNull_discarded() {
+        NotificationService svc = service();
+        TransactionStatusEvent event = new TransactionStatusEvent();
+        event.setEventId("e-001");
+        TransactionStatusEvent.Payload payload = new TransactionStatusEvent.Payload();
+        // transactionId intentionally left unset
+        event.setPayload(payload);
 
         svc.processTransactionEvent(event);
 
@@ -151,8 +168,10 @@ class NotificationServiceBranchTest {
         TransactionStatusEvent event = new TransactionStatusEvent();
         event.setEventId("e-throw");
         event.setEventType("TransactionAuthorized");
-        event.setTransactionId("tx-throw");
-        event.setCardToken("vault:v1:tok");
+        TransactionStatusEvent.Payload payload = new TransactionStatusEvent.Payload();
+        payload.setTransactionId("tx-throw");
+        payload.setCardToken("vault:v1:tok");
+        event.setPayload(payload);
 
         svc.processTransactionEvent(event);
 
@@ -181,8 +200,10 @@ class NotificationServiceBranchTest {
         TransactionStatusEvent event = new TransactionStatusEvent();
         event.setEventId("e-sms-only");
         event.setEventType("TransactionAuthorized");
-        event.setTransactionId("tx-sms-only");
-        event.setCardToken("vault:v1:tok");
+        TransactionStatusEvent.Payload payload = new TransactionStatusEvent.Payload();
+        payload.setTransactionId("tx-sms-only");
+        payload.setCardToken("vault:v1:tok");
+        event.setPayload(payload);
 
         svc.processTransactionEvent(event);
 
@@ -206,8 +227,10 @@ class NotificationServiceBranchTest {
         TransactionStatusEvent event = new TransactionStatusEvent();
         event.setEventId("e-sent");
         event.setEventType("TransactionAuthorized");
-        event.setTransactionId("tx-sent");
-        event.setCardToken("vault:v1:tok");
+        TransactionStatusEvent.Payload payload = new TransactionStatusEvent.Payload();
+        payload.setTransactionId("tx-sent");
+        payload.setCardToken("vault:v1:tok");
+        event.setPayload(payload);
 
         svc.processTransactionEvent(event);
 

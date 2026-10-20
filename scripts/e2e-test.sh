@@ -11,6 +11,8 @@ GW_MGMT=8088
 TXN_GRPC=9090
 TXN_MGMT=8081
 AUTH_MGMT=8082
+FRAUD_MGMT=8083
+NOTIF_MGMT=8084
 SETTLE_MGMT=8085
 REPORT_PORT=8086
 REPORT_MGMT=8091
@@ -77,10 +79,12 @@ step2_health_checks() {
   info "Step 2 — Waiting for all services to be healthy"
   local ok=1
 
-  wait_http "api-gateway"          "http://localhost:${GW_MGMT}/actuator/health"     180 || { fail "Step 2 — api-gateway unhealthy";          ok=0; }
-  wait_http "transaction-service"  "http://localhost:${TXN_MGMT}/actuator/health"    180 || { fail "Step 2 — transaction-service unhealthy";   ok=0; }
-  wait_http "reporting-service"    "http://localhost:${REPORT_MGMT}/actuator/health" 180 || { fail "Step 2 — reporting-service unhealthy";     ok=0; }
-  wait_http "settlement-service"   "http://localhost:${SETTLE_MGMT}/actuator/health" 180 || { fail "Step 2 — settlement-service unhealthy";    ok=0; }
+  wait_http "api-gateway"             "http://localhost:${GW_MGMT}/actuator/health"     180 || { fail "Step 2 — api-gateway unhealthy";             ok=0; }
+  wait_http "transaction-service"     "http://localhost:${TXN_MGMT}/actuator/health"    180 || { fail "Step 2 — transaction-service unhealthy";      ok=0; }
+  wait_http "fraud-detection-service" "http://localhost:${FRAUD_MGMT}/actuator/health"  180 || { fail "Step 2 — fraud-detection-service unhealthy";  ok=0; }
+  wait_http "notification-service"    "http://localhost:${NOTIF_MGMT}/actuator/health"  180 || { fail "Step 2 — notification-service unhealthy";     ok=0; }
+  wait_http "reporting-service"       "http://localhost:${REPORT_MGMT}/actuator/health" 180 || { fail "Step 2 — reporting-service unhealthy";        ok=0; }
+  wait_http "settlement-service"      "http://localhost:${SETTLE_MGMT}/actuator/health" 180 || { fail "Step 2 — settlement-service unhealthy";       ok=0; }
 
   [[ $ok -eq 1 ]] && pass "Step 2 — All services healthy"
 }
@@ -118,7 +122,32 @@ seed_card_account() {
      VALUES ('${ciphertext}', 'ACTIVE', 100000.0000, 100000.0000, 'USD')
      ON CONFLICT (card_token) DO NOTHING;" >/dev/null
 
+  # Exported so other seed steps (notification-service's cardholder_contacts) can
+  # reuse the exact same token without re-deriving it from Vault.
+  CARD_TOKEN="${ciphertext}"
+  export CARD_TOKEN
+
   info "Card account seeded (token ${ciphertext:0:20}…)"
+}
+
+# ── Cardholder-contact seed ───────────────────────────────────────────────────
+# notification-service looks up notification_service.cardholder_contacts by the
+# same card token before it will write a notification_records row — with no
+# matching contact it records the idempotency key and returns silently (by
+# design, so a legitimately unregistered card never leaks a notification).
+# Seed a contact for the e2e test card so the new Step 11 check has something
+# to find.
+seed_cardholder_contact() {
+  info "Seeding notification_service.cardholder_contacts for the e2e test card"
+
+  docker compose -f "${COMPOSE_FILE}" exec -T cockroachdb \
+    cockroach sql --insecure --database=defaultdb -e \
+    "INSERT INTO notification_service.cardholder_contacts
+       (card_token, masked_card_number, email, phone_number, transaction_notifications_enabled)
+     VALUES ('${CARD_TOKEN}', '****-****-****-1111', 'e2e-test@example.com', '+15555550123', true)
+     ON CONFLICT (card_token) DO NOTHING;" >/dev/null
+
+  info "Cardholder contact seeded"
 }
 
 # ── Auth-service mock ─────────────────────────────────────────────────────────
@@ -510,6 +539,51 @@ step10_settlement() {
   fail "Step 10 — Transaction did not reach SETTLED within ${max}s (last status=${final_status})"
 }
 
+# ── Step 11: Fraud evaluation + notification records ─────────────────────────
+# Regression guard for the fraud-detection-service / notification-service Kafka
+# envelope migration: both services used to bind every field of the incoming
+# envelope event to null and silently discard it, so neither ever wrote a
+# record for a real payment. This queries CockroachDB directly (there is no
+# REST endpoint for either record type) so that bug can never come back
+# unnoticed.
+step11_fraud_and_notification_records() {
+  info "Step 11 — Verifying fraud evaluation and notification records for transaction ${TXN_ID}"
+
+  local max=30 interval=2 elapsed=0
+  local fraud_count=0 notif_count=0
+
+  while [[ $elapsed -lt $max ]]; do
+    fraud_count=$(docker compose -f "${COMPOSE_FILE}" exec -T cockroachdb \
+      cockroach sql --insecure --database=defaultdb -e \
+      "SELECT count(*) FROM fraud_detection_service.transaction_records WHERE transaction_id = '${TXN_ID}';" \
+      2>/dev/null | tail -1 | tr -d '[:space:]')
+    notif_count=$(docker compose -f "${COMPOSE_FILE}" exec -T cockroachdb \
+      cockroach sql --insecure --database=defaultdb -e \
+      "SELECT count(*) FROM notification_service.notification_records WHERE content LIKE '%${TXN_ID}%';" \
+      2>/dev/null | tail -1 | tr -d '[:space:]')
+
+    if [[ "${fraud_count:-0}" =~ ^[0-9]+$ && "${notif_count:-0}" =~ ^[0-9]+$ \
+          && "${fraud_count}" -ge 1 && "${notif_count}" -ge 1 ]]; then
+      break
+    fi
+
+    elapsed=$((elapsed + interval))
+    sleep "$interval"
+  done
+
+  if [[ "${fraud_count:-0}" =~ ^[0-9]+$ && "${fraud_count}" -ge 1 ]]; then
+    pass "Step 11 — Fraud evaluation record found (fraud_detection_service.transaction_records, transaction_id=${TXN_ID})"
+  else
+    fail "Step 11 — No fraud evaluation record found for transaction ${TXN_ID}"
+  fi
+
+  if [[ "${notif_count:-0}" =~ ^[0-9]+$ && "${notif_count}" -ge 1 ]]; then
+    pass "Step 11 — Notification record found (notification_service.notification_records, references ${TXN_ID})"
+  else
+    fail "Step 11 — No notification record found referencing transaction ${TXN_ID}"
+  fi
+}
+
 # ── Cleanup ───────────────────────────────────────────────────────────────────
 cleanup() {
   info "Cleaning up auth-service mock container"
@@ -562,6 +636,7 @@ main() {
   sleep 15
 
   seed_card_account
+  seed_cardholder_contact
   setup_auth_mock
 
   step3_obtain_jwt
@@ -572,6 +647,7 @@ main() {
   step8_circuit_breaker
   step9_reporting_query
   step10_settlement
+  step11_fraud_and_notification_records
 
   print_summary
 }

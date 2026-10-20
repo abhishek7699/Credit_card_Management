@@ -43,8 +43,8 @@ public class TransactionInitiatedListener {
                 return;
             }
 
-            if (event.getTransactionId() == null) {
-                log.warn("Received event with null transactionId eventId={}, discarding", event.getEventId());
+            if (event.getPayload() == null || event.getPayload().getTransactionId() == null) {
+                log.warn("Received event with null or invalid payload eventId={}, discarding", event.getEventId());
                 return;
             }
 

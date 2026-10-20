@@ -50,19 +50,20 @@ class TransactionInitiatedListenerTest {
     void shouldPublishAlertAndAckWhenFraudDetected() {
         TransactionInitiatedEvent event = buildEvent("evt-001");
         String idempotencyKey = "fraud:TransactionInitiated:evt-001";
-        FraudAlertRaisedEvent alertEvent = buildAlertEvent(event.getTransactionId());
+        UUID transactionId = event.getPayload().getTransactionId();
+        FraudAlertRaisedEvent alertEvent = buildAlertEvent(transactionId);
 
         when(idempotencyService.buildKey("TransactionInitiated", "evt-001")).thenReturn(idempotencyKey);
         when(idempotencyService.isDuplicate(idempotencyKey)).thenReturn(false);
         when(fraudDetectionService.evaluate(event)).thenReturn(Optional.of(alertEvent));
 
         ConsumerRecord<String, TransactionInitiatedEvent> record = new ConsumerRecord<>(
-                "transaction.initiated", 0, 0L, event.getTransactionId().toString(), event);
+                "transaction.initiated", 0, 0L, transactionId.toString(), event);
 
         listener.onMessage(record, acknowledgment);
 
         ArgumentCaptor<FraudAlertRaisedEvent> captor = ArgumentCaptor.forClass(FraudAlertRaisedEvent.class);
-        verify(kafkaTemplate).send(eq("fraud.alert.raised"), eq(event.getTransactionId().toString()), captor.capture());
+        verify(kafkaTemplate).send(eq("fraud.alert.raised"), eq(transactionId.toString()), captor.capture());
         assertThat(captor.getValue().getEventType()).isEqualTo("FraudAlertRaised");
         verify(acknowledgment).acknowledge();
     }
@@ -71,13 +72,14 @@ class TransactionInitiatedListenerTest {
     void shouldNotPublishAndAckWhenCleanTransaction() {
         TransactionInitiatedEvent event = buildEvent("evt-clean");
         String idempotencyKey = "fraud:TransactionInitiated:evt-clean";
+        String transactionId = event.getPayload().getTransactionId().toString();
 
         when(idempotencyService.buildKey("TransactionInitiated", "evt-clean")).thenReturn(idempotencyKey);
         when(idempotencyService.isDuplicate(idempotencyKey)).thenReturn(false);
         when(fraudDetectionService.evaluate(event)).thenReturn(Optional.empty());
 
         ConsumerRecord<String, TransactionInitiatedEvent> record = new ConsumerRecord<>(
-                "transaction.initiated", 0, 1L, event.getTransactionId().toString(), event);
+                "transaction.initiated", 0, 1L, transactionId, event);
 
         listener.onMessage(record, acknowledgment);
 
@@ -89,12 +91,13 @@ class TransactionInitiatedListenerTest {
     void shouldSkipDuplicateEventAndAck() {
         TransactionInitiatedEvent event = buildEvent("evt-dup");
         String idempotencyKey = "fraud:TransactionInitiated:evt-dup";
+        String transactionId = event.getPayload().getTransactionId().toString();
 
         when(idempotencyService.buildKey("TransactionInitiated", "evt-dup")).thenReturn(idempotencyKey);
         when(idempotencyService.isDuplicate(idempotencyKey)).thenReturn(true);
 
         ConsumerRecord<String, TransactionInitiatedEvent> record = new ConsumerRecord<>(
-                "transaction.initiated", 0, 2L, event.getTransactionId().toString(), event);
+                "transaction.initiated", 0, 2L, transactionId, event);
 
         listener.onMessage(record, acknowledgment);
 
@@ -104,7 +107,7 @@ class TransactionInitiatedListenerTest {
     }
 
     @Test
-    void shouldDiscardAndAckWhenPayloadIsNull() {
+    void shouldDiscardAndAckWhenEventIsNull() {
         ConsumerRecord<String, TransactionInitiatedEvent> record = new ConsumerRecord<>(
                 "transaction.initiated", 0, 3L, "some-key", null);
 
@@ -116,11 +119,13 @@ class TransactionInitiatedListenerTest {
     }
 
     @Test
-    void shouldDiscardAndAckWhenTransactionIdIsNull() {
+    void shouldDiscardAndAckWhenPayloadIsNull() {
         TransactionInitiatedEvent event = new TransactionInitiatedEvent();
-        event.setEventId("evt-null-tx");
+        event.setEventId("evt-null-payload");
         event.setEventType("TransactionInitiated");
-        event.setCardToken("vault:v1:tok");
+        // payload intentionally left unset — this is the exact shape produced when a
+        // flat (pre-envelope) consumer binds an enveloped message: everything but the
+        // top-level eventId/eventType comes back null.
 
         ConsumerRecord<String, TransactionInitiatedEvent> record = new ConsumerRecord<>(
                 "transaction.initiated", 0, 4L, UUID.randomUUID().toString(), event);
@@ -133,16 +138,38 @@ class TransactionInitiatedListenerTest {
     }
 
     @Test
+    void shouldDiscardAndAckWhenPayloadTransactionIdIsNull() {
+        TransactionInitiatedEvent event = new TransactionInitiatedEvent();
+        event.setEventId("evt-null-tx");
+        event.setEventType("TransactionInitiated");
+
+        TransactionInitiatedEvent.Payload payload = new TransactionInitiatedEvent.Payload();
+        payload.setCardToken("vault:v1:tok");
+        // transactionId intentionally left unset
+        event.setPayload(payload);
+
+        ConsumerRecord<String, TransactionInitiatedEvent> record = new ConsumerRecord<>(
+                "transaction.initiated", 0, 5L, UUID.randomUUID().toString(), event);
+
+        listener.onMessage(record, acknowledgment);
+
+        verify(fraudDetectionService, never()).evaluate(any());
+        verify(kafkaTemplate, never()).send(anyString(), anyString(), any());
+        verify(acknowledgment).acknowledge();
+    }
+
+    @Test
     void shouldDiscardAndAckWhenServiceThrows() {
         TransactionInitiatedEvent event = buildEvent("evt-err");
         String idempotencyKey = "fraud:TransactionInitiated:evt-err";
+        String transactionId = event.getPayload().getTransactionId().toString();
 
         when(idempotencyService.buildKey("TransactionInitiated", "evt-err")).thenReturn(idempotencyKey);
         when(idempotencyService.isDuplicate(idempotencyKey)).thenReturn(false);
         when(fraudDetectionService.evaluate(event)).thenThrow(new RuntimeException("DB error"));
 
         ConsumerRecord<String, TransactionInitiatedEvent> record = new ConsumerRecord<>(
-                "transaction.initiated", 0, 5L, event.getTransactionId().toString(), event);
+                "transaction.initiated", 0, 6L, transactionId, event);
 
         listener.onMessage(record, acknowledgment);
 
@@ -154,11 +181,15 @@ class TransactionInitiatedListenerTest {
         TransactionInitiatedEvent event = new TransactionInitiatedEvent();
         event.setEventId(eventId);
         event.setEventType("TransactionInitiated");
-        event.setTransactionId(UUID.randomUUID());
-        event.setCardToken("vault:v1:tok");
-        event.setAmount(new BigDecimal("100.00"));
-        event.setCurrencyCode("USD");
+        event.setSourceService("transaction-service");
         event.setOccurredAt(Instant.now());
+
+        TransactionInitiatedEvent.Payload payload = new TransactionInitiatedEvent.Payload();
+        payload.setTransactionId(UUID.randomUUID());
+        payload.setCardToken("vault:v1:tok");
+        payload.setAmount(new BigDecimal("100.00"));
+        payload.setCurrencyCode("USD");
+        event.setPayload(payload);
         return event;
     }
 

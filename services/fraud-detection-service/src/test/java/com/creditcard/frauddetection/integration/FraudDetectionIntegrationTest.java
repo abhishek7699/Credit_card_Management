@@ -362,11 +362,15 @@ class FraudDetectionIntegrationTest {
         TransactionInitiatedEvent event = new TransactionInitiatedEvent();
         event.setEventId(eventId);
         event.setEventType("TransactionInitiated");
-        event.setTransactionId(txId);
-        event.setCardToken(token);
-        event.setAmount(new BigDecimal(amount));
-        event.setCurrencyCode("USD");
+        event.setSourceService("transaction-service");
         event.setOccurredAt(Instant.now());
+
+        TransactionInitiatedEvent.Payload payload = new TransactionInitiatedEvent.Payload();
+        payload.setTransactionId(txId);
+        payload.setCardToken(token);
+        payload.setAmount(new BigDecimal(amount));
+        payload.setCurrencyCode("USD");
+        event.setPayload(payload);
         return event;
     }
 

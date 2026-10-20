@@ -122,11 +122,14 @@ class AmountAnomalyRuleTest {
         TransactionInitiatedEvent event = new TransactionInitiatedEvent();
         event.setEventId(UUID.randomUUID().toString());
         event.setEventType("TransactionInitiated");
-        event.setTransactionId(UUID.randomUUID());
-        event.setCardToken(token);
-        event.setAmount(new BigDecimal(amount));
-        event.setCurrencyCode("USD");
         event.setOccurredAt(Instant.now());
+
+        TransactionInitiatedEvent.Payload payload = new TransactionInitiatedEvent.Payload();
+        payload.setTransactionId(UUID.randomUUID());
+        payload.setCardToken(token);
+        payload.setAmount(new BigDecimal(amount));
+        payload.setCurrencyCode("USD");
+        event.setPayload(payload);
         return event;
     }
 }

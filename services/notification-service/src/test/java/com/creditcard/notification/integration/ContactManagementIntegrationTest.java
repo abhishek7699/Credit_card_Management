@@ -179,9 +179,13 @@ class ContactManagementIntegrationTest {
         TransactionStatusEvent event = new TransactionStatusEvent();
         event.setEventId(UUID.randomUUID().toString());
         event.setEventType("TransactionAuthorized");
-        event.setTransactionId(UUID.randomUUID().toString());
-        event.setCardToken("vault:v1:tok_us3b");
         event.setOccurredAt(Instant.now());
+
+        TransactionStatusEvent.Payload payload = new TransactionStatusEvent.Payload();
+        payload.setTransactionId(UUID.randomUUID().toString());
+        payload.setCardToken("vault:v1:tok_us3b");
+        payload.setOutcome("AUTHORIZED");
+        event.setPayload(payload);
 
         contactTestTxKafkaTemplate.send("transaction.status.updated", event).get();
 
@@ -210,9 +214,13 @@ class ContactManagementIntegrationTest {
         TransactionStatusEvent txEvent = new TransactionStatusEvent();
         txEvent.setEventId(UUID.randomUUID().toString());
         txEvent.setEventType("TransactionAuthorized");
-        txEvent.setTransactionId(UUID.randomUUID().toString());
-        txEvent.setCardToken("vault:v1:tok_us3c");
         txEvent.setOccurredAt(Instant.now());
+
+        TransactionStatusEvent.Payload txPayload = new TransactionStatusEvent.Payload();
+        txPayload.setTransactionId(UUID.randomUUID().toString());
+        txPayload.setCardToken("vault:v1:tok_us3c");
+        txPayload.setOutcome("AUTHORIZED");
+        txEvent.setPayload(txPayload);
         contactTestTxKafkaTemplate.send("transaction.status.updated", txEvent).get();
 
         await().atMost(10, TimeUnit.SECONDS).untilAsserted(() ->

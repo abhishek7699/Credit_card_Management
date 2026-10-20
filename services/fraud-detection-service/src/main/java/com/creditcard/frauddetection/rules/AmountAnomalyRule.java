@@ -40,12 +40,12 @@ public class AmountAnomalyRule implements FraudRule {
         Instant cutoff = Instant.now().minus(params.lookbackDays(), ChronoUnit.DAYS);
 
         Optional<BigDecimal> avgOpt = transactionRecordRepository
-                .findAverageAmountByCardTokenAndOccurredAtAfter(event.getCardToken(), cutoff);
+                .findAverageAmountByCardTokenAndOccurredAtAfter(event.getPayload().getCardToken(), cutoff);
 
         BigDecimal baseline = avgOpt.orElse(params.absoluteCeiling());
         BigDecimal threshold = baseline.multiply(BigDecimal.valueOf(params.multiplier()));
 
-        if (event.getAmount().compareTo(threshold) > 0) {
+        if (event.getPayload().getAmount().compareTo(threshold) > 0) {
             return Optional.of(RULE_TYPE);
         }
         return Optional.empty();

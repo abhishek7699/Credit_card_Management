@@ -37,7 +37,8 @@ public class VelocityRule implements FraudRule {
 
         VelocityParams params = parseParams(configOpt.get().getParameters());
         Instant cutoff = Instant.now().minus(params.windowMinutes(), ChronoUnit.MINUTES);
-        long count = transactionRecordRepository.countByCardTokenAndOccurredAtAfter(event.getCardToken(), cutoff);
+        long count = transactionRecordRepository.countByCardTokenAndOccurredAtAfter(
+                event.getPayload().getCardToken(), cutoff);
 
         if (count >= params.maxTransactions()) {
             return Optional.of(RULE_TYPE);

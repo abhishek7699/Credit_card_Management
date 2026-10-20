@@ -29,7 +29,7 @@ public class BlacklistRule implements FraudRule {
             return Optional.empty();
         }
 
-        if (blacklistEntryRepository.existsByCardToken(event.getCardToken())) {
+        if (blacklistEntryRepository.existsByCardToken(event.getPayload().getCardToken())) {
             return Optional.of(RULE_TYPE);
         }
         return Optional.empty();

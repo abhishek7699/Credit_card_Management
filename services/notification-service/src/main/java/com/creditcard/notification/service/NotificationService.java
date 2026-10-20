@@ -42,8 +42,8 @@ public class NotificationService {
 
     @Transactional
     public void processTransactionEvent(TransactionStatusEvent event) {
-        if (event.getEventId() == null || event.getTransactionId() == null) {
-            log.warn("Discarding transaction event with null eventId or transactionId");
+        if (event.getEventId() == null || event.getPayload() == null || event.getPayload().getTransactionId() == null) {
+            log.warn("Discarding transaction event with null eventId, payload, or transactionId");
             return;
         }
 
@@ -54,7 +54,8 @@ public class NotificationService {
             return;
         }
 
-        Optional<CardholderContact> contactOpt = contactRepo.findById(event.getCardToken());
+        TransactionStatusEvent.Payload payload = event.getPayload();
+        Optional<CardholderContact> contactOpt = contactRepo.findById(payload.getCardToken());
         if (contactOpt.isEmpty()) {
             log.warn("No CardholderContact found for cardToken, skipping notification");
             return;
@@ -68,7 +69,7 @@ public class NotificationService {
 
         String last4 = last4(contact.getMaskedCardNumber());
         String subject = buildTransactionSubject(event.getEventType());
-        String body = buildTransactionBody(event.getEventType(), last4, event.getTransactionId(), event.getReasonCode());
+        String body = buildTransactionBody(event.getEventType(), last4, payload.getTransactionId(), payload.getReasonCode());
 
         List<NotificationRecord> records = buildPendingRecords(event.getEventId(), event.getEventType(), contact, subject, body);
         recordRepo.saveAll(records);
