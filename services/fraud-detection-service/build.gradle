@@ -54,7 +54,13 @@ jacoco {
 }
 
 jacocoTestReport {
-    dependsOn test
+    // Explicit dependency: afterEvaluate below rebuilds classDirectories from
+    // resolved File paths (via fileTree), which drops the implicit task
+    // dependency normally carried by sourceSets.main.output. Declare it
+    // explicitly so Gradle's task dependency validation doesn't flag this
+    // task for reading compileJava/processResources outputs without a
+    // declared dependency.
+    dependsOn test, compileJava, processResources
     reports {
         xml.required = true
         html.required = true

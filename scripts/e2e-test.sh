@@ -370,14 +370,20 @@ step6_pan_scan() {
 
 # ── Step 7: Rate limit test ───────────────────────────────────────────────────
 step7_rate_limit() {
-  info "Step 7 — Rate limit test (burst-capacity=20, sending 21 requests)"
+  info "Step 7 — Rate limit test (burst-capacity=20, sending 100 requests)"
 
   local -a pids=() codes=()
   local tmp_dir
   tmp_dir=$(mktemp -d)
 
-  # Send 21 concurrent requests
-  for i in $(seq 1 21); do
+  # Send 100 concurrent requests. Burst capacity is only 20, but the
+  # RedisRateLimiter is a continuously-refilling token bucket (replenish
+  # rate 10/sec), so on a slow/shared CI runner the server-side processing
+  # of a small burst can spread out enough for replenishment to cover a
+  # thin (1-request) deficit and let everything through with no 429s.
+  # Sending far more than the burst capacity keeps the test robust to that
+  # timing variance without touching the actual rate limiter config.
+  for i in $(seq 1 100); do
     {
       code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 \
         "http://localhost:${GW_PORT}/api/v1/transactions/${TXN_ID}" \
@@ -398,7 +404,7 @@ step7_rate_limit() {
   if [[ $count_429 -ge 1 ]]; then
     pass "Step 7 — Rate limiting triggered (${count_429} × 429 responses)"
   else
-    fail "Step 7 — No 429 responses received (burst-capacity=20, sent 21 requests)"
+    fail "Step 7 — No 429 responses received (burst-capacity=20, sent 100 requests)"
   fi
 }
 

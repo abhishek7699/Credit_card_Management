@@ -137,7 +137,12 @@ def filteredClassDirs = {
 }
 
 jacocoTestReport {
-    dependsOn test
+    // Explicit dependency: classDirectories below is rebuilt from a raw
+    // buildDir path string (via fileTree), which carries no implicit task
+    // dependency back to compileJava/processResources. Declare it
+    // explicitly so Gradle's task dependency validation doesn't flag this
+    // task for reading those tasks' outputs without a declared dependency.
+    dependsOn test, compileJava, processResources
     reports {
         xml.required = true
         html.required = true
