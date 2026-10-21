@@ -1,0 +1,100 @@
+# Vault — dev mode (stays dev mode for now, per the task). The container's own
+# startup script provisions the transit engine and the convergent card-pan-key,
+# matching docker-compose.yml's inline `command:` block exactly — same single
+# source of truth for that provisioning logic, just run here instead.
+#
+# The readinessProbe below is the same check as docker-compose.yml's healthcheck
+# (vault up AND the transit key exists) — this is deliberate: because a
+# Kubernetes Service only routes to Ready pods, every other service's
+# wait-for-vault initContainer gets correct dependency ordering for free, with
+# no vault-specific logic of its own.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vault
+  namespace: credit-card
+  labels:
+    app: vault
+    tier: infra
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vault
+  template:
+    metadata:
+      labels:
+        app: vault
+        tier: infra
+    spec:
+      containers:
+        - name: vault
+          image: hashicorp/vault:1.16
+          securityContext:
+            capabilities:
+              add: ["IPC_LOCK"]
+          env:
+            - name: VAULT_DEV_ROOT_TOKEN_ID
+              valueFrom:
+                secretKeyRef:
+                  name: vault-secrets
+                  key: VAULT_DEV_ROOT_TOKEN
+            - name: VAULT_DEV_LISTEN_ADDRESS
+              value: 0.0.0.0:8200
+            - name: VAULT_ADDR
+              value: http://127.0.0.1:8200
+            - name: VAULT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: vault-secrets
+                  key: VAULT_DEV_ROOT_TOKEN
+          command:
+            - sh
+            - -c
+            - |
+              vault server -dev -dev-listen-address=0.0.0.0:8200 &
+              until vault status >/dev/null 2>&1; do sleep 1; done
+              vault secrets enable transit 2>/dev/null || true
+              vault write transit/keys/card-pan-key type=aes256-gcm96 convergent_encryption=true derived=true
+              wait
+          ports:
+            - containerPort: 8200
+              name: http
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - vault status >/dev/null 2>&1 && vault read transit/keys/card-pan-key >/dev/null 2>&1
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 20
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "vault status >/dev/null 2>&1"]
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            failureThreshold: 6
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vault
+  namespace: credit-card
+  labels:
+    app: vault
+spec:
+  type: ClusterIP
+  selector:
+    app: vault
+  ports:
+    - name: http
+      port: 8200
+      targetPort: 8200

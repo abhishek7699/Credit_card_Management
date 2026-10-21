@@ -1,0 +1,99 @@
+# CockroachDB — single-node, insecure (matches docker-compose.yml's dev setup).
+#
+# Unlike docker-compose.yml (which uses an in-memory store, `--store=type=mem,...`,
+# so it never actually persists anything), this uses a disk-backed store on a
+# PersistentVolumeClaim so data survives pod restarts — the explicit ask for this
+# k8s rehearsal.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: cockroachdb-data
+  namespace: credit-card
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cockroachdb
+  namespace: credit-card
+  labels:
+    app: cockroachdb
+    tier: infra
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: cockroachdb
+  template:
+    metadata:
+      labels:
+        app: cockroachdb
+        tier: infra
+    spec:
+      containers:
+        - name: cockroachdb
+          image: cockroachdb/cockroach:v23.2.0
+          args:
+            - start-single-node
+            - --insecure
+            - "--store=path=/cockroach/cockroach-data"
+            - "--max-sql-memory=128MiB"
+            - "--log={file-defaults: {dir: /tmp}}"
+          ports:
+            - containerPort: 26257
+              name: sql
+            - containerPort: 8080
+              name: http
+          volumeMounts:
+            - name: data
+              mountPath: /cockroach/cockroach-data
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+          readinessProbe:
+            httpGet:
+              path: /health?ready=1
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 20
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            failureThreshold: 6
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: cockroachdb-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cockroachdb
+  namespace: credit-card
+  labels:
+    app: cockroachdb
+spec:
+  type: ClusterIP
+  selector:
+    app: cockroachdb
+  ports:
+    - name: sql
+      port: 26257
+      targetPort: 26257
+    - name: http
+      port: 8080
+      targetPort: 8080
