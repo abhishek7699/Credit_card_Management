@@ -13,13 +13,20 @@ spec:
       labels:
         app: settlement-service
     spec:
-      securityContext:
-        runAsNonRoot: true
-        runAsUser: 1000
-        fsGroup: 1000
+      initContainers:
+        - name: wait-for-cockroachdb
+          image: busybox:1.36
+          command: ['sh', '-c', 'until wget -qO- http://cockroachdb:8080/health?ready=1; do echo waiting for cockroachdb; sleep 2; done']
+        - name: wait-for-kafka
+          image: busybox:1.36
+          command: ['sh', '-c', 'until nc -z kafka 9092; do echo waiting for kafka; sleep 2; done']
       containers:
         - name: settlement-service
-          image: settlement-service:latest
+          image: credit-card/settlement-service:local
+          imagePullPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 999
           ports:
             - containerPort: 8080
               name: http
@@ -29,22 +36,30 @@ spec:
             - secretRef:
                 name: settlement-service-secrets
           env:
+            - name: JAVA_TOOL_OPTIONS
+              value: "-Xmx256m -XX:MaxMetaspaceSize=128m"
             - name: SETTLEMENT_INTERCHANGE_FEE_RATE
               value: "0.02"
             - name: SETTLEMENT_BATCH_CRON
               value: "0 59 23 * * *"
           resources:
             requests:
-              cpu: 250m
-              memory: 256Mi
+              cpu: 150m
+              memory: 384Mi
             limits:
               cpu: 500m
-              memory: 256Mi
+              memory: 512Mi
+          # initialDelaySeconds bumped from compose's original 30s: this service
+          # runs the heaviest Flyway migration set (the Spring Batch schema
+          # plus 4 more tables), which can exceed 30s under the CPU contention
+          # of every service starting at once -- observed one restart from
+          # exactly this during local testing (the retry was fast, since
+          # Flyway's own idempotency skips already-applied migrations).
           livenessProbe:
             httpGet:
               path: /actuator/health/liveness
               port: 8085
-            initialDelaySeconds: 30
+            initialDelaySeconds: 45
             periodSeconds: 10
             failureThreshold: 3
           readinessProbe:

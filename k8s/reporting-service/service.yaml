@@ -12,3 +12,7 @@ spec:
       port: 8086
       targetPort: 8086
       protocol: TCP
+    - name: management
+      port: 8091
+      targetPort: 8091
+      protocol: TCP
