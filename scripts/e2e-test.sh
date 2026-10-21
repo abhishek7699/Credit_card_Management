@@ -21,6 +21,16 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COMPOSE_FILE="${REPO_ROOT}/docker-compose.yml"
 PROTO_DIR="${REPO_ROOT}/proto"
 
+# Load local dev env vars (same ones docker-compose.yml reads) if present —
+# see .env.example. CI exports these directly as job env vars instead, so
+# this is a no-op there.
+if [[ -f "${REPO_ROOT}/.env" ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  source "${REPO_ROOT}/.env"
+  set +a
+fi
+
 AUTH_CONTAINER="auth-service"
 AUTH_MOCK_PORT=9000
 AUTH_NETWORK="credit_card_default"   # adjust if compose project name differs
@@ -105,7 +115,7 @@ seed_card_account() {
   ctx_b64=$(printf '%s' "${CARD_CONTEXT}" | base64 | tr -d '\n')
 
   ciphertext=$(curl -sf -X POST \
-    -H "X-Vault-Token: dev-root-token" \
+    -H "X-Vault-Token: ${VAULT_DEV_ROOT_TOKEN}" \
     -d "{\"plaintext\":\"${pan_b64}\",\"context\":\"${ctx_b64}\"}" \
     "http://localhost:8200/v1/transit/encrypt/card-pan-key" 2>/dev/null \
     | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['ciphertext'])" 2>/dev/null || echo "")
