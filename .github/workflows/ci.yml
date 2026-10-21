@@ -12,6 +12,14 @@ on:
 env:
   # Pin compose project name so the auth-mock network name is predictable
   COMPOSE_PROJECT_NAME: credit_card
+  # Same dev-only values from .env.example — not real secrets (see SECURITY.md:
+  # CockroachDB runs --insecure and ignores these; Vault dev mode just needs
+  # every service to agree on one token string). Supplied here directly,
+  # matching docker-compose.yml's ${DB_USERNAME}/${DB_PASSWORD}/${VAULT_DEV_ROOT_TOKEN}
+  # references and scripts/e2e-test.sh's own use of VAULT_DEV_ROOT_TOKEN.
+  DB_USERNAME: root
+  DB_PASSWORD: ""
+  VAULT_DEV_ROOT_TOKEN: dev-root-token
 
 jobs:
   build-test-e2e:
