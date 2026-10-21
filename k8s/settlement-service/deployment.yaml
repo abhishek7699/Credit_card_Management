@@ -49,17 +49,23 @@ spec:
             limits:
               cpu: 500m
               memory: 512Mi
-          # initialDelaySeconds bumped from compose's original 30s: this service
-          # runs the heaviest Flyway migration set (the Spring Batch schema
-          # plus 4 more tables), which can exceed 30s under the CPU contention
-          # of every service starting at once -- observed one restart from
-          # exactly this during local testing (the retry was fast, since
-          # Flyway's own idempotency skips already-applied migrations).
+          # See transaction-service/deployment.yaml for why: gives a slow
+          # cold start up to 5 minutes before the liveness probe's own
+          # tighter steady-state timing takes over. This service in
+          # particular runs the heaviest Flyway migration set (the Spring
+          # Batch schema plus 4 more tables), which was the first one
+          # observed hitting this under full-stack-cold-start contention.
+          startupProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8085
+            periodSeconds: 10
+            failureThreshold: 30
           livenessProbe:
             httpGet:
               path: /actuator/health/liveness
               port: 8085
-            initialDelaySeconds: 45
+            initialDelaySeconds: 30
             periodSeconds: 10
             failureThreshold: 3
           readinessProbe:

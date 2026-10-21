@@ -48,6 +48,15 @@ spec:
             limits:
               cpu: 500m
               memory: 512Mi
+          # See transaction-service/deployment.yaml for why: gives a slow
+          # cold start up to 5 minutes before the liveness probe's own
+          # tighter steady-state timing takes over.
+          startupProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8082
+            periodSeconds: 10
+            failureThreshold: 30
           livenessProbe:
             httpGet:
               path: /actuator/health/liveness

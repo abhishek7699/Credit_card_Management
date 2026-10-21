@@ -127,6 +127,18 @@ spec:
             limits:
               cpu: "500m"
               memory: "512Mi"
+          # Gives slow cold starts (observed: all 7 services starting at once
+          # on a single kind node can push JVM startup well past a minute
+          # under CPU contention) up to 5 minutes to pass readiness once,
+          # before the steady-state liveness probe's own tighter timing
+          # takes over -- without this, the liveness probe kills otherwise-
+          # healthy pods mid-startup.
+          startupProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8081
+            periodSeconds: 10
+            failureThreshold: 30
           livenessProbe:
             httpGet:
               path: /actuator/health/liveness
