@@ -119,15 +119,21 @@ kubectl create secret generic reporting-service-secrets -n "${NAMESPACE}" \
   --from-literal=SPRING_DATASOURCE_PASSWORD="${DB_PASSWORD}" \
   --dry-run=client -o yaml | kubectl apply -f -
 
-# AUTH_SERVICE_JWKS_URI points at host.docker.internal, not the compose-style
-# "auth-service" hostname: the JWT mock from scripts/e2e-test.sh runs as a
-# plain Docker container, not a cluster resource, and is only reachable from
-# inside kind's pods via Docker Desktop's host-gateway DNS. See the e2e script
-# and the plan notes for the Linux/portability caveat on this.
+# AUTH_SERVICE_JWKS_URI points at the in-cluster auth-mock Service
+# (k8s/infra/auth-mock.yaml), not a host-side Docker container reached via
+# host.docker.internal. That approach was tried first and is fundamentally
+# broken for repeat test runs: the mock's RSA keypair was regenerated on every
+# scripts/e2e-test.sh invocation, but api-gateway's JwtDecoder caches the JWKS
+# it fetches -- any run after the first against an already-warm gateway pod
+# failed JWT signature validation against the stale cached key (confirmed via
+# Spring Security DEBUG logs: BadJWSException: Invalid signature). The
+# in-cluster mock generates its keypair once at pod startup and keeps serving
+# the same one for its whole lifetime, matching the cluster's lifecycle --
+# this is what actually fixes it, not just where the mock happens to run.
 kubectl create secret generic api-gateway-secrets -n "${NAMESPACE}" \
   --from-literal=REDIS_HOST="redis" \
   --from-literal=REDIS_PORT="6379" \
-  --from-literal=AUTH_SERVICE_JWKS_URI="http://host.docker.internal:9000/.well-known/jwks.json" \
+  --from-literal=AUTH_SERVICE_JWKS_URI="http://auth-mock:9000/.well-known/jwks.json" \
   --from-literal=TRANSACTION_SERVICE_GRPC_ADDRESS="static://transaction-service:9090" \
   --from-literal=REPORTING_SERVICE_URL="http://reporting-service:8086" \
   --dry-run=client -o yaml | kubectl apply -f -

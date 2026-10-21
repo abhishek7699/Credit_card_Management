@@ -33,6 +33,34 @@ fi
 
 AUTH_CONTAINER="auth-service"
 AUTH_MOCK_PORT=9000
+
+# ── Target: docker compose (default) or a kind cluster brought up by
+#    scripts/k8s-up.sh ─────────────────────────────────────────────────────────
+TARGET="${E2E_TARGET:-compose}"
+K8S_NAMESPACE="credit-card"
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --target)
+      TARGET="$2"
+      shift 2
+      ;;
+    --target=*)
+      TARGET="${1#*=}"
+      shift
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+if [[ "${TARGET}" != "compose" && "${TARGET}" != "kind" ]]; then
+  echo "Unknown --target '${TARGET}' (expected 'compose' or 'kind')" >&2
+  exit 1
+fi
+
+# kubectl port-forward PIDs (kind mode only) -- declared unconditionally so
+# `set -u` doesn't choke on an empty array reference in compose mode.
+PF_PIDS=()
 AUTH_NETWORK="credit_card_default"   # adjust if compose project name differs
 
 # ── Colour helpers ────────────────────────────────────────────────────────────
@@ -63,8 +91,49 @@ check_prereqs() {
   grpcurl -version 2>&1 | head -1 || true
 }
 
+# ── kubectl port-forward helpers (kind mode only) ─────────────────────────────
+# Forwards the exact same host ports docker-compose already maps, so every
+# later step that just curls localhost:<port> needs no further changes.
+start_port_forward() {
+  local svc=$1; shift
+  kubectl port-forward -n "${K8S_NAMESPACE}" "svc/${svc}" "$@" >/dev/null 2>&1 &
+  PF_PIDS+=($!)
+}
+
+start_port_forwards() {
+  info "Starting kubectl port-forward for every service (--target kind)"
+  start_port_forward api-gateway "${GW_PORT}:8080" "${GW_MGMT}:8090"
+  start_port_forward transaction-service "${TXN_MGMT}:8081"
+  start_port_forward authorization-service "${AUTH_MGMT}:8082"
+  start_port_forward fraud-detection-service "${FRAUD_MGMT}:8083"
+  start_port_forward notification-service "${NOTIF_MGMT}:8084"
+  start_port_forward settlement-service "${SETTLE_MGMT}:8085"
+  start_port_forward reporting-service "${REPORT_PORT}:8086" "${REPORT_MGMT}:8091"
+  start_port_forward vault "8200:8200"
+  sleep 3
+}
+
+# Runs a cockroach SQL statement against the cluster's cockroachdb pod (kind)
+# or the compose service (compose) -- same callers, same output shape either way.
+run_cockroach_sql() {
+  local sql="$1"
+  if [[ "${TARGET}" == "kind" ]]; then
+    kubectl exec -n "${K8S_NAMESPACE}" deploy/cockroachdb -- \
+      cockroach sql --insecure --database=defaultdb -e "${sql}"
+  else
+    docker compose -f "${COMPOSE_FILE}" exec -T cockroachdb \
+      cockroach sql --insecure --database=defaultdb -e "${sql}"
+  fi
+}
+
 # ── Step 1: Start services ─────────────────────────────────────────────────────
 step1_start_services() {
+  if [[ "${TARGET}" == "kind" ]]; then
+    info "Step 1 — target=kind: assuming scripts/k8s-up.sh already brought the cluster up"
+    start_port_forwards
+    pass "Step 1 — kubectl port-forwards started"
+    return
+  fi
   info "Step 1 — Starting all services via Docker Compose"
   cd "${REPO_ROOT}"
   docker compose -f "${COMPOSE_FILE}" up -d --build 2>&1 | tail -5
@@ -125,8 +194,7 @@ seed_card_account() {
     return 1
   fi
 
-  docker compose -f "${COMPOSE_FILE}" exec -T cockroachdb \
-    cockroach sql --insecure --database=defaultdb -e \
+  run_cockroach_sql \
     "INSERT INTO authorization_service.card_accounts
        (card_token, status, credit_limit, available_credit, currency_code)
      VALUES ('${ciphertext}', 'ACTIVE', 100000.0000, 100000.0000, 'USD')
@@ -150,8 +218,7 @@ seed_card_account() {
 seed_cardholder_contact() {
   info "Seeding notification_service.cardholder_contacts for the e2e test card"
 
-  docker compose -f "${COMPOSE_FILE}" exec -T cockroachdb \
-    cockroach sql --insecure --database=defaultdb -e \
+  run_cockroach_sql \
     "INSERT INTO notification_service.cardholder_contacts
        (card_token, masked_card_number, email, phone_number, transaction_notifications_enabled)
      VALUES ('${CARD_TOKEN}', '****-****-****-1111', 'e2e-test@example.com', '+15555550123', true)
@@ -165,8 +232,54 @@ seed_cardholder_contact() {
 # The api-gateway's application.yml must point jwk-set-uri to http://auth-service:9000/oauth2/jwks
 # (which resolves inside the compose network to this container).
 
+# kind mode: the mock already runs in-cluster (k8s/infra/auth-mock.yaml,
+# applied once by scripts/k8s-up.sh and stable for the cluster's whole
+# lifetime -- see that file for the full story). Unlike compose mode, a fresh
+# keypair is NOT generated per invocation here: api-gateway's JwtDecoder
+# caches whatever JWKS it fetches, so a keypair that changed on every e2e run
+# would fail signature validation on every run after the first against an
+# already-warm gateway pod (confirmed directly via Spring Security DEBUG
+# logs: BadJWSException: Invalid signature). This just fetches the
+# already-generated private key out of that pod so make_jwt can sign locally
+# with openssl exactly as in compose mode, after verifying JWKS is reachable
+# from *inside* the cluster -- the same path api-gateway uses, not just that
+# the mock answers on localhost.
+setup_auth_mock_kind() {
+  local key_dir
+  key_dir=$(mktemp -d)
+
+  kubectl wait --for=condition=ready pod -l app=auth-mock -n "${K8S_NAMESPACE}" --timeout=120s >/dev/null
+
+  kubectl delete pod/auth-mock-check -n "${K8S_NAMESPACE}" --now >/dev/null 2>&1 || true
+  kubectl run auth-mock-check -n "${K8S_NAMESPACE}" --image=busybox:1.36 --restart=Never \
+    --command -- sh -c 'i=0; until wget -q -T 3 -O- http://auth-mock:9000/oauth2/jwks >/dev/null 2>&1; do i=$((i+1)); [ $i -ge 10 ] && exit 1; sleep 1; done' \
+    >/dev/null
+
+  local reachable=0
+  if kubectl wait --for=jsonpath='{.status.phase}'=Succeeded pod/auth-mock-check -n "${K8S_NAMESPACE}" --timeout=30s >/dev/null 2>&1; then
+    reachable=1
+  fi
+  kubectl delete pod/auth-mock-check -n "${K8S_NAMESPACE}" --now >/dev/null 2>&1 || true
+
+  if [[ $reachable -ne 1 ]]; then
+    fail "Auth mock JWKS not reachable from inside the cluster"
+    return 1
+  fi
+
+  kubectl exec -n "${K8S_NAMESPACE}" deploy/auth-mock -- cat /data/private.pem > "${key_dir}/private.pem"
+
+  E2E_KEY_DIR="${key_dir}"
+  export E2E_KEY_DIR
+  info "Auth mock JWKS reachable (in-cluster, stable keypair)"
+}
+
 setup_auth_mock() {
   info "Setting up auth-service mock (RSA JWKS + JWT issuer)"
+
+  if [[ "${TARGET}" == "kind" ]]; then
+    setup_auth_mock_kind
+    return
+  fi
 
   # Generate RSA key pair on the host
   local key_dir
@@ -226,13 +339,14 @@ PYEOF
   # Stop any existing mock
   docker rm -f "${AUTH_CONTAINER}" 2>/dev/null || true
 
+  # Only reached in compose mode (kind mode returns via setup_auth_mock_kind
+  # above) -- api-gateway reaches this mock as "auth-service" over the
+  # compose network.
+  local docker_run_args=(-d --name "${AUTH_CONTAINER}" --network "${AUTH_NETWORK}")
+  docker_run_args+=(-p "${AUTH_MOCK_PORT}:9000" -v "${key_dir}:/data:ro" python:3.11-slim)
+
   # Start a Python HTTP server container serving the JWKS
-  docker run -d \
-    --name "${AUTH_CONTAINER}" \
-    --network "${AUTH_NETWORK}" \
-    -p "${AUTH_MOCK_PORT}:9000" \
-    -v "${key_dir}:/data:ro" \
-    python:3.11-slim \
+  docker run "${docker_run_args[@]}" \
     python3 -c "
 import http.server, json, pathlib, os
 
@@ -397,7 +511,11 @@ step6_pan_scan() {
   # Fetch logs for each service defined in compose
   for svc in api-gateway transaction-service authorization-service fraud-detection-service notification-service settlement-service reporting-service; do
     local logs
-    logs=$(docker compose -f "${COMPOSE_FILE}" logs --no-color "${svc}" 2>/dev/null || true)
+    if [[ "${TARGET}" == "kind" ]]; then
+      logs=$(kubectl logs -n "${K8S_NAMESPACE}" -l "app=${svc}" --all-containers --tail=-1 2>/dev/null || true)
+    else
+      logs=$(docker compose -f "${COMPOSE_FILE}" logs --no-color "${svc}" 2>/dev/null || true)
+    fi
     if echo "$logs" | grep -qF "$raw_pan"; then
       fail "Step 6 — Raw PAN found in logs for ${svc}"
       found=1
@@ -448,10 +566,45 @@ step7_rate_limit() {
 }
 
 # ── Step 8: Circuit breaker ───────────────────────────────────────────────────
+# Polls api-gateway's actuator until the named circuit breaker reports
+# CLOSED, driving real read-only traffic through it on every poll.
+# Resilience4j never resolves HALF_OPEN on a timer alone -- it only
+# transitions once permittedNumberOfCallsInHalfOpenState real calls have
+# actually been attempted and recorded, so a passive health check that
+# never calls the gateway can poll forever without the breaker ever
+# moving. Confirmed directly: tripping the breaker and restarting
+# transaction-service left it in HALF_OPEN indefinitely until real traffic
+# was sent -- and if that first trial call happens to hit a backend that's
+# still warming up, it can re-open the breaker immediately. Works
+# identically in both modes: GW_MGMT/GW_PORT are the same forwarded/mapped
+# host ports either way.
+wait_circuit_breaker_closed() {
+  local cb_name=$1 max=${2:-60} interval=2 elapsed=0 state=""
+  while [[ $elapsed -lt $max ]]; do
+    state=$(curl -s --max-time 3 "http://localhost:${GW_MGMT}/actuator/health" 2>/dev/null \
+      | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['components']['circuitBreakers']['details']['${cb_name}']['details']['state'])" 2>/dev/null || echo "")
+    [[ "$state" == "CLOSED" ]] && return 0
+
+    # Read-only trial call -- lets a HALF_OPEN breaker actually evaluate
+    # and close; a bare health poll alone cannot do this.
+    curl -s -o /dev/null --max-time 5 \
+      "http://localhost:${GW_PORT}/api/v1/transactions/${TXN_ID}" \
+      -H "Authorization: Bearer ${MERCHANT_JWT}" 2>/dev/null || true
+
+    elapsed=$((elapsed + interval))
+    sleep "$interval"
+  done
+  return 1
+}
+
 step8_circuit_breaker() {
   info "Step 8 — Circuit breaker test (stopping transaction-service)"
 
-  docker compose -f "${COMPOSE_FILE}" stop transaction-service 2>/dev/null
+  if [[ "${TARGET}" == "kind" ]]; then
+    kubectl scale deployment/transaction-service -n "${K8S_NAMESPACE}" --replicas=0
+  else
+    docker compose -f "${COMPOSE_FILE}" stop transaction-service 2>/dev/null
+  fi
 
   local tripped=0
   for i in $(seq 1 15); do
@@ -478,13 +631,35 @@ step8_circuit_breaker() {
   done
 
   # Restart transaction-service for subsequent steps
-  docker compose -f "${COMPOSE_FILE}" start transaction-service 2>/dev/null
+  if [[ "${TARGET}" == "kind" ]]; then
+    kubectl scale deployment/transaction-service -n "${K8S_NAMESPACE}" --replicas=2
+    kubectl wait --for=condition=ready pod -l app=transaction-service -n "${K8S_NAMESPACE}" --timeout=90s || true
+    # The old port-forward was tunneling to a specific pod that no longer
+    # exists after the scale-down/up cycle -- kubectl port-forward doesn't
+    # re-resolve mid-session, so every forward needs restarting fresh.
+    for pid in "${PF_PIDS[@]:-}"; do kill "$pid" 2>/dev/null || true; done
+    PF_PIDS=()
+    start_port_forwards
+  else
+    docker compose -f "${COMPOSE_FILE}" start transaction-service 2>/dev/null
+  fi
   wait_http "transaction-service" "http://localhost:${TXN_MGMT}/actuator/health" 90 || true
 
   if [[ $tripped -eq 1 ]]; then
     pass "Step 8 — Circuit breaker opened; fallback 503 received"
   else
     fail "Step 8 — No 503 fallback received after stopping transaction-service"
+  fi
+
+  # Clean up after ourselves: transaction-service being healthy again isn't
+  # the same as the breaker being CLOSED again (see function comment above).
+  # Leaving it in HALF_OPEN -- or re-tripped OPEN, if the first incidental
+  # trial call hit a still-cold backend -- silently breaks whatever runs
+  # next against this same long-lived gateway. Fail loudly instead.
+  if wait_circuit_breaker_closed "transaction-service-cb" 60; then
+    pass "Step 8 — transaction-service-cb back to CLOSED"
+  else
+    fail "Step 8 — transaction-service-cb did not return to CLOSED within 60s"
   fi
 }
 
@@ -517,11 +692,17 @@ step9_reporting_query() {
 step10_settlement() {
   info "Step 10 — Triggering settlement batch and verifying SETTLED status"
 
-  # settlement-service internal endpoint; accessed via docker exec to avoid host port conflict
+  # settlement-service internal endpoint; accessed via exec to avoid a host port conflict
   local trigger_resp
-  trigger_resp=$(docker compose -f "${COMPOSE_FILE}" exec -T settlement-service \
-    curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
-    -X POST "http://localhost:8080/internal/settlement/trigger" 2>/dev/null || echo "000")
+  if [[ "${TARGET}" == "kind" ]]; then
+    trigger_resp=$(kubectl exec -n "${K8S_NAMESPACE}" deploy/settlement-service -- \
+      curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
+      -X POST "http://localhost:8080/internal/settlement/trigger" 2>/dev/null || echo "000")
+  else
+    trigger_resp=$(docker compose -f "${COMPOSE_FILE}" exec -T settlement-service \
+      curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
+      -X POST "http://localhost:8080/internal/settlement/trigger" 2>/dev/null || echo "000")
+  fi
 
   if [[ ! "$trigger_resp" =~ ^(200|204|202)$ ]]; then
     fail "Step 10 — Settlement trigger returned ${trigger_resp}"
@@ -563,12 +744,10 @@ step11_fraud_and_notification_records() {
   local fraud_count=0 notif_count=0
 
   while [[ $elapsed -lt $max ]]; do
-    fraud_count=$(docker compose -f "${COMPOSE_FILE}" exec -T cockroachdb \
-      cockroach sql --insecure --database=defaultdb -e \
+    fraud_count=$(run_cockroach_sql \
       "SELECT count(*) FROM fraud_detection_service.transaction_records WHERE transaction_id = '${TXN_ID}';" \
       2>/dev/null | tail -1 | tr -d '[:space:]')
-    notif_count=$(docker compose -f "${COMPOSE_FILE}" exec -T cockroachdb \
-      cockroach sql --insecure --database=defaultdb -e \
+    notif_count=$(run_cockroach_sql \
       "SELECT count(*) FROM notification_service.notification_records WHERE content LIKE '%${TXN_ID}%';" \
       2>/dev/null | tail -1 | tr -d '[:space:]')
 
@@ -599,6 +778,12 @@ cleanup() {
   info "Cleaning up auth-service mock container"
   docker rm -f "${AUTH_CONTAINER}" 2>/dev/null || true
   [[ -n "${E2E_KEY_DIR:-}" ]] && rm -rf "${E2E_KEY_DIR}"
+  if [[ "${TARGET}" == "kind" ]]; then
+    info "Stopping kubectl port-forwards"
+    for pid in "${PF_PIDS[@]:-}"; do
+      kill "$pid" 2>/dev/null || true
+    done
+  fi
 }
 trap cleanup EXIT
 
