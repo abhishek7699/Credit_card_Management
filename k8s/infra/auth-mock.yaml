@@ -1,0 +1,138 @@
+# In-cluster JWT/JWKS mock for the e2e suite's --target kind path.
+#
+# This replaces reaching a host-side Docker container via host.docker.internal
+# (Docker-Desktop-specific, and not what a real deployment looks like -- GKE
+# has no host.docker.internal at all). More importantly, it fixes a real bug
+# that reaching the mock from the cluster never would have: the RSA keypair is
+# generated ONCE here, at pod startup, and stays stable for the life of this
+# pod -- not regenerated on every scripts/e2e-test.sh invocation. api-gateway's
+# JwtDecoder caches the JWKS it fetches; with a keypair that changed on every
+# test run, any run after the first one against an already-warm gateway pod
+# would fail JWT signature validation against the (now-stale) cached key. That
+# was confirmed directly: scripts/e2e-test.sh --target kind run 2+ against a
+# kind cluster that had already run once reproducibly failed with
+# `BadJWSException: Signed JWT rejected: Invalid signature` once Spring
+# Security DEBUG logging was turned on to look. Tying the keypair's lifetime
+# to this pod (and therefore to the cluster's lifetime, same as every other
+# infra component) removes the mismatch entirely -- as long as this pod hasn't
+# restarted, the JWKS it serves never changes.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auth-mock
+  namespace: credit-card
+  labels:
+    app: auth-mock
+    tier: infra
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: auth-mock
+  template:
+    metadata:
+      labels:
+        app: auth-mock
+        tier: infra
+    spec:
+      containers:
+        - name: auth-mock
+          image: python:3.11-slim
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              mkdir -p /data
+              openssl genrsa -out /data/private.pem 2048
+              pip install --quiet --disable-pip-version-check --root-user-action=ignore cryptography
+              cat > /data/gen_jwks.py <<'PYEOF'
+              import json, base64
+              from cryptography.hazmat.primitives.serialization import load_pem_private_key
+
+              with open("/data/private.pem", "rb") as f:
+                  priv = load_pem_private_key(f.read(), password=None)
+
+              pub_nums = priv.public_key().public_numbers()
+
+              def to_b64(n):
+                  raw = n.to_bytes((n.bit_length() + 7) // 8, "big")
+                  return base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
+
+              jwk = {
+                  "kty": "RSA",
+                  "kid": "e2e-key-1",
+                  "use": "sig",
+                  "alg": "RS256",
+                  "n": to_b64(pub_nums.n),
+                  "e": to_b64(pub_nums.e),
+              }
+
+              with open("/data/jwks.json", "w") as f:
+                  json.dump({"keys": [jwk]}, f)
+              print("JWKS written")
+              PYEOF
+              python3 /data/gen_jwks.py
+              cat > /data/serve.py <<'PYEOF'
+              import http.server, json, pathlib
+
+              class H(http.server.BaseHTTPRequestHandler):
+                  def do_GET(self):
+                      jwks = pathlib.Path('/data/jwks.json').read_text()
+                      if self.path in ('/oauth2/jwks', '/.well-known/jwks.json'):
+                          body = jwks.encode()
+                      elif self.path == '/.well-known/openid-configuration':
+                          body = json.dumps({'issuer':'http://auth-mock:9000','jwks_uri':'http://auth-mock:9000/oauth2/jwks'}).encode()
+                      else:
+                          self.send_response(404); self.end_headers(); return
+                      self.send_response(200)
+                      self.send_header('Content-Type','application/json')
+                      self.end_headers()
+                      self.wfile.write(body)
+                  def log_message(self, *a): pass
+
+              http.server.HTTPServer(('0.0.0.0', 9000), H).serve_forever()
+              PYEOF
+              exec python3 /data/serve.py
+          ports:
+            - containerPort: 9000
+              name: http
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+          readinessProbe:
+            httpGet:
+              path: /oauth2/jwks
+              port: 9000
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            # pip install cryptography can take a little while on a cold
+            # image pull / cold pip cache.
+            failureThreshold: 24
+          livenessProbe:
+            httpGet:
+              path: /oauth2/jwks
+              port: 9000
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            failureThreshold: 6
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: auth-mock
+  namespace: credit-card
+  labels:
+    app: auth-mock
+spec:
+  type: ClusterIP
+  selector:
+    app: auth-mock
+  ports:
+    - name: http
+      port: 9000
+      targetPort: 9000

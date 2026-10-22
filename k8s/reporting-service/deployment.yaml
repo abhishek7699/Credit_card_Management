@@ -13,28 +13,53 @@ spec:
       labels:
         app: reporting-service
     spec:
-      securityContext:
-        runAsNonRoot: true
-        runAsUser: 1000
-        fsGroup: 1000
+      initContainers:
+        - name: wait-for-cockroachdb
+          image: busybox:1.36
+          command: ['sh', '-c', 'until wget -qO- http://cockroachdb:8080/health?ready=1; do echo waiting for cockroachdb; sleep 2; done']
+        # reporting-service has Flyway disabled and reads settlement-service's
+        # own schema directly -- docker-compose.yml only waits for
+        # settlement-service to have *started*, not be ready, which is a
+        # latent race against settlement-service's own migrations. Waiting on
+        # its management port (only reachable once its own readinessProbe
+        # passes) closes that race here.
+        - name: wait-for-settlement-service
+          image: busybox:1.36
+          command: ['sh', '-c', 'until nc -z settlement-service 8085; do echo waiting for settlement-service; sleep 2; done']
       containers:
         - name: reporting-service
-          image: reporting-service:latest
+          image: credit-card/reporting-service:local
+          imagePullPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 999
           ports:
             - containerPort: 8086
               name: http
             - containerPort: 8091
               name: management
+          env:
+            - name: JAVA_TOOL_OPTIONS
+              value: "-Xmx256m -XX:MaxMetaspaceSize=128m"
           envFrom:
             - secretRef:
                 name: reporting-service-secrets
           resources:
             requests:
-              cpu: 250m
-              memory: 128Mi
+              cpu: 150m
+              memory: 384Mi
             limits:
               cpu: 500m
-              memory: 256Mi
+              memory: 512Mi
+          # See transaction-service/deployment.yaml for why: gives a slow
+          # cold start up to 5 minutes before the liveness probe's own
+          # tighter steady-state timing takes over.
+          startupProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8091
+            periodSeconds: 10
+            failureThreshold: 30
           livenessProbe:
             httpGet:
               path: /actuator/health/liveness
