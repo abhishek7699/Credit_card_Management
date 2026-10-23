@@ -24,6 +24,9 @@ dependencyManagement {
 }
 
 dependencies {
+    // Exposes /actuator/prometheus for k8s/monitoring to scrape
+    implementation 'io.micrometer:micrometer-registry-prometheus'
+
     // Spring Cloud Gateway (reactive Netty)
     implementation 'org.springframework.cloud:spring-cloud-starter-gateway'
 
