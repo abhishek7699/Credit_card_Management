@@ -1,0 +1,133 @@
+# Prometheus — scrapes Spring Boot actuator /actuator/prometheus from all 7
+# services plus itself. Static targets (not Kubernetes service-discovery):
+# every service name/port in this cluster is already fixed and known, so
+# static_configs avoids needing any extra RBAC (a ClusterRole to watch
+# pods/endpoints) just to find seven targets that never move.
+#
+# No PVC: short in-memory-friendly retention (6h) is plenty for a local
+# rehearsal dashboard, and keeps this out of the PVC-persistence story that
+# only CockroachDB and Kafka actually need.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: credit-card
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+      evaluation_interval: 15s
+
+    scrape_configs:
+      - job_name: prometheus
+        static_configs:
+          - targets: ["localhost:9090"]
+
+      - job_name: transaction-service
+        metrics_path: /actuator/prometheus
+        static_configs:
+          - targets: ["transaction-service:8081"]
+
+      - job_name: authorization-service
+        metrics_path: /actuator/prometheus
+        static_configs:
+          - targets: ["authorization-service:8082"]
+
+      - job_name: fraud-detection-service
+        metrics_path: /actuator/prometheus
+        static_configs:
+          - targets: ["fraud-detection-service:8083"]
+
+      - job_name: notification-service
+        metrics_path: /actuator/prometheus
+        static_configs:
+          - targets: ["notification-service:8084"]
+
+      - job_name: settlement-service
+        metrics_path: /actuator/prometheus
+        static_configs:
+          - targets: ["settlement-service:8085"]
+
+      - job_name: reporting-service
+        metrics_path: /actuator/prometheus
+        static_configs:
+          - targets: ["reporting-service:8091"]
+
+      - job_name: api-gateway
+        metrics_path: /actuator/prometheus
+        static_configs:
+          - targets: ["api-gateway:8090"]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus
+  namespace: credit-card
+  labels:
+    app: prometheus
+    tier: infra
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: prometheus
+  template:
+    metadata:
+      labels:
+        app: prometheus
+        tier: infra
+    spec:
+      containers:
+        - name: prometheus
+          image: prom/prometheus:v2.54.1
+          args:
+            - --config.file=/etc/prometheus/prometheus.yml
+            - --storage.tsdb.retention.time=6h
+            - --storage.tsdb.path=/prometheus
+          ports:
+            - containerPort: 9090
+              name: http
+          volumeMounts:
+            - name: config
+              mountPath: /etc/prometheus
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          readinessProbe:
+            httpGet:
+              path: /-/ready
+              port: 9090
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 12
+          livenessProbe:
+            httpGet:
+              path: /-/healthy
+              port: 9090
+            initialDelaySeconds: 15
+            periodSeconds: 15
+            failureThreshold: 6
+      volumes:
+        - name: config
+          configMap:
+            name: prometheus-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus
+  namespace: credit-card
+  labels:
+    app: prometheus
+spec:
+  type: ClusterIP
+  selector:
+    app: prometheus
+  ports:
+    - name: http
+      port: 9090
+      targetPort: 9090
