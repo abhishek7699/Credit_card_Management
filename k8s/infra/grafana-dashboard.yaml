@@ -1,0 +1,89 @@
+# The actual dashboard JSON Grafana auto-loads via the file provider
+# configured in grafana.yaml's grafana-dashboard-provider ConfigMap. Kept as
+# its own file/ConfigMap since it's large and edited independently of the
+# Grafana Deployment itself.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-json
+  namespace: credit-card
+data:
+  credit-card-services.json: |
+    {
+      "title": "Credit Card Payment Gateway — Services",
+      "uid": "credit-card-services",
+      "schemaVersion": 39,
+      "version": 1,
+      "editable": true,
+      "timezone": "browser",
+      "time": { "from": "now-30m", "to": "now" },
+      "refresh": "10s",
+      "panels": [
+        {
+          "id": 1,
+          "title": "Request rate (req/s, per service)",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+          "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+          "targets": [
+            {
+              "expr": "sum(rate(http_server_requests_seconds_count[1m])) by (job)",
+              "legendFormat": "{{job}}"
+            }
+          ]
+        },
+        {
+          "id": 2,
+          "title": "Error rate (% of requests returning 5xx, per service)",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+          "fieldConfig": { "defaults": { "unit": "percent", "min": 0 }, "overrides": [] },
+          "targets": [
+            {
+              "expr": "100 * sum(rate(http_server_requests_seconds_count{status=~\"5..\"}[1m])) by (job) / sum(rate(http_server_requests_seconds_count[1m])) by (job)",
+              "legendFormat": "{{job}}"
+            }
+          ]
+        },
+        {
+          "id": 3,
+          "title": "Average request latency (per service)",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+          "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+          "targets": [
+            {
+              "expr": "sum(rate(http_server_requests_seconds_sum[1m])) by (job) / sum(rate(http_server_requests_seconds_count[1m])) by (job)",
+              "legendFormat": "{{job}}"
+            }
+          ]
+        },
+        {
+          "id": 4,
+          "title": "Kafka consumer lag (per service, topic)",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+          "fieldConfig": { "defaults": { "unit": "short", "min": 0 }, "overrides": [] },
+          "targets": [
+            {
+              "expr": "max(kafka_consumer_fetch_manager_records_lag) by (job, topic)",
+              "legendFormat": "{{job}} / {{topic}}"
+            }
+          ]
+        },
+        {
+          "id": 5,
+          "title": "Circuit breaker state (api-gateway)",
+          "description": "0 = CLOSED, 1 = OPEN, 2 = HALF_OPEN. Only api-gateway has circuit breakers (transaction-service-cb, reporting-service-cb) -- it's the only service this panel will show data for.",
+          "type": "state-timeline",
+          "gridPos": { "h": 8, "w": 24, "x": 0, "y": 16 },
+          "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+          "targets": [
+            {
+              "expr": "resilience4j_circuitbreaker_state == 1",
+              "legendFormat": "{{name}}: {{state}}"
+            }
+          ]
+        }
+      ]
+    }

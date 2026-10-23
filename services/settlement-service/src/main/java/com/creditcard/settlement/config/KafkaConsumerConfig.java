@@ -1,14 +1,15 @@
 package com.creditcard.settlement.config;
 
 import com.creditcard.settlement.kafka.event.TransactionAuthorizedEvent;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
-import org.springframework.kafka.core.ConsumerFactory;
 import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
+import org.springframework.kafka.core.MicrometerConsumerListener;
 import org.springframework.kafka.listener.ContainerProperties;
 import org.springframework.kafka.support.serializer.JsonDeserializer;
 
@@ -40,9 +41,16 @@ public class KafkaConsumerConfig {
     }
 
     @Bean
-    public ConcurrentKafkaListenerContainerFactory<String, TransactionAuthorizedEvent> txAuthorizedContainerFactory() {
-        ConsumerFactory<String, TransactionAuthorizedEvent> cf =
+    public ConcurrentKafkaListenerContainerFactory<String, TransactionAuthorizedEvent> txAuthorizedContainerFactory(
+            MeterRegistry meterRegistry) {
+        DefaultKafkaConsumerFactory<String, TransactionAuthorizedEvent> cf =
                 new DefaultKafkaConsumerFactory<>(consumerProps());
+        // Exposes kafka_consumer_fetch_manager_records_lag (and the rest of the
+        // kafka-clients consumer metrics) via Micrometer -> /actuator/prometheus,
+        // for k8s/monitoring's Grafana dashboard. Needed because this is a
+        // manually-constructed ConsumerFactory -- Spring Boot's own Kafka metrics
+        // auto-configuration only attaches to its own auto-configured bean.
+        cf.addListener(new MicrometerConsumerListener<>(meterRegistry));
         ConcurrentKafkaListenerContainerFactory<String, TransactionAuthorizedEvent> factory =
                 new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(cf);

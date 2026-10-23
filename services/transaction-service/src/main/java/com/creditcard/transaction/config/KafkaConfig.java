@@ -2,6 +2,7 @@ package com.creditcard.transaction.config;
 
 import com.creditcard.transaction.event.StatusUpdateEvent;
 import com.creditcard.transaction.event.TransactionInitiatedEvent;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.serialization.StringDeserializer;
@@ -65,7 +66,7 @@ public class KafkaConfig {
     }
 
     @Bean
-    public ConsumerFactory<String, StatusUpdateEvent> consumerFactory() {
+    public ConsumerFactory<String, StatusUpdateEvent> consumerFactory(MeterRegistry meterRegistry) {
         Map<String, Object> props = new HashMap<>();
         props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
         props.put(ConsumerConfig.GROUP_ID_CONFIG, consumerGroupId);
@@ -77,14 +78,23 @@ public class KafkaConfig {
         props.put(ErrorHandlingDeserializer.VALUE_DESERIALIZER_CLASS, JsonDeserializer.class);
         props.put(JsonDeserializer.TRUSTED_PACKAGES, "com.creditcard.transaction.event");
         props.put(JsonDeserializer.VALUE_DEFAULT_TYPE, StatusUpdateEvent.class.getName());
-        return new DefaultKafkaConsumerFactory<>(props);
+        DefaultKafkaConsumerFactory<String, StatusUpdateEvent> factory = new DefaultKafkaConsumerFactory<>(props);
+        // Exposes kafka_consumer_fetch_manager_records_lag (and the rest of the
+        // kafka-clients consumer metrics) via Micrometer -> /actuator/prometheus,
+        // for k8s/monitoring's Grafana dashboard. This is a manually-constructed
+        // ConsumerFactory, so Spring Boot's own Kafka metrics auto-configuration
+        // (which only attaches to its own auto-configured ConsumerFactory bean)
+        // never wires this up on its own.
+        factory.addListener(new MicrometerConsumerListener<>(meterRegistry));
+        return factory;
     }
 
     @Bean
-    public ConcurrentKafkaListenerContainerFactory<String, StatusUpdateEvent> kafkaListenerContainerFactory() {
+    public ConcurrentKafkaListenerContainerFactory<String, StatusUpdateEvent> kafkaListenerContainerFactory(
+            ConsumerFactory<String, StatusUpdateEvent> consumerFactory) {
         ConcurrentKafkaListenerContainerFactory<String, StatusUpdateEvent> factory =
                 new ConcurrentKafkaListenerContainerFactory<>();
-        factory.setConsumerFactory(consumerFactory());
+        factory.setConsumerFactory(consumerFactory);
         factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.MANUAL_IMMEDIATE);
         return factory;
     }

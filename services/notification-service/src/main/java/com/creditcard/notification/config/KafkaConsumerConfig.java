@@ -2,6 +2,7 @@ package com.creditcard.notification.config;
 
 import com.creditcard.notification.kafka.event.FraudAlertEvent;
 import com.creditcard.notification.kafka.event.TransactionStatusEvent;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.springframework.beans.factory.annotation.Value;
@@ -10,6 +11,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
 import org.springframework.kafka.core.ConsumerFactory;
 import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
+import org.springframework.kafka.core.MicrometerConsumerListener;
 import org.springframework.kafka.listener.ContainerProperties;
 import org.springframework.kafka.support.serializer.ErrorHandlingDeserializer;
 import org.springframework.kafka.support.serializer.JsonDeserializer;
@@ -26,30 +28,45 @@ public class KafkaConsumerConfig {
     @Value("${spring.kafka.consumer.group-id}")
     private String groupId;
 
+    // Both factories get a MicrometerConsumerListener so
+    // kafka_consumer_fetch_manager_records_lag (and the rest of the
+    // kafka-clients consumer metrics) show up via /actuator/prometheus for
+    // k8s/monitoring's Grafana dashboard -- needed because these are
+    // manually-constructed ConsumerFactory beans, which Spring Boot's own
+    // Kafka metrics auto-configuration never attaches to on its own.
+
     @Bean
-    public ConsumerFactory<String, TransactionStatusEvent> txStatusConsumerFactory() {
-        return new DefaultKafkaConsumerFactory<>(consumerProps(TransactionStatusEvent.class));
+    public ConsumerFactory<String, TransactionStatusEvent> txStatusConsumerFactory(MeterRegistry meterRegistry) {
+        DefaultKafkaConsumerFactory<String, TransactionStatusEvent> factory =
+                new DefaultKafkaConsumerFactory<>(consumerProps(TransactionStatusEvent.class));
+        factory.addListener(new MicrometerConsumerListener<>(meterRegistry));
+        return factory;
     }
 
     @Bean
-    public ConcurrentKafkaListenerContainerFactory<String, TransactionStatusEvent> txStatusContainerFactory() {
+    public ConcurrentKafkaListenerContainerFactory<String, TransactionStatusEvent> txStatusContainerFactory(
+            ConsumerFactory<String, TransactionStatusEvent> txStatusConsumerFactory) {
         ConcurrentKafkaListenerContainerFactory<String, TransactionStatusEvent> factory =
                 new ConcurrentKafkaListenerContainerFactory<>();
-        factory.setConsumerFactory(txStatusConsumerFactory());
+        factory.setConsumerFactory(txStatusConsumerFactory);
         factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.MANUAL_IMMEDIATE);
         return factory;
     }
 
     @Bean
-    public ConsumerFactory<String, FraudAlertEvent> fraudAlertConsumerFactory() {
-        return new DefaultKafkaConsumerFactory<>(consumerProps(FraudAlertEvent.class));
+    public ConsumerFactory<String, FraudAlertEvent> fraudAlertConsumerFactory(MeterRegistry meterRegistry) {
+        DefaultKafkaConsumerFactory<String, FraudAlertEvent> factory =
+                new DefaultKafkaConsumerFactory<>(consumerProps(FraudAlertEvent.class));
+        factory.addListener(new MicrometerConsumerListener<>(meterRegistry));
+        return factory;
     }
 
     @Bean
-    public ConcurrentKafkaListenerContainerFactory<String, FraudAlertEvent> fraudAlertContainerFactory() {
+    public ConcurrentKafkaListenerContainerFactory<String, FraudAlertEvent> fraudAlertContainerFactory(
+            ConsumerFactory<String, FraudAlertEvent> fraudAlertConsumerFactory) {
         ConcurrentKafkaListenerContainerFactory<String, FraudAlertEvent> factory =
                 new ConcurrentKafkaListenerContainerFactory<>();
-        factory.setConsumerFactory(fraudAlertConsumerFactory());
+        factory.setConsumerFactory(fraudAlertConsumerFactory);
         factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.MANUAL_IMMEDIATE);
         return factory;
     }
