@@ -1,12 +1,65 @@
-# Prometheus — scrapes Spring Boot actuator /actuator/prometheus from all 7
-# services plus itself. Static targets (not Kubernetes service-discovery):
-# every service name/port in this cluster is already fixed and known, so
-# static_configs avoids needing any extra RBAC (a ClusterRole to watch
-# pods/endpoints) just to find seven targets that never move.
+# Prometheus — scrapes Spring Boot actuator /actuator/prometheus from every
+# pod of all 7 services plus itself, via Kubernetes pod service-discovery
+# (not static per-service targets).
+#
+# Why not static_configs (what this file used to do): a static target like
+# "transaction-service:8081" resolves to the Service's ClusterIP, and
+# kube-proxy DNATs each scrape connection to exactly one of that Service's
+# N replica pods. Each pod keeps its own independent in-process
+# MeterRegistry (confirmed live: two api-gateway replicas showed 213 vs 376
+# total requests at the same instant) -- so a single ClusterIP target only
+# ever sees ONE replica's counters, never the true combined total, and can
+# silently miss short-lived activity (a single 503, a 1-second burst) that
+# happened to land on the replica Prometheus didn't scrape that interval.
+# This was the root cause of two dashboard bugs: the error-rate panel not
+# showing Step 8's circuit-breaker 503s, and the request-rate panel
+# flattening Step 7's 100-request burst to ~0.4 req/s.
+#
+# The fix: scrape every individual pod (role: pod), selected by the
+# "prometheus.io/scrape: true" annotation each service's Deployment now
+# carries, with job/port/path taken from the pod's own annotations/labels.
+# Requires a Role/RoleBinding (get/list/watch on pods) scoped to the
+# credit-card namespace -- least-privilege, and still no cluster-wide RBAC.
+#
+# scrape_interval dropped from 15s to 5s, and dashboard panels now use a
+# 20s rate() window instead of 1m, so a sub-second burst or a single
+# transient error is still backed by enough samples for a stable rate()
+# while remaining narrow enough to show up as a visible spike rather than
+# being averaged away over a full minute.
 #
 # No PVC: short in-memory-friendly retention (6h) is plenty for a local
 # rehearsal dashboard, and keeps this out of the PVC-persistence story that
 # only CockroachDB and Kafka actually need.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: prometheus
+  namespace: credit-card
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: prometheus-pod-reader
+  namespace: credit-card
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: prometheus-pod-reader
+  namespace: credit-card
+subjects:
+  - kind: ServiceAccount
+    name: prometheus
+    namespace: credit-card
+roleRef:
+  kind: Role
+  name: prometheus-pod-reader
+  apiGroup: rbac.authorization.k8s.io
+---
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -15,48 +68,38 @@ metadata:
 data:
   prometheus.yml: |
     global:
-      scrape_interval: 15s
-      evaluation_interval: 15s
+      scrape_interval: 5s
+      evaluation_interval: 5s
 
     scrape_configs:
       - job_name: prometheus
         static_configs:
           - targets: ["localhost:9090"]
 
-      - job_name: transaction-service
-        metrics_path: /actuator/prometheus
-        static_configs:
-          - targets: ["transaction-service:8081"]
-
-      - job_name: authorization-service
-        metrics_path: /actuator/prometheus
-        static_configs:
-          - targets: ["authorization-service:8082"]
-
-      - job_name: fraud-detection-service
-        metrics_path: /actuator/prometheus
-        static_configs:
-          - targets: ["fraud-detection-service:8083"]
-
-      - job_name: notification-service
-        metrics_path: /actuator/prometheus
-        static_configs:
-          - targets: ["notification-service:8084"]
-
-      - job_name: settlement-service
-        metrics_path: /actuator/prometheus
-        static_configs:
-          - targets: ["settlement-service:8085"]
-
-      - job_name: reporting-service
-        metrics_path: /actuator/prometheus
-        static_configs:
-          - targets: ["reporting-service:8091"]
-
-      - job_name: api-gateway
-        metrics_path: /actuator/prometheus
-        static_configs:
-          - targets: ["api-gateway:8090"]
+      - job_name: kubernetes-pods
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces:
+              names: ["credit-card"]
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+            action: keep
+            regex: "true"
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+            action: replace
+            target_label: __metrics_path__
+            regex: (.+)
+          - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+            action: replace
+            regex: ([^:]+)(?::\d+)?;(\d+)
+            replacement: $1:$2
+            target_label: __address__
+          - source_labels: [__meta_kubernetes_pod_label_app]
+            action: replace
+            target_label: job
+          - source_labels: [__meta_kubernetes_pod_name]
+            action: replace
+            target_label: pod
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -77,6 +120,7 @@ spec:
         app: prometheus
         tier: infra
     spec:
+      serviceAccountName: prometheus
       containers:
         - name: prometheus
           image: prom/prometheus:v2.54.1
