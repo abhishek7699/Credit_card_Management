@@ -6,10 +6,12 @@ import com.creditcard.gateway.fallback.FallbackController;
 import com.creditcard.gateway.filter.AuditLoggingFilter;
 import com.creditcard.gateway.filter.IdentityPropagationFilter;
 import com.creditcard.gateway.filter.MerchantScopeEnforcementFilter;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.reactive.WebFluxTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.boot.test.mock.mockito.SpyBean;
 import org.springframework.context.annotation.Import;
 import org.springframework.security.oauth2.jwt.ReactiveJwtDecoder;
 import org.springframework.security.test.web.reactive.server.SecurityMockServerConfigurers;
@@ -25,6 +27,12 @@ class SecurityConfigTest {
 
     @Autowired
     private WebTestClient webClient;
+
+    // FallbackController now needs a MeterRegistry; see FallbackControllerTest
+    // for why this must be the concrete SimpleMeterRegistry type with no
+    // field initializer (both avoid distinct bean-resolution failures).
+    @SpyBean
+    private SimpleMeterRegistry meterRegistry;
 
     @MockBean
     private ReactiveJwtDecoder jwtDecoder;
