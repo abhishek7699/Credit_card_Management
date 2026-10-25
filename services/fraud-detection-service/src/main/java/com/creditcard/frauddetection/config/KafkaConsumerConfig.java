@@ -1,6 +1,7 @@
 package com.creditcard.frauddetection.config;
 
 import com.creditcard.frauddetection.kafka.event.TransactionInitiatedEvent;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.springframework.beans.factory.annotation.Value;
@@ -9,6 +10,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
 import org.springframework.kafka.core.ConsumerFactory;
 import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
+import org.springframework.kafka.core.MicrometerConsumerListener;
 import org.springframework.kafka.listener.ContainerProperties;
 import org.springframework.kafka.support.serializer.ErrorHandlingDeserializer;
 import org.springframework.kafka.support.serializer.JsonDeserializer;
@@ -26,7 +28,7 @@ public class KafkaConsumerConfig {
     private String groupId;
 
     @Bean
-    public ConsumerFactory<String, TransactionInitiatedEvent> consumerFactory() {
+    public ConsumerFactory<String, TransactionInitiatedEvent> consumerFactory(MeterRegistry meterRegistry) {
         Map<String, Object> props = new HashMap<>();
         props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
         props.put(ConsumerConfig.GROUP_ID_CONFIG, groupId);
@@ -39,14 +41,22 @@ public class KafkaConsumerConfig {
         props.put(JsonDeserializer.VALUE_DEFAULT_TYPE, TransactionInitiatedEvent.class.getName());
         props.put(JsonDeserializer.TRUSTED_PACKAGES, "com.creditcard.*");
         props.put(JsonDeserializer.USE_TYPE_INFO_HEADERS, false);
-        return new DefaultKafkaConsumerFactory<>(props);
+        DefaultKafkaConsumerFactory<String, TransactionInitiatedEvent> factory = new DefaultKafkaConsumerFactory<>(props);
+        // Exposes kafka_consumer_fetch_manager_records_lag (and the rest of the
+        // kafka-clients consumer metrics) via Micrometer -> /actuator/prometheus,
+        // for k8s/monitoring's Grafana dashboard. Needed because this is a
+        // manually-constructed ConsumerFactory -- Spring Boot's own Kafka metrics
+        // auto-configuration only attaches to its own auto-configured bean.
+        factory.addListener(new MicrometerConsumerListener<>(meterRegistry));
+        return factory;
     }
 
     @Bean
-    public ConcurrentKafkaListenerContainerFactory<String, TransactionInitiatedEvent> kafkaListenerContainerFactory() {
+    public ConcurrentKafkaListenerContainerFactory<String, TransactionInitiatedEvent> kafkaListenerContainerFactory(
+            ConsumerFactory<String, TransactionInitiatedEvent> consumerFactory) {
         ConcurrentKafkaListenerContainerFactory<String, TransactionInitiatedEvent> factory =
                 new ConcurrentKafkaListenerContainerFactory<>();
-        factory.setConsumerFactory(consumerFactory());
+        factory.setConsumerFactory(consumerFactory);
         factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.MANUAL_IMMEDIATE);
         return factory;
     }
