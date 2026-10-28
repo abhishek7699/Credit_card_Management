@@ -77,13 +77,13 @@ data:
         {
           "id": 5,
           "title": "Circuit breaker state (api-gateway)",
-          "description": "0 = CLOSED, 1 = OPEN, 2 = HALF_OPEN. Only api-gateway has circuit breakers (transaction-service-cb, reporting-service-cb) -- it's the only service this panel will show data for.",
+          "description": "Only api-gateway has circuit breakers (transaction-service-cb, reporting-service-cb) -- it's the only service this panel will show data for. api-gateway runs 2 replicas, each reporting its own per-pod state since Prometheus scrapes every pod individually (see prometheus.yaml); max by (name, state) collapses that per-pod dimension so each breaker shows one row per state rather than one row per (state, pod) -- max is equivalent to logical OR here since the underlying gauge is 0/1, so a state only shows as active if at least one replica is actually in it (open if either replica is open).",
           "type": "state-timeline",
           "gridPos": { "h": 8, "w": 24, "x": 0, "y": 16 },
           "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
           "targets": [
             {
-              "expr": "resilience4j_circuitbreaker_state == 1",
+              "expr": "max by (name, state) (resilience4j_circuitbreaker_state) == 1",
               "legendFormat": "{{name}}: {{state}}"
             }
           ]
