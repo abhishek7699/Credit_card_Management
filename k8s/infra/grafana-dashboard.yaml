@@ -21,40 +21,43 @@ data:
       "panels": [
         {
           "id": 1,
-          "title": "Request rate (req/s, per service)",
+          "title": "Request rate (req/s, per service and protocol)",
+          "description": "Combines three request families, each labeled by protocol: HTTP (Spring MVC/WebFlux http_server_requests_seconds, actuator endpoints excluded so health checks and Prometheus's own scrape don't count as traffic), gRPC (transaction-service's grpc_server_processing_duration_seconds), and Kafka (the consumer services' spring_kafka_listener_seconds, one sample per consumed message). A 20s rate() window (with Prometheus now scraping every 5s) keeps short bursts -- e.g. Step 7's 100 requests in ~1s -- visible as a spike instead of averaged away over a full minute.",
           "type": "timeseries",
           "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
           "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
           "targets": [
             {
-              "expr": "sum(rate(http_server_requests_seconds_count[1m])) by (job)",
-              "legendFormat": "{{job}}"
+              "expr": "sum by (job, protocol) (label_replace(rate(http_server_requests_seconds_count{uri!~\"/actuator.*\"}[20s]), \"protocol\", \"http\", \"job\", \"(.*)\") or label_replace(rate(grpc_server_processing_duration_seconds_count[20s]), \"protocol\", \"grpc\", \"job\", \"(.*)\") or label_replace(rate(spring_kafka_listener_seconds_count[20s]), \"protocol\", \"kafka\", \"job\", \"(.*)\"))",
+              "legendFormat": "{{job}} ({{protocol}})"
             }
           ]
         },
         {
           "id": 2,
-          "title": "Error rate (% of requests returning 5xx, per service)",
+          "title": "Error rate (% of requests failing, per service and protocol)",
+          "description": "HTTP error = status 5xx (actuator and the circuit-breaker fallback route excluded here, see below) + gateway_fallback_requests_total; gRPC error = statusCode != OK; Kafka error = listener result != success. The fallback route is split out into its own dedicated, eagerly-registered counter (FallbackController) rather than relying on Spring's auto-generated http_server_requests_seconds{uri=\"/fallback/{service}\",status=\"503\"} series directly: that series doesn't exist at all until the first trip, so its first-ever sample jumps straight from nothing to 1 with no preceding sample for rate()/increase() to compare against -- a single circuit-breaker trip was architecturally invisible no matter the rate window. Scraping every pod individually (see prometheus.yaml) means a failure on either replica is always captured too, instead of only showing up when Prometheus happened to scrape the one replica that saw it.",
           "type": "timeseries",
           "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
           "fieldConfig": { "defaults": { "unit": "percent", "min": 0 }, "overrides": [] },
           "targets": [
             {
-              "expr": "100 * sum(rate(http_server_requests_seconds_count{status=~\"5..\"}[1m])) by (job) / sum(rate(http_server_requests_seconds_count[1m])) by (job)",
-              "legendFormat": "{{job}}"
+              "expr": "100 * sum by (job, protocol) (label_replace(rate(http_server_requests_seconds_count{uri!~\"/actuator.*\", uri!=\"/fallback/{service}\", status=~\"5..\"}[20s]), \"protocol\", \"http\", \"job\", \"(.*)\") or label_replace(rate(gateway_fallback_requests_total[20s]), \"protocol\", \"http\", \"job\", \"(.*)\") or label_replace(rate(grpc_server_processing_duration_seconds_count{statusCode!=\"OK\"}[20s]), \"protocol\", \"grpc\", \"job\", \"(.*)\") or label_replace(rate(spring_kafka_listener_seconds_count{result!=\"success\"}[20s]), \"protocol\", \"kafka\", \"job\", \"(.*)\")) / sum by (job, protocol) (label_replace(rate(http_server_requests_seconds_count{uri!~\"/actuator.*\"}[20s]), \"protocol\", \"http\", \"job\", \"(.*)\") or label_replace(rate(grpc_server_processing_duration_seconds_count[20s]), \"protocol\", \"grpc\", \"job\", \"(.*)\") or label_replace(rate(spring_kafka_listener_seconds_count[20s]), \"protocol\", \"kafka\", \"job\", \"(.*)\"))",
+              "legendFormat": "{{job}} ({{protocol}})"
             }
           ]
         },
         {
           "id": 3,
-          "title": "Average request latency (per service)",
+          "title": "Average request latency (per service and protocol)",
+          "description": "Sum/count ratio per protocol family, actuator endpoints excluded from the HTTP terms so health-check and scrape latency don't skew real request latency.",
           "type": "timeseries",
           "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
           "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
           "targets": [
             {
-              "expr": "sum(rate(http_server_requests_seconds_sum[1m])) by (job) / sum(rate(http_server_requests_seconds_count[1m])) by (job)",
-              "legendFormat": "{{job}}"
+              "expr": "sum by (job, protocol) (label_replace(rate(http_server_requests_seconds_sum{uri!~\"/actuator.*\"}[20s]), \"protocol\", \"http\", \"job\", \"(.*)\") or label_replace(rate(grpc_server_processing_duration_seconds_sum[20s]), \"protocol\", \"grpc\", \"job\", \"(.*)\") or label_replace(rate(spring_kafka_listener_seconds_sum[20s]), \"protocol\", \"kafka\", \"job\", \"(.*)\")) / sum by (job, protocol) (label_replace(rate(http_server_requests_seconds_count{uri!~\"/actuator.*\"}[20s]), \"protocol\", \"http\", \"job\", \"(.*)\") or label_replace(rate(grpc_server_processing_duration_seconds_count[20s]), \"protocol\", \"grpc\", \"job\", \"(.*)\") or label_replace(rate(spring_kafka_listener_seconds_count[20s]), \"protocol\", \"kafka\", \"job\", \"(.*)\"))",
+              "legendFormat": "{{job}} ({{protocol}})"
             }
           ]
         },
