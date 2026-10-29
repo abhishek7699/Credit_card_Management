@@ -150,6 +150,12 @@ public class RouteConfig {
                         .uri(bookingServiceUrl))
 
                 // ── Booking: submit (POST) ────────────────────────────────────────────
+                // Its own breaker id, "booking-submit-cb", distinct from room-search/
+                // booking-get's "booking-service-cb": this route's backend latency
+                // includes booking-service's own 5s gRPC deadline to transaction-service
+                // (BookingService#initiatePayment), so its circuit-breaker/time-limiter
+                // timeout must exceed 5s — set to 10s in CircuitBreakerConfig — without
+                // loosening the other two (unaffected) booking routes' timeout.
                 .route("booking-submit", r -> r
                         .path("/api/v1/bookings")
                         .and().method(HttpMethod.POST)
@@ -158,7 +164,7 @@ public class RouteConfig {
                                         .setRateLimiter(rateLimiter)
                                         .setKeyResolver(keyResolver))
                                 .circuitBreaker(c -> c
-                                        .setName("booking-service-cb")
+                                        .setName("booking-submit-cb")
                                         .setFallbackUri("forward:/fallback/booking")))
                         .uri(bookingServiceUrl))
 
