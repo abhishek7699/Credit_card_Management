@@ -89,6 +89,17 @@ class FallbackControllerTest {
     }
 
     @Test
+    void fallbackBooking_returns503() {
+        webClient.get().uri("/fallback/booking")
+                .exchange()
+                .expectStatus().isEqualTo(HttpStatus.SERVICE_UNAVAILABLE)
+                .expectBody()
+                .jsonPath("$.message").value(msg ->
+                        org.assertj.core.api.Assertions.assertThat(msg.toString())
+                                .containsIgnoringCase("booking"));
+    }
+
+    @Test
     void fallbackTransaction_post_returns503() {
         webClient.post().uri("/fallback/transaction")
                 .exchange()
@@ -117,6 +128,8 @@ class FallbackControllerTest {
         assertThat(meterRegistry.find("gateway.fallback.requests").tag("service", "transaction").counter())
                 .isNotNull();
         assertThat(meterRegistry.find("gateway.fallback.requests").tag("service", "reporting").counter())
+                .isNotNull();
+        assertThat(meterRegistry.find("gateway.fallback.requests").tag("service", "booking").counter())
                 .isNotNull();
     }
 

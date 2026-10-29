@@ -1,0 +1,63 @@
+spring:
+  application:
+    name: booking-service
+  datasource:
+    url: ${SPRING_DATASOURCE_URL}
+    username: ${SPRING_DATASOURCE_USERNAME:root}
+    password: ${SPRING_DATASOURCE_PASSWORD:}
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate.dialect: org.hibernate.dialect.PostgreSQLDialect
+      hibernate.jdbc.time_zone: UTC
+  kafka:
+    bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS}
+    consumer:
+      group-id: booking-service
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+      isolation-level: read_committed
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      properties:
+        spring.json.trusted.packages: "com.creditcard.*"
+        spring.json.use.type.headers: false
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    schemas: booking_service
+    create-schemas: true
+
+server:
+  port: 8080
+
+management:
+  server:
+    port: 8092
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: always
+      probes:
+        enabled: true
+
+grpc:
+  client:
+    transaction-service:
+      address: ${TRANSACTION_SERVICE_GRPC_ADDRESS:static://transaction-service:9090}
+      negotiation-type: plaintext
+      enable-keep-alive: true
+      keep-alive-without-calls: true
+      keep-alive-time: 30s
+      keep-alive-timeout: 5s
+
+booking:
+  merchant-id: ${BOOKING_MERCHANT_ID:HOTEL-001}
+  hold-timeout-minutes: ${BOOKING_HOLD_TIMEOUT_MINUTES:10}

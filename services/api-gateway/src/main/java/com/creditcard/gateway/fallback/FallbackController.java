@@ -33,6 +33,7 @@ public class FallbackController {
         // panel, no matter the rate window or scrape interval.
         counterFor("transaction");
         counterFor("reporting");
+        counterFor("booking");
     }
 
     @RequestMapping(value = "/{service}", method = {RequestMethod.GET, RequestMethod.POST,
@@ -42,6 +43,7 @@ public class FallbackController {
         String message = switch (service) {
             case "transaction" -> "Transaction service temporarily unavailable. Please retry shortly.";
             case "reporting" -> "Reporting service temporarily unavailable. Please retry shortly.";
+            case "booking" -> "Booking service temporarily unavailable. Please retry shortly.";
             default -> "Service temporarily unavailable. Please retry shortly.";
         };
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)

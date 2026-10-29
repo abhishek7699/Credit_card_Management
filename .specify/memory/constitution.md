@@ -1,29 +1,26 @@
 <!--
 SYNC IMPACT REPORT
 ==================
-Version change: 1.2.0 → 1.2.1 (PATCH — CI/CD tool references updated from GitLab CI/CD
-to GitHub Actions throughout; GitLab terminology "merge request" updated to GitHub "pull
-request")
+Version change: 1.2.1 → 1.3.0 (MINOR — governed scope expanded: booking-service added
+to Principle V's list of in-scope services, per the Roadmap in CLAUDE.md starting the
+"2a Booking" layer on top of the existing 7-service payment core)
 
 Modified principles:
-  - II. Test-First / 100% Coverage — "GitLab CI/CD pipeline" → "GitHub Actions workflow";
-    "merge request" → "pull request"
+  - V. Layered Microservice Architecture & Communication Tiers — "Services in scope"
+    list now includes `booking-service`
   - (no principle renamed or restructured)
 
-Security & Compliance Standards:
-  - Dependency scanning bullet: "GitLab CI/CD pipeline" → "GitHub Actions workflow"
+Security & Compliance Standards: no changes
 
-Infrastructure & Technology Stack:
-  - CI/CD table row: "GitLab CI/CD" → "GitHub Actions"
-  - Kubernetes manifests paragraph: "GitLab CI/CD pipeline" → "GitHub Actions workflow"
+Infrastructure & Technology Stack: no changes
 
 Governance:
-  - "All merge requests MUST include" → "All pull requests MUST include"
+  - Last Amended date updated
 
 Templates reviewed:
-  - .specify/templates/plan-template.md   ✅ no GitLab references found
-  - .specify/templates/spec-template.md   ✅ no GitLab references found
-  - .specify/templates/tasks-template.md  ✅ no GitLab references found
+  - .specify/templates/plan-template.md   ✅ no scope-list references found
+  - .specify/templates/spec-template.md   ✅ no scope-list references found
+  - .specify/templates/tasks-template.md  ✅ no scope-list references found
 
 Deferred TODOs: none
 -->
@@ -123,7 +120,7 @@ Rules:
 
 Services in scope: `api-gateway`, `transaction-service`, `authorization-service`,
 `fraud-detection-service`, `notification-service`, `settlement-service`,
-`reporting-service`.
+`reporting-service`, `booking-service`.
 
 ### VI. Observability & Audit Trail
 
@@ -282,4 +279,4 @@ begin until the web app is stable and approved.
   block the merge.
 - For runtime development guidance, refer to `CLAUDE.md` at the repository root.
 
-**Version**: 1.2.1 | **Ratified**: 2026-06-11 | **Last Amended**: 2026-06-18
+**Version**: 1.3.0 | **Ratified**: 2026-06-11 | **Last Amended**: 2026-10-29

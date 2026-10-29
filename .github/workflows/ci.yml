@@ -93,6 +93,7 @@ jobs:
             [settlement-service]=8085
             [notification-service]=8084
             [reporting-service]=8091
+            [booking-service]=8092
           )
 
           DEADLINE=$(( SECONDS + 150 ))

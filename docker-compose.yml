@@ -212,6 +212,28 @@ services:
       SPRING_DATASOURCE_USERNAME: ${DB_USERNAME}
       SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD}
 
+  booking-service:
+    build:
+      context: .
+      dockerfile: services/booking-service/Dockerfile
+    depends_on:
+      cockroachdb:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      transaction-service:
+        condition: service_started
+    ports:
+      - "8093:8080"
+      - "8092:8092"
+    environment:
+      JAVA_TOOL_OPTIONS: "-Xmx256m -XX:MaxMetaspaceSize=128m"
+      SPRING_DATASOURCE_URL: jdbc:postgresql://cockroachdb:26257/defaultdb?sslmode=disable&currentSchema=booking_service
+      SPRING_DATASOURCE_USERNAME: ${DB_USERNAME}
+      SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD}
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      TRANSACTION_SERVICE_GRPC_ADDRESS: static://transaction-service:9090
+
   api-gateway:
     build:
       context: .
@@ -223,6 +245,8 @@ services:
         condition: service_started
       reporting-service:
         condition: service_started
+      booking-service:
+        condition: service_started
     ports:
       - "8087:8080"
       - "8088:8090"
@@ -233,4 +257,5 @@ services:
       AUTH_SERVICE_JWKS_URI: http://auth-service:9000/.well-known/jwks.json
       TRANSACTION_SERVICE_GRPC_ADDRESS: static://transaction-service:9090
       REPORTING_SERVICE_URL: http://reporting-service:8086
+      BOOKING_SERVICE_URL: http://booking-service:8080
 

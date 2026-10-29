@@ -1,0 +1,155 @@
+plugins {
+    id 'java'
+    id 'org.springframework.boot' version '3.2.5'
+    id 'io.spring.dependency-management' version '1.1.4'
+    id 'com.google.protobuf' version '0.9.4'
+    id 'jacoco'
+}
+
+group = 'com.creditcard'
+version = '0.0.1-SNAPSHOT'
+
+ext {
+    grpcVersion           = '1.63.0'
+    protobufVersion       = '3.25.3'
+    lognetGrpcVersion     = '3.1.0.RELEASE'
+    testcontainersVersion = '2.0.5'
+}
+
+dependencies {
+    // Exposes /actuator/prometheus for k8s/monitoring to scrape
+    implementation 'io.micrometer:micrometer-registry-prometheus'
+
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
+
+    // Spring Kafka
+    implementation 'org.springframework.kafka:spring-kafka'
+
+    // Database — CockroachDB uses PostgreSQL wire protocol
+    runtimeOnly 'org.postgresql:postgresql'
+
+    // Flyway database migrations
+    implementation 'org.flywaydb:flyway-core'
+
+    // Jackson JSR-310 module for Instant/LocalDate serialization
+    implementation 'com.fasterxml.jackson.datatype:jackson-datatype-jsr310'
+
+    // gRPC — client-side only, to call transaction-service (same versions as api-gateway)
+    implementation "net.devh:grpc-client-spring-boot-starter:${lognetGrpcVersion}"
+    implementation "io.grpc:grpc-protobuf:${grpcVersion}"
+    implementation "io.grpc:grpc-stub:${grpcVersion}"
+    implementation "io.grpc:grpc-netty:${grpcVersion}"
+    implementation "com.google.protobuf:protobuf-java:${protobufVersion}"
+
+    // Required by gRPC generated stubs
+    compileOnly 'jakarta.annotation:jakarta.annotation-api'
+    compileOnly 'javax.annotation:javax.annotation-api:1.3.2'
+
+    // Structured JSON logging
+    implementation 'net.logstash.logback:logstash-logback-encoder:7.4'
+
+    // ── Test dependencies ──────────────────────────────────────────────────────
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'org.springframework.kafka:spring-kafka-test'
+    testImplementation "io.grpc:grpc-testing:${grpcVersion}"
+    testImplementation "org.testcontainers:testcontainers-postgresql:${testcontainersVersion}"
+    testImplementation "org.testcontainers:testcontainers:${testcontainersVersion}"
+    testImplementation "org.testcontainers:testcontainers-junit-jupiter:${testcontainersVersion}"
+    testImplementation 'org.mockito:mockito-core'
+    testImplementation 'org.awaitility:awaitility'
+
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+// ── Protobuf plugin — reuse proto from repo root ───────────────────────────
+protobuf {
+    protoc {
+        artifact = "com.google.protobuf:protoc:${protobufVersion}"
+    }
+    plugins {
+        grpc {
+            artifact = "io.grpc:protoc-gen-grpc-java:${grpcVersion}"
+        }
+    }
+    generateProtoTasks {
+        all()*.plugins {
+            grpc {}
+        }
+    }
+    generatedFilesBaseDir = "$buildDir/generated/source/proto"
+}
+
+sourceSets {
+    main {
+        proto {
+            srcDir "${rootProject.projectDir}/proto"
+        }
+        java {
+            srcDirs += [
+                "$buildDir/generated/source/proto/main/java",
+                "$buildDir/generated/source/proto/main/grpc"
+            ]
+        }
+    }
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+
+compileJava.dependsOn generateProto
+compileTestJava.dependsOn generateProto
+
+test {
+    useJUnitPlatform()
+    finalizedBy jacocoTestReport
+}
+
+jacoco {
+    toolVersion = '0.8.11'
+}
+
+def jacocoExcludes = [
+    '**/BookingServiceApplication.class',
+    '**/transaction/grpc/**',
+]
+
+def filteredClassDirs = {
+    fileTree(dir: "${buildDir}/classes/java/main", excludes: jacocoExcludes)
+}
+
+jacocoTestReport {
+    dependsOn test, compileJava, processResources
+    reports {
+        xml.required = true
+        html.required = true
+    }
+    classDirectories.setFrom(files(filteredClassDirs))
+}
+
+jacocoTestCoverageVerification {
+    dependsOn jacocoTestReport
+    violationRules {
+        rule {
+            limit {
+                counter = 'INSTRUCTION'
+                value   = 'COVEREDRATIO'
+                minimum = 1.0
+            }
+            limit {
+                counter = 'BRANCH'
+                value   = 'COVEREDRATIO'
+                minimum = 1.0
+            }
+        }
+    }
+    classDirectories.setFrom(files(filteredClassDirs))
+}
+
+check {
+    dependsOn jacocoTestCoverageVerification
+}
