@@ -98,6 +98,12 @@ start_port_forward() {
   local svc=$1; shift
   kubectl port-forward -n "${K8S_NAMESPACE}" "svc/${svc}" "$@" >/dev/null 2>&1 &
   PF_PIDS+=($!)
+  # disown: without this, bash's own job-control notifications (not the
+  # port-forward process's redirected stdout/stderr -- this is the shell
+  # itself reporting job state) print a "[1]+  Terminated: 15  kubectl
+  # port-forward ..." line to the terminal every time one of these gets
+  # killed below or in cleanup(), even though the kill is always expected.
+  disown "$!" 2>/dev/null || true
 }
 
 start_port_forwards() {
@@ -600,7 +606,14 @@ wait_circuit_breaker_closed() {
 step8_circuit_breaker() {
   info "Step 8 — Circuit breaker test (stopping transaction-service)"
 
+  local original_replicas
   if [[ "${TARGET}" == "kind" ]]; then
+    # Read the deployment's actual configured replica count rather than
+    # hardcoding it -- k8s/overlays/kind runs 1 per service (k8s/overlays/gke
+    # runs the base's 2), and scaling back up to a hardcoded wrong number
+    # would drift from the deployment's real spec until the next apply.
+    original_replicas=$(kubectl get deployment/transaction-service -n "${K8S_NAMESPACE}" \
+      -o jsonpath='{.spec.replicas}')
     kubectl scale deployment/transaction-service -n "${K8S_NAMESPACE}" --replicas=0
   else
     docker compose -f "${COMPOSE_FILE}" stop transaction-service 2>/dev/null
@@ -632,8 +645,14 @@ step8_circuit_breaker() {
 
   # Restart transaction-service for subsequent steps
   if [[ "${TARGET}" == "kind" ]]; then
-    kubectl scale deployment/transaction-service -n "${K8S_NAMESPACE}" --replicas=2
-    kubectl wait --for=condition=ready pod -l app=transaction-service -n "${K8S_NAMESPACE}" --timeout=90s || true
+    kubectl scale deployment/transaction-service -n "${K8S_NAMESPACE}" --replicas="${original_replicas}"
+    # Best-effort: wait_http right below is the real health gate for this
+    # step, so a slow-but-successful scale-up isn't a failure here -- just
+    # don't let kubectl's raw per-pod "timed out waiting..." lines spam the
+    # output on a slow settle. A genuine problem still surfaces normally,
+    # as a wait_http/fail below.
+    kubectl wait --for=condition=ready pod -l app=transaction-service -n "${K8S_NAMESPACE}" --timeout=90s \
+      >/dev/null 2>&1 || info "transaction-service pods still settling after scale-up (continuing -- the health check below is the real gate)"
     # The old port-forward was tunneling to a specific pod that no longer
     # exists after the scale-down/up cycle -- kubectl port-forward doesn't
     # re-resolve mid-session, so every forward needs restarting fresh.

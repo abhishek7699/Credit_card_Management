@@ -1,0 +1,24 @@
+# 1 replica per service on local kind -- the GKE/production default (2,
+# inherited unchanged from ../../base) doubles every JVM's startup CPU/memory
+# footprint at once during a rollout, which is what caused the cascading
+# pod-restart instability on this single-node cluster (see README/commit
+# history for scripts/k8s-up.sh). Halving it to 1 removes that pressure
+# entirely for local use; nothing here changes what ships to GKE.
+resources:
+  - ../../base
+
+replicas:
+  - name: api-gateway
+    count: 1
+  - name: authorization-service
+    count: 1
+  - name: fraud-detection-service
+    count: 1
+  - name: notification-service
+    count: 1
+  - name: reporting-service
+    count: 1
+  - name: settlement-service
+    count: 1
+  - name: transaction-service
+    count: 1

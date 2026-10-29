@@ -1,0 +1,5 @@
+# Production/GKE default: no patches, replicas: 2 inherited unchanged from
+# ../../base. Exists for symmetry with k8s/overlays/kind, so the replica count
+# a given target gets is always explicit at the apply call site.
+resources:
+  - ../../base

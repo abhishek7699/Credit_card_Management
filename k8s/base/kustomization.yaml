@@ -1,0 +1,31 @@
+# Base: the 7 service Deployments + Services, each committed at replicas: 2 --
+# that's the production/GKE default. Moved here (from a flat k8s/<service>/
+# layout) because Kustomize's default load restrictor refuses to let a
+# kustomization reference files outside its own directory tree -- a base
+# can't just point `../` at siblings, it has to actually contain them.
+# k8s/namespace.yaml, k8s/infra/*, and the generated Secrets are applied
+# directly by scripts/k8s-up.sh (not through Kustomize) and are unaffected
+# by this file or either overlay in ../overlays/.
+#
+# Overlays:
+#   k8s/overlays/kind -- 1 replica per service, to cut memory pressure during
+#     rollouts on a single-node local kind cluster.
+#   k8s/overlays/gke  -- no patches; inherits replicas: 2 from this base
+#     unchanged. Exists so "which replica count am I getting" always has an
+#     explicit answer at the call site, instead of a bare `kubectl apply -f
+#     k8s/` leaving it implicit.
+resources:
+  - api-gateway/deployment.yaml
+  - api-gateway/service.yaml
+  - authorization-service/deployment.yaml
+  - authorization-service/service.yaml
+  - fraud-detection-service/deployment.yaml
+  - fraud-detection-service/service.yaml
+  - notification-service/deployment.yaml
+  - notification-service/service.yaml
+  - reporting-service/deployment.yaml
+  - reporting-service/service.yaml
+  - settlement-service/deployment.yaml
+  - settlement-service/service.yaml
+  - transaction-service/deployment.yaml
+  - transaction-service/service.yaml
