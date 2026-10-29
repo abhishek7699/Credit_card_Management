@@ -86,14 +86,14 @@ spec:
             - -c
             - |
               set -e
-              META_FILE=/var/lib/kafka/data/meta.properties
+              META_FILE=/var/lib/kafka/data/logs/meta.properties
               if [ -f "$META_FILE" ]; then
                 STORED_ID=$(sed -n 's/^cluster\.id=//p' "$META_FILE")
                 ZK_ID=$(zookeeper-shell zookeeper:2181 get /cluster/id 2>/dev/null \
                   | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
                 if [ -n "$ZK_ID" ] && [ -n "$STORED_ID" ] && [ "$STORED_ID" != "$ZK_ID" ]; then
                   echo "Cluster ID mismatch (broker has ${STORED_ID}, zookeeper has ${ZK_ID}) -- clearing stale broker data for a clean rejoin"
-                  rm -rf /var/lib/kafka/data/*
+                  rm -rf /var/lib/kafka/data/logs/*
                 fi
               fi
               exec /etc/confluent/docker/run
@@ -106,8 +106,21 @@ spec:
               value: PLAINTEXT://kafka:9092
             - name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR
               value: "1"
+            # A subdirectory, not the PVC mount's root: GKE's persistent-disk
+            # PVs are ext4-formatted and every ext4 filesystem has a
+            # lost+found directory at its root, used for orphaned-inode
+            # recovery after an unclean shutdown/fsck. Kafka's log-dir
+            # scanner expects every entry under KAFKA_LOG_DIRS to be a
+            # "<topic>-<partition>" directory and refuses to start
+            # otherwise: "Found directory ... not in the form of
+            # topic-partition" -- confirmed live on GKE. kind's storage
+            # (a bind-mounted directory, not a formatted block device)
+            # never has this, which is why it only showed up on GKE.
+            # Pointing at a subdirectory keeps lost+found (which lives at
+            # the mount's top level, outside this subdirectory) out of
+            # what Kafka ever scans, on both targets.
             - name: KAFKA_LOG_DIRS
-              value: /var/lib/kafka/data
+              value: /var/lib/kafka/data/logs
             # Not set in docker-compose.yml (image default is ~1G heap) — explicitly
             # tuned down here to fit this rehearsal's memory budget.
             - name: KAFKA_HEAP_OPTS
