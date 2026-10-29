@@ -250,19 +250,19 @@ including both terminal-state edge cases, behaves per spec.
 e2e only — no Kubernetes, per the current step's clarification) and closing out the
 coverage gate.
 
-- [ ] T040 [P] Add a `booking-service` entry to `docker-compose.yml` (image build,
+- [X] T040 [P] Add a `booking-service` entry to `docker-compose.yml` (image build,
       env vars matching `application.yml`, CockroachDB database bootstrap step — same
       shape as every other service's entry)
-- [ ] T041 [P] Add `booking-service` to the Gradle build/test matrix in
+- [X] T041 [P] Add `booking-service` to the Gradle build/test matrix in
       `.github/workflows/ci.yml`
-- [ ] T042 Add e2e step 12 (book a room, reach CONFIRMED) to `scripts/e2e-test.sh`
-- [ ] T043 Add e2e step 13 (declined card → CANCELLED, room available again) to
+- [X] T042 Add e2e step 12 (book a room, reach CONFIRMED) to `scripts/e2e-test.sh`
+- [X] T043 Add e2e step 13 (declined card → CANCELLED, room available again) to
       `scripts/e2e-test.sh`
-- [ ] T044 Run every scenario in `specs/008-booking-service/quickstart.md` end to end,
+- [X] T044 Run every scenario in `specs/008-booking-service/quickstart.md` end to end,
       including the transactionId-race and gRPC-deadline edge cases
-- [ ] T045 Verify 100% JaCoCo instruction + branch coverage for `booking-service`
+- [X] T045 Verify 100% JaCoCo instruction + branch coverage for `booking-service`
       (Principle II gate) and fix any gap
-- [ ] T046 [P] Log anything discovered during implementation that is out of this
+- [X] T046 [P] Log anything discovered during implementation that is out of this
       layer's spec in `docs/BACKLOG.md` instead of building it (CLAUDE.md "no
       speculative features")
 

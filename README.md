@@ -1,13 +1,35 @@
 # Credit Card Payment Gateway
 
-A 7-service payment processing system — authorization, fraud detection,
-settlement, notifications, and reporting, fronted by an API gateway and
-driven end-to-end by Kafka — built to rehearse the full lifecycle of a
-real microservices stack: local development, CI with 100% test coverage,
-a Kubernetes dry run on `kind`, and a path to a real GKE deployment.
-Every piece (tokenization, rate limiting, circuit breaking, settlement
-batching) is wired for real, not stubbed, and verified by an 11-step
+A payment processing system — authorization, fraud detection, settlement,
+notifications, and reporting, fronted by an API gateway and driven
+end-to-end by Kafka — built to rehearse the full lifecycle of a real
+microservices stack: local development, CI with 100% test coverage, a
+Kubernetes dry run on `kind`, and a path to a real GKE deployment. Every
+piece (tokenization, rate limiting, circuit breaking, settlement
+batching) is wired for real, not stubbed, and verified by a 13-step
 end-to-end test against a live card submission.
+
+**Layered on top of that payment core** is a hotel booking system,
+added one layer at a time (see `CLAUDE.md`'s Roadmap): `booking-service`
+(layer 2a) is the first layer — rooms, availability search, and a
+front-desk-staff booking saga. Hotel layers never touch card data
+themselves; they only ask the payment core to charge and react to the
+result over the same gRPC/Kafka contracts the original 7 services
+already use. Later layers (room status, charges, a staff frontend) build
+on this one the same way.
+
+## Services
+
+| Service | Role |
+|---|---|
+| `api-gateway` | External REST entry point — JWT auth, per-route RBAC, rate limiting, circuit breaking, bridges REST→gRPC for `transaction-service` |
+| `transaction-service` | Tokenizes cards via Vault, persists transactions, publishes `transaction.initiated` |
+| `authorization-service` | Consumes `transaction.initiated`, authorizes/declines against a card account's credit, publishes `transaction.status.updated` |
+| `fraud-detection-service` | Consumes `transaction.initiated` in parallel, evaluates and records a fraud decision |
+| `notification-service` | Consumes `transaction.status.updated`, sends email/SMS notifications |
+| `settlement-service` | Batches authorized transactions into settlement runs (Spring Batch) |
+| `reporting-service` | Read-only queries across the other services' data for dashboards/support |
+| `booking-service` | **Layer 2a.** Room inventory, availability search, and the staff booking saga (HELD → charge via `transaction-service` → CONFIRMED/CANCELLED), consuming the same `transaction.status.updated` event |
 
 ## Architecture
 
@@ -16,6 +38,7 @@ flowchart LR
     Client -->|HTTPS + JWT| Gateway[api-gateway]
     Gateway -->|gRPC| Txn[transaction-service]
     Gateway -->|HTTP| Report[reporting-service]
+    Gateway -->|HTTP, FRONT_DESK role| Booking[booking-service]
     Gateway -.->|rate limit| Redis[(Redis)]
 
     Txn -->|Vault Transit: tokenize PAN| Vault[(Vault)]
@@ -29,26 +52,34 @@ flowchart LR
     Fraud -->|fraud.alert.raised| Kafka
     Kafka --> Notify[notification-service]
     Kafka --> Txn
+    Kafka --> Booking
 
-    Txn & Auth & Fraud & Settle & Notify -->|JDBC| CRDB[(CockroachDB)]
+    Booking -->|gRPC InitiateTransaction| Txn
+
+    Txn & Auth & Fraud & Settle & Notify & Booking -->|JDBC| CRDB[(CockroachDB)]
     Report -->|JDBC, read-only| CRDB
 
-    Prom[Prometheus] -.scrapes.-> Txn & Auth & Fraud & Settle & Notify & Report & Gateway
+    Prom[Prometheus] -.scrapes.-> Txn & Auth & Fraud & Settle & Notify & Report & Gateway & Booking
     Grafana -.queries.-> Prom
 ```
 
 Each service owns its own schema in a shared CockroachDB cluster (no
 cross-service table access except `reporting-service`'s intentionally
 read-only queries) and talks to its neighbors only through Kafka events
-or, for the gateway's hot path to `transaction-service`, gRPC. Card
-numbers are tokenized via Vault's Transit engine before anything ever
-touches a database or log line — Step 6 of the e2e test (below) scans
-every service's logs for the raw PAN on every run to prove that.
+or, for the gateway's hot path to `transaction-service` (and
+`booking-service`'s own call to it), gRPC. Card numbers are tokenized
+via Vault's Transit engine before anything ever touches a database or
+log line — Step 6 of the e2e test (below) scans every service's logs
+for the raw PAN on every run to prove that. `booking-service` never
+receives a tokenized or raw card number back from this path — it only
+forwards what the caller submitted to `transaction-service` and reacts
+to the resulting `transaction.status.updated` event, the same contract
+`notification-service` and `settlement-service` already consume.
 
 ## Tech stack
 
 - **Services**: Java 17, Spring Boot 3.2, Spring Data JPA, Spring Kafka, Spring Cloud Gateway (WebFlux)
-- **Resilience**: Resilience4j (circuit breakers on the gateway's calls to `transaction-service` and `reporting-service`), Redis-backed rate limiting
+- **Resilience**: Resilience4j (circuit breakers on the gateway's calls to `transaction-service`, `reporting-service`, and `booking-service` — the booking-submission route carries its own longer timeout, see Engineering challenges below), Redis-backed rate limiting
 - **Transport**: gRPC (gateway → transaction-service), Kafka (everything else), REST
 - **Data**: CockroachDB (Postgres wire protocol), Flyway migrations per service
 - **Secrets**: HashiCorp Vault (Transit engine for PAN tokenization)
@@ -110,6 +141,8 @@ service and asserts on each hop:
 9. **Reporting query** — confirms `reporting-service` returns the transaction with a masked card number
 10. **Settlement** — triggers a settlement batch, polls until `SETTLED`
 11. **Fraud + notification records** — confirms both side-effects landed in their own services' tables
+12. **Booking confirmed** — a `FRONT_DESK`-role staff JWT books a room through `booking-service` with a card the payment core authorizes; polls until the booking reaches `CONFIRMED` (compose only — `booking-service` has no `kind`/GKE manifests yet)
+13. **Booking declined** — books a different room with a card that has no seeded account (an automatic decline, no extra seeding needed); confirms the booking reaches `CANCELLED` with reason `PAYMENT_DECLINED` and the room reappears in availability search (compose only)
 
 ## Engineering challenges
 
@@ -127,8 +160,22 @@ tokenization deterministic (so the same PAN always maps to the same
 token — `settlement-service` and `reporting-service` both need to
 recognize the same card across independent transactions), and adding
 `reporting-service`'s single-transaction lookup endpoint that the e2e
-test's Step 9 actually needed and didn't have. All 11 steps pass
+test's Step 9 actually needed and didn't have. All steps pass
 end-to-end as a result.
+
+**A circuit-breaker timeout shorter than the backend's own deadline.**
+`booking-service`'s booking-submission saga calls `transaction-service`
+over gRPC with its own 5s deadline — correct in isolation, but the
+gateway's default circuit-breaker/time-limiter timeout was *also* 5s, on
+the same route. Under any real latency the gateway gave up and served a
+503 fallback before `booking-service`'s own deadline logic ever got a
+chance to run — observed live on docker-compose, not just in a test.
+Fixed by giving that one route its own breaker id with a 10s timeout
+(every other route, including the booking service's other two routes,
+is unaffected), and added an integration test that asserts a 7s backend
+delay now succeeds on booking-submission but still falls back on
+room-search — proving the fix is scoped to the one route that needed
+it, not a blanket loosening.
 
 **Testcontainers stopped finding Docker — on a CI image we didn't change.**
 CI started failing with every Testcontainers-backed test throwing
@@ -162,12 +209,16 @@ with the cluster up, repeatedly, until it recovered on its own.
 ## Project layout
 
 ```
-services/<name>/       7 independent Spring Boot services
-k8s/base/               Kubernetes manifests, replicas: 2 (the GKE default)
+services/<name>/       8 independent Spring Boot services (7-service payment core
+                        + booking-service, the first hotel layer on top of it)
+k8s/base/               Kubernetes manifests, replicas: 2 (the GKE default) —
+                        the 7 payment-core services; booking-service's k8s/GKE
+                        wiring is deferred to the backlog (see CLAUDE.md)
 k8s/overlays/kind       1 replica per service, local-only images
 k8s/overlays/gke        images rewritten to Artifact Registry
 k8s/infra/              CockroachDB, Kafka, Zookeeper, Vault, Redis, Prometheus, Grafana
 scripts/                k8s-up/down, gke-deploy, demo-up/down, e2e-test
 docs/GKE.md             exact gcloud commands for a real deployment
+docs/BACKLOG.md         scope deliberately deferred to a later layer or pass
 SECURITY.md             what's dev-only and must not ship as-is
 ```

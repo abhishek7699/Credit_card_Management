@@ -16,6 +16,7 @@ NOTIF_MGMT=8084
 SETTLE_MGMT=8085
 REPORT_PORT=8086
 REPORT_MGMT=8091
+BOOKING_MGMT=8092
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COMPOSE_FILE="${REPO_ROOT}/docker-compose.yml"
@@ -73,6 +74,7 @@ NC='\033[0m'
 pass() { echo -e "${GREEN}[PASS]${NC} $1"; RESULTS+=("PASS  | $1"); }
 fail() { echo -e "${RED}[FAIL]${NC} $1"; RESULTS+=("FAIL  | $1"); FAILED=1; }
 info() { echo -e "${YELLOW}[INFO]${NC} $1"; }
+skip() { echo -e "${YELLOW}[SKIP]${NC} $1"; RESULTS+=("SKIP  | $1"); }
 
 RESULTS=()
 FAILED=0
@@ -170,6 +172,13 @@ step2_health_checks() {
   wait_http "notification-service"    "http://localhost:${NOTIF_MGMT}/actuator/health"  180 || { fail "Step 2 — notification-service unhealthy";     ok=0; }
   wait_http "reporting-service"       "http://localhost:${REPORT_MGMT}/actuator/health" 180 || { fail "Step 2 — reporting-service unhealthy";        ok=0; }
   wait_http "settlement-service"      "http://localhost:${SETTLE_MGMT}/actuator/health" 180 || { fail "Step 2 — settlement-service unhealthy";       ok=0; }
+
+  # booking-service has no k8s manifests yet (deferred to the backlog per the
+  # Roadmap in CLAUDE.md) -- only wait for it, and only run steps 12-13 later,
+  # in compose mode.
+  if [[ "${TARGET}" == "compose" ]]; then
+    wait_http "booking-service" "http://localhost:${BOOKING_MGMT}/actuator/health" 180 || { fail "Step 2 — booking-service unhealthy"; ok=0; }
+  fi
 
   [[ $ok -eq 1 ]] && pass "Step 2 — All services healthy"
 }
@@ -438,12 +447,13 @@ step3_obtain_jwt() {
   info "Step 3 — Obtaining JWT from auth-service mock"
   MERCHANT_JWT=$(make_jwt "merchant-e2e-001" "ROLE_MERCHANT" "merchant-e2e-001")
   ADMIN_JWT=$(make_jwt "admin-e2e-001" "ROLE_ADMIN" "")
+  FRONT_DESK_JWT=$(make_jwt "staff-e2e-001" "ROLE_FRONT_DESK" "")
 
-  if [[ -z "$MERCHANT_JWT" || -z "$ADMIN_JWT" ]]; then
+  if [[ -z "$MERCHANT_JWT" || -z "$ADMIN_JWT" || -z "$FRONT_DESK_JWT" ]]; then
     fail "Step 3 — JWT generation failed"
     return 1
   fi
-  export MERCHANT_JWT ADMIN_JWT
+  export MERCHANT_JWT ADMIN_JWT FRONT_DESK_JWT
   pass "Step 3 — JWT tokens obtained"
 }
 
@@ -792,6 +802,177 @@ step11_fraud_and_notification_records() {
   fi
 }
 
+# ── Step 12: Booking — staff books a room, reaches CONFIRMED ─────────────────
+# Layer 2a (booking-service) on top of the payment core: front-desk staff
+# (FRONT_DESK role) search availability and submit a booking through the same
+# api-gateway; the saga authorizes via the existing payment core and confirms
+# asynchronously off the same transaction.status.updated event steps 4-5
+# already exercise.
+step12_booking_confirmed() {
+  if [[ "${TARGET}" == "kind" ]]; then
+    skip "Step 12 — booking-service has no k8s manifests yet (deferred to the backlog); compose-only for this layer"
+    return 0
+  fi
+
+  info "Step 12 — Staff books a room and it reaches CONFIRMED"
+
+  local check_in="2030-01-10" check_out="2030-01-12"
+  local resp http_code body room_id
+
+  resp=$(curl -s -w '\n%{http_code}' \
+    "http://localhost:${GW_PORT}/api/v1/rooms?checkIn=${check_in}&checkOut=${check_out}" \
+    -H "Authorization: Bearer ${FRONT_DESK_JWT}" 2>/dev/null)
+  http_code=$(echo "$resp" | tail -1)
+  body=$(echo "$resp" | sed '$d')
+
+  if [[ "$http_code" != "200" ]]; then
+    fail "Step 12 — Room search failed: expected 200, got ${http_code}. Body: ${body}"
+    return 1
+  fi
+
+  room_id=$(echo "$body" | python3 -c "import sys,json; rooms=json.load(sys.stdin); print(rooms[0]['roomId'] if rooms else '')" 2>/dev/null || echo "")
+  if [[ -z "$room_id" ]]; then
+    fail "Step 12 — No available room returned for ${check_in} to ${check_out}"
+    return 1
+  fi
+
+  resp=$(curl -s -w '\n%{http_code}' \
+    -X POST "http://localhost:${GW_PORT}/api/v1/bookings" \
+    -H "Authorization: Bearer ${FRONT_DESK_JWT}" \
+    -H "Content-Type: application/json" \
+    -d "{\"roomId\":\"${room_id}\",\"checkIn\":\"${check_in}\",\"checkOut\":\"${check_out}\",\"guestName\":\"E2E Guest\",\"card\":{\"cardNumber\":\"${CARD_PAN}\",\"expiry\":\"12/27\",\"cvv\":\"123\",\"cardholderName\":\"E2E Guest\"}}" \
+    2>/dev/null)
+  http_code=$(echo "$resp" | tail -1)
+  body=$(echo "$resp" | sed '$d')
+
+  if [[ "$http_code" != "201" ]]; then
+    fail "Step 12 — Booking submission failed: expected 201, got ${http_code}. Body: ${body}"
+    return 1
+  fi
+
+  local booking_id status=""
+  booking_id=$(echo "$body" | python3 -c "import sys,json; print(json.load(sys.stdin).get('bookingId',''))" 2>/dev/null || echo "")
+  if [[ -z "$booking_id" ]]; then
+    fail "Step 12 — No bookingId in response: ${body}"
+    return 1
+  fi
+
+  local max=60 elapsed=0 interval=3
+  while [[ $elapsed -lt $max ]]; do
+    resp=$(curl -s -w '\n%{http_code}' "http://localhost:${GW_PORT}/api/v1/bookings/${booking_id}" \
+      -H "Authorization: Bearer ${FRONT_DESK_JWT}" 2>/dev/null)
+    http_code=$(echo "$resp" | tail -1)
+    body=$(echo "$resp" | sed '$d')
+    if [[ "$http_code" == "200" ]]; then
+      status=$(echo "$body" | python3 -c "import sys,json; print(json.load(sys.stdin).get('status',''))" 2>/dev/null || echo "")
+      [[ "$status" == "CONFIRMED" ]] && break
+    fi
+    elapsed=$((elapsed + interval))
+    sleep "$interval"
+  done
+
+  if [[ "$status" == "CONFIRMED" ]]; then
+    pass "Step 12 — Booking ${booking_id} reached CONFIRMED (room ${room_id})"
+  else
+    fail "Step 12 — Booking ${booking_id} did not reach CONFIRMED within ${max}s (last status=${status})"
+  fi
+}
+
+# ── Step 13: Booking — declined card cancels and frees the room ─────────────
+step13_booking_declined() {
+  if [[ "${TARGET}" == "kind" ]]; then
+    skip "Step 13 — booking-service has no k8s manifests yet (deferred to the backlog); compose-only for this layer"
+    return 0
+  fi
+
+  info "Step 13 — Declined card cancels the booking and frees the room"
+
+  local check_in="2030-02-10" check_out="2030-02-12"
+  local resp http_code body room_id
+
+  resp=$(curl -s -w '\n%{http_code}' \
+    "http://localhost:${GW_PORT}/api/v1/rooms?checkIn=${check_in}&checkOut=${check_out}" \
+    -H "Authorization: Bearer ${FRONT_DESK_JWT}" 2>/dev/null)
+  http_code=$(echo "$resp" | tail -1)
+  body=$(echo "$resp" | sed '$d')
+
+  if [[ "$http_code" != "200" ]]; then
+    fail "Step 13 — Room search failed: expected 200, got ${http_code}. Body: ${body}"
+    return 1
+  fi
+
+  room_id=$(echo "$body" | python3 -c "import sys,json; rooms=json.load(sys.stdin); print(rooms[0]['roomId'] if rooms else '')" 2>/dev/null || echo "")
+  if [[ -z "$room_id" ]]; then
+    fail "Step 13 — No available room returned for ${check_in} to ${check_out}"
+    return 1
+  fi
+
+  # A card with no seeded authorization_service.card_accounts row is declined
+  # deterministically as INVALID_CARD (AuthorizationService#authorize) — no
+  # extra seeding needed, unlike the always-authorized CARD_PAN above.
+  resp=$(curl -s -w '\n%{http_code}' \
+    -X POST "http://localhost:${GW_PORT}/api/v1/bookings" \
+    -H "Authorization: Bearer ${FRONT_DESK_JWT}" \
+    -H "Content-Type: application/json" \
+    -d "{\"roomId\":\"${room_id}\",\"checkIn\":\"${check_in}\",\"checkOut\":\"${check_out}\",\"guestName\":\"E2E Declined Guest\",\"card\":{\"cardNumber\":\"4000000000000002\",\"expiry\":\"12/27\",\"cvv\":\"123\",\"cardholderName\":\"E2E Declined Guest\"}}" \
+    2>/dev/null)
+  http_code=$(echo "$resp" | tail -1)
+  body=$(echo "$resp" | sed '$d')
+
+  if [[ "$http_code" != "201" ]]; then
+    fail "Step 13 — Booking submission failed: expected 201, got ${http_code}. Body: ${body}"
+    return 1
+  fi
+
+  local booking_id status="" reason=""
+  booking_id=$(echo "$body" | python3 -c "import sys,json; print(json.load(sys.stdin).get('bookingId',''))" 2>/dev/null || echo "")
+  if [[ -z "$booking_id" ]]; then
+    fail "Step 13 — No bookingId in response: ${body}"
+    return 1
+  fi
+
+  local max=60 elapsed=0 interval=3
+  while [[ $elapsed -lt $max ]]; do
+    resp=$(curl -s -w '\n%{http_code}' "http://localhost:${GW_PORT}/api/v1/bookings/${booking_id}" \
+      -H "Authorization: Bearer ${FRONT_DESK_JWT}" 2>/dev/null)
+    http_code=$(echo "$resp" | tail -1)
+    body=$(echo "$resp" | sed '$d')
+    if [[ "$http_code" == "200" ]]; then
+      status=$(echo "$body" | python3 -c "import sys,json; print(json.load(sys.stdin).get('status',''))" 2>/dev/null || echo "")
+      [[ "$status" == "CANCELLED" ]] && break
+    fi
+    elapsed=$((elapsed + interval))
+    sleep "$interval"
+  done
+
+  if [[ "$status" != "CANCELLED" ]]; then
+    fail "Step 13 — Booking ${booking_id} did not reach CANCELLED within ${max}s (last status=${status})"
+    return 1
+  fi
+
+  reason=$(echo "$body" | python3 -c "import sys,json; print(json.load(sys.stdin).get('cancellationReason',''))" 2>/dev/null || echo "")
+  if [[ "$reason" != "PAYMENT_DECLINED" ]]; then
+    fail "Step 13 — Expected cancellationReason PAYMENT_DECLINED, got ${reason}"
+    return 1
+  fi
+  pass "Step 13 — Booking ${booking_id} cancelled (reason=${reason})"
+
+  resp=$(curl -s -w '\n%{http_code}' \
+    "http://localhost:${GW_PORT}/api/v1/rooms?checkIn=${check_in}&checkOut=${check_out}" \
+    -H "Authorization: Bearer ${FRONT_DESK_JWT}" 2>/dev/null)
+  http_code=$(echo "$resp" | tail -1)
+  body=$(echo "$resp" | sed '$d')
+  if [[ "$http_code" == "200" ]] && echo "$body" | python3 -c "
+import sys, json
+rooms = json.load(sys.stdin)
+sys.exit(0 if any(r.get('roomId') == '${room_id}' for r in rooms) else 1)
+" 2>/dev/null; then
+    pass "Step 13 — Room ${room_id} is available again after the decline"
+  else
+    fail "Step 13 — Room ${room_id} did not reappear in availability search after the decline"
+  fi
+}
+
 # ── Cleanup ───────────────────────────────────────────────────────────────────
 cleanup() {
   info "Cleaning up auth-service mock container"
@@ -862,6 +1043,8 @@ main() {
   step9_reporting_query
   step10_settlement
   step11_fraud_and_notification_records
+  step12_booking_confirmed
+  step13_booking_declined
 
   print_summary
 }
