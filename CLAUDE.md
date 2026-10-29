@@ -12,6 +12,12 @@ I want to learn the codebase, not just get changes. For every task:
 - Show me the exact commands you run and what each one does.
 - After finishing, give a per-file summary and point me to the single most important change to read first.
 - Prefer small, separate changes over one large one.
+- Approval granularity: for `/speckit-tasks`-generated work, approve per **phase**
+  (Setup / Foundational / each user story / Polish), not per individual task. Implement
+  a whole phase, commit it, then stop and show the checkpoint for that phase before
+  moving to the next. This supersedes the constitution's Principle IV at the
+  method/class level for the duration of a phase; the phase boundary is still a hard
+  stop.
 
 ## Working approach
 - Make it operable first with the minimum needed; add requirements and security
