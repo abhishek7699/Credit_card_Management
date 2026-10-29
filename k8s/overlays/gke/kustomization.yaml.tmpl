@@ -1,0 +1,87 @@
+# Template, not applied directly: scripts/gke-deploy.sh renders this into
+# k8s/overlays/gke/kustomization.yaml (gitignored -- it bakes in your GCP
+# project ID) via `envsubst` before `kubectl apply -k`.
+#
+# Same base as k8s/overlays/kind (replicas: 2, unpatched -- the
+# production/GKE default), but with every image rewritten from the
+# kind-only `credit-card/<service>:local` + imagePullPolicy: Never to the
+# Artifact Registry path scripts/gke-deploy.sh just pushed to.
+resources:
+  - ../../base
+
+images:
+  - name: credit-card/api-gateway
+    newName: ${AR_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${AR_REPO}/api-gateway
+    newTag: ${TAG}
+  - name: credit-card/authorization-service
+    newName: ${AR_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${AR_REPO}/authorization-service
+    newTag: ${TAG}
+  - name: credit-card/fraud-detection-service
+    newName: ${AR_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${AR_REPO}/fraud-detection-service
+    newTag: ${TAG}
+  - name: credit-card/notification-service
+    newName: ${AR_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${AR_REPO}/notification-service
+    newTag: ${TAG}
+  - name: credit-card/reporting-service
+    newName: ${AR_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${AR_REPO}/reporting-service
+    newTag: ${TAG}
+  - name: credit-card/settlement-service
+    newName: ${AR_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${AR_REPO}/settlement-service
+    newTag: ${TAG}
+  - name: credit-card/transaction-service
+    newName: ${AR_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${AR_REPO}/transaction-service
+    newTag: ${TAG}
+
+patches:
+  # The kind-only imagePullPolicy: Never (never pull, only use kind's
+  # locally-loaded image) is wrong once the image actually lives in a real
+  # registry -- GKE nodes need to pull it.
+  - target:
+      kind: Deployment
+      name: api-gateway
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: IfNotPresent
+  - target:
+      kind: Deployment
+      name: authorization-service
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: IfNotPresent
+  - target:
+      kind: Deployment
+      name: fraud-detection-service
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: IfNotPresent
+  - target:
+      kind: Deployment
+      name: notification-service
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: IfNotPresent
+  - target:
+      kind: Deployment
+      name: reporting-service
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: IfNotPresent
+  - target:
+      kind: Deployment
+      name: settlement-service
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: IfNotPresent
+  - target:
+      kind: Deployment
+      name: transaction-service
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: IfNotPresent
