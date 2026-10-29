@@ -45,3 +45,14 @@ These were named up front as out of scope for every layer until explicitly start
   booking lifecycle again.
 - **No pagination on `GET /api/v1/rooms`**: fine at the current 14-room seed
   size; would need it before room inventory grows meaningfully.
+
+## Discovered while building the room board (layer 2b)
+
+- **`MAINTENANCE` doesn't check for future `CONFIRMED` bookings**: `PATCH
+  /api/v1/rooms/{id}/status` allows a room to be set to `MAINTENANCE` even if it
+  already has one or more `CONFIRMED` bookings for future dates. Nothing blocks the
+  transition, warns the caller, or reassigns/cancels those bookings — they simply
+  stay `CONFIRMED` against a room that is now out of service. Noted explicitly per
+  this layer's own planning step; needs a real decision (block the transition?
+  surface a warning? reassign automatically?) before it's safe to rely on in
+  practice.
