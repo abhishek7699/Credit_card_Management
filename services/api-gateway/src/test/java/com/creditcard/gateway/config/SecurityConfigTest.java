@@ -108,4 +108,37 @@ class SecurityConfigTest {
                 .exchange()
                 .expectStatus().isForbidden();
     }
+
+    @Test
+    void frontDeskToken_roomSearch_notForbidden() {
+        webClient.mutateWith(mockJwt().authorities(() -> "ROLE_FRONT_DESK"))
+                .get().uri("/api/v1/rooms?checkIn=2026-11-01&checkOut=2026-11-03")
+                .exchange()
+                .expectStatus().isNotFound(); // not 401/403 — no booking-service in this slice
+    }
+
+    @Test
+    void frontDeskToken_postBookings_notForbidden() {
+        webClient.mutateWith(mockJwt().authorities(() -> "ROLE_FRONT_DESK"))
+                .post().uri("/api/v1/bookings")
+                .exchange()
+                .expectStatus().isNotFound(); // not 401/403
+    }
+
+    @Test
+    void merchantToken_bookingsRoute_returns403() {
+        webClient.mutateWith(mockJwt()
+                        .authorities(() -> "ROLE_MERCHANT")
+                        .jwt(j -> j.claim("merchantId", "m-001")))
+                .get().uri("/api/v1/bookings/00000000-0000-0000-0000-000000000000")
+                .exchange()
+                .expectStatus().isForbidden();
+    }
+
+    @Test
+    void noToken_bookingsRoute_returns401() {
+        webClient.get().uri("/api/v1/rooms?checkIn=2026-11-01&checkOut=2026-11-03")
+                .exchange()
+                .expectStatus().isUnauthorized();
+    }
 }

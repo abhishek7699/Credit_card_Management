@@ -106,59 +106,59 @@ Independent Test for this story and `quickstart.md`'s Story 1 walkthrough.
 
 ### Tests for User Story 1 ⚠️ (write first, confirm they fail)
 
-- [ ] T014 [P] [US1] Contract test for `GET /api/v1/rooms` (valid range, invalid range
+- [X] T014 [P] [US1] Contract test for `GET /api/v1/rooms` (valid range, invalid range
       → 400) in `services/booking-service/src/test/java/com/creditcard/booking/controller/RoomControllerTest.java`
-- [ ] T015 [P] [US1] Contract test for `POST /api/v1/bookings` (happy path → 201 HELD;
+- [X] T015 [P] [US1] Contract test for `POST /api/v1/bookings` (happy path → 201 HELD;
       nonexistent room → 404) in `services/booking-service/src/test/java/com/creditcard/booking/controller/BookingControllerTest.java`
-- [ ] T016 [P] [US1] Contract test for `GET /api/v1/bookings/{id}` (found, 404 when not)
+- [X] T016 [P] [US1] Contract test for `GET /api/v1/bookings/{id}` (found, 404 when not)
       in the same `BookingControllerTest.java`
-- [ ] T017 [P] [US1] Integration test (Testcontainers CockroachDB + Kafka): full saga
+- [X] T017 [P] [US1] Integration test (Testcontainers CockroachDB + Kafka): full saga
       HELD → AUTHORIZED event → CONFIRMED in `services/booking-service/src/test/java/com/creditcard/booking/integration/BookingConfirmedFlowIT.java`
-- [ ] T018 [P] [US1] Unit test: `RoomAvailabilityService` excludes rooms with a
+- [X] T018 [P] [US1] Unit test: `RoomAvailabilityService` excludes rooms with a
       HELD/CONFIRMED night in the requested range in `services/booking-service/src/test/java/com/creditcard/booking/service/RoomAvailabilityServiceTest.java`
-- [ ] T019 [P] [US1] Unit/integration test: two concurrent booking attempts for the same
+- [X] T019 [P] [US1] Unit/integration test: two concurrent booking attempts for the same
       room/overlapping dates — exactly one succeeds, the other gets 409 (research.md §1,
       FR-007) in `services/booking-service/src/test/java/com/creditcard/booking/service/BookingServiceConcurrencyTest.java`
-- [ ] T020 [P] [US1] Unit test: `TransactionStatusConsumer` HELD+AUTHORIZED → CONFIRMED,
+- [X] T020 [P] [US1] Unit test: `TransactionStatusConsumer` HELD+AUTHORIZED → CONFIRMED,
       and the "no matching booking" race throws without writing `processed_events`
       (research.md §3a) in `services/booking-service/src/test/java/com/creditcard/booking/kafka/TransactionStatusConsumerTest.java`
 
 ### Implementation for User Story 1
 
-- [ ] T021 [US1] Implement `RoomAvailabilityService.findAvailable(checkIn, checkOut)` in
+- [X] T021 [US1] Implement `RoomAvailabilityService.findAvailable(checkIn, checkOut)` in
       `services/booking-service/src/main/java/com/creditcard/booking/service/RoomAvailabilityService.java`
       (depends on T009, T010)
-- [ ] T022 [US1] Implement `RoomController` (`GET /api/v1/rooms`, 400 on invalid range —
+- [X] T022 [US1] Implement `RoomController` (`GET /api/v1/rooms`, 400 on invalid range —
       FR-003) in `services/booking-service/src/main/java/com/creditcard/booking/controller/RoomController.java`
       (depends on T021)
-- [ ] T023 [US1] Implement `BookingService.createHeldBooking(request)` — one CockroachDB
+- [X] T023 [US1] Implement `BookingService.createHeldBooking(request)` — one CockroachDB
       transaction inserting the `bookings` row and its `booking_room_nights` rows,
       catching the unique-constraint violation as "room unavailable" (research.md §1) in
       `services/booking-service/src/main/java/com/creditcard/booking/service/BookingService.java`
       (depends on T009, T010)
-- [ ] T024 [US1] Implement `BookingService.initiatePayment(booking, card)` — calls
+- [X] T024 [US1] Implement `BookingService.initiatePayment(booking, card)` — calls
       `TransactionServiceBlockingStub.initiateTransaction` with a 5s deadline
       (`withDeadlineAfter`), saves the returned `transactionId`; on `DEADLINE_EXCEEDED`/
       `UNAVAILABLE`, logs WARN and leaves the booking HELD with no `transactionId`
       (research.md §2, Key Design Decision #3) in
       `services/booking-service/src/main/java/com/creditcard/booking/service/BookingService.java`
       (depends on T011, T023)
-- [ ] T025 [US1] Implement `BookingController` `POST /api/v1/bookings` (calls
+- [X] T025 [US1] Implement `BookingController` `POST /api/v1/bookings` (calls
       `createHeldBooking` then `initiatePayment`, returns 201 HELD) in
       `services/booking-service/src/main/java/com/creditcard/booking/controller/BookingController.java`
       (depends on T023, T024)
-- [ ] T026 [US1] Implement `BookingController` `GET /api/v1/bookings/{id}` in the same
+- [X] T026 [US1] Implement `BookingController` `GET /api/v1/bookings/{id}` in the same
       `BookingController.java` (depends on T010)
-- [ ] T027 [US1] Implement `TransactionStatusConsumer`: look up booking by
+- [X] T027 [US1] Implement `TransactionStatusConsumer`: look up booking by
       `payload.transactionId`; if none found, throw without writing `processed_events`
       (research.md §3a); if found and HELD with `AUTHORIZED`, transition to CONFIRMED
       and write `processed_events` in the same transaction (FR-010, FR-012, FR-016) in
       `services/booking-service/src/main/java/com/creditcard/booking/kafka/TransactionStatusConsumer.java`
       (depends on T012, T010)
-- [ ] T028 [US1] Add `booking-submit`/`booking-get`/`room-search` routes (direct REST
+- [X] T028 [US1] Add `booking-submit`/`booking-get`/`room-search` routes (direct REST
       proxy, `booking-service-cb` circuit breaker, `forward:/fallback/booking`) in
       `services/api-gateway/src/main/java/com/creditcard/gateway/config/RouteConfig.java`
-- [ ] T029 [US1] Add `.pathMatchers("/api/v1/bookings/**",
+- [X] T029 [US1] Add `.pathMatchers("/api/v1/bookings/**",
       "/api/v1/rooms/**").hasAnyRole("FRONT_DESK", "ADMIN")` in
       `services/api-gateway/src/main/java/com/creditcard/gateway/config/SecurityConfig.java`
       (FR-017)

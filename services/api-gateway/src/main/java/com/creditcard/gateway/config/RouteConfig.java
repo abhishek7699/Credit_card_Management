@@ -20,6 +20,9 @@ public class RouteConfig {
     @Value("${REPORTING_SERVICE_URL:http://reporting-service:8086}")
     private String reportingServiceUrl;
 
+    @Value("${BOOKING_SERVICE_URL:http://booking-service:8080}")
+    private String bookingServiceUrl;
+
     public RouteConfig(GrpcTransactionGatewayFilterFactory grpcFilter,
                        KeyResolver keyResolver,
                        RedisRateLimiter rateLimiter) {
@@ -129,6 +132,48 @@ public class RouteConfig {
                                         .setName("reporting-service-cb")
                                         .setFallbackUri("forward:/fallback/reporting")))
                         .uri(reportingServiceUrl))
+
+                // ── Booking: room search ──────────────────────────────────────────────
+                // Direct REST proxy — booking-service already speaks plain REST, so
+                // (unlike the transaction routes) no rewritePath or gRPC bridge filter
+                // is needed here.
+                .route("room-search", r -> r
+                        .path("/api/v1/rooms")
+                        .and().method(HttpMethod.GET)
+                        .filters(f -> f
+                                .requestRateLimiter(c -> c
+                                        .setRateLimiter(rateLimiter)
+                                        .setKeyResolver(keyResolver))
+                                .circuitBreaker(c -> c
+                                        .setName("booking-service-cb")
+                                        .setFallbackUri("forward:/fallback/booking")))
+                        .uri(bookingServiceUrl))
+
+                // ── Booking: submit (POST) ────────────────────────────────────────────
+                .route("booking-submit", r -> r
+                        .path("/api/v1/bookings")
+                        .and().method(HttpMethod.POST)
+                        .filters(f -> f
+                                .requestRateLimiter(c -> c
+                                        .setRateLimiter(rateLimiter)
+                                        .setKeyResolver(keyResolver))
+                                .circuitBreaker(c -> c
+                                        .setName("booking-service-cb")
+                                        .setFallbackUri("forward:/fallback/booking")))
+                        .uri(bookingServiceUrl))
+
+                // ── Booking: get by id (GET) ──────────────────────────────────────────
+                .route("booking-get", r -> r
+                        .path("/api/v1/bookings/{id}")
+                        .and().method(HttpMethod.GET)
+                        .filters(f -> f
+                                .requestRateLimiter(c -> c
+                                        .setRateLimiter(rateLimiter)
+                                        .setKeyResolver(keyResolver))
+                                .circuitBreaker(c -> c
+                                        .setName("booking-service-cb")
+                                        .setFallbackUri("forward:/fallback/booking")))
+                        .uri(bookingServiceUrl))
 
                 .build();
     }

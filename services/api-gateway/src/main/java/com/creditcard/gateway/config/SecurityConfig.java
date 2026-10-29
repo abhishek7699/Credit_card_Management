@@ -49,6 +49,10 @@ public class SecurityConfig {
                         // Reporting — all authenticated roles for per-merchant and transactions
                         .pathMatchers(HttpMethod.GET, "/api/v1/reporting/**")
                                 .authenticated()
+                        // Booking — B2B, staff-only (FR-017): front-desk staff create and
+                        // manage bookings on a guest's behalf; guests never call this API.
+                        .pathMatchers("/api/v1/bookings/**", "/api/v1/rooms/**")
+                                .hasAnyRole("FRONT_DESK", "ADMIN")
                         .anyExchange().authenticated()
                 )
                 .oauth2ResourceServer(oauth2 -> oauth2
