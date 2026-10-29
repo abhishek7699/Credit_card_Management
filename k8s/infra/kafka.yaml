@@ -52,6 +52,51 @@ spec:
       containers:
         - name: kafka
           image: confluentinc/cp-kafka:7.6.0
+          # Reproduced directly: restarting Docker Desktop with the cluster
+          # up recreates the kind node's container, and Zookeeper's snapshot
+          # on disk turned out to not reliably survive that (its own PVC
+          # exists and persists the mount, but the data written right before
+          # the abrupt restart wasn't durably flushed) -- it comes back up
+          # with a brand-new, different /cluster/id znode. Kafka's own PVC
+          # data does survive intact, including the OLD cluster ID in
+          # meta.properties, so the broker refuses to start forever:
+          # kafka.common.InconsistentClusterIdException, confirmed live.
+          #
+          # Rather than chase Zookeeper's exact durability guarantees under
+          # an ungraceful kill, make Kafka self-heal from this specific
+          # mismatch: compare its own stored cluster.id against whatever
+          # Zookeeper currently has, and clear only the stale broker
+          # metadata (not a blanket wipe on every restart -- a normal pod
+          # restart where Zookeeper's data is untouched leaves this a no-op
+          # and keeps Kafka's log segments intact).
+          #
+          # This has to live in the main container's own command, not a
+          # separate initContainer: initContainers run once per pod, at
+          # pod-creation time, but Kubernetes restarts a crashed *container*
+          # in place without re-running them. An initContainer version of
+          # this check raced Zookeeper's own concurrent restart -- it found
+          # no mismatch once at pod creation, but by the time this container
+          # actually started moments later Zookeeper had already cycled to a
+          # different cluster ID, and nothing re-checked on the next crash
+          # loop iteration. Running the check here instead means every
+          # single restart attempt re-reads Zookeeper's *current* state,
+          # which converges correctly once Zookeeper itself settles.
+          command:
+            - bash
+            - -c
+            - |
+              set -e
+              META_FILE=/var/lib/kafka/data/meta.properties
+              if [ -f "$META_FILE" ]; then
+                STORED_ID=$(sed -n 's/^cluster\.id=//p' "$META_FILE")
+                ZK_ID=$(zookeeper-shell zookeeper:2181 get /cluster/id 2>/dev/null \
+                  | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+                if [ -n "$ZK_ID" ] && [ -n "$STORED_ID" ] && [ "$STORED_ID" != "$ZK_ID" ]; then
+                  echo "Cluster ID mismatch (broker has ${STORED_ID}, zookeeper has ${ZK_ID}) -- clearing stale broker data for a clean rejoin"
+                  rm -rf /var/lib/kafka/data/*
+                fi
+              fi
+              exec /etc/confluent/docker/run
           env:
             - name: KAFKA_BROKER_ID
               value: "1"

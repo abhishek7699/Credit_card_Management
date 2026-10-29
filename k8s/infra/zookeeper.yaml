@@ -1,6 +1,32 @@
-# Zookeeper — coordinates the single Kafka broker. No PVC: losing its state on
-# restart is harmless for this rehearsal (Kafka itself is the thing that must
-# persist), and docker-compose.yml doesn't persist it either.
+# Zookeeper — coordinates the single Kafka broker.
+#
+# PVC added after reproducing a real failure: restarting Docker Desktop with
+# the cluster up recreates every container (the kind node's own container
+# gets recreated by the VM restart, and kubelet then recreates each pod's
+# sandbox on top of that). Kafka's broker data is already persisted via its
+# own PVC (kafka.yaml) and survives this fine -- but Zookeeper previously had
+# none, so every restart wiped its data directory and it allocated a brand
+# new random cluster ID on the next boot. Kafka then refused to start,
+# permanently: its PVC-persisted meta.properties still held the OLD cluster
+# ID, which no longer matched Zookeeper's new one --
+# kafka.common.InconsistentClusterIdException: "The broker is trying to join
+# the wrong cluster" -- confirmed directly in the broker's crash log. Every
+# one of the 7 app services has a wait-for-kafka initContainer, so this one
+# mismatch stalled the entire stack, not just Kafka. The original "no PVC:
+# losing its state on restart is harmless" reasoning had it backwards: once
+# Kafka's data outlives a restart, Zookeeper's cluster identity has to
+# outlive the same restart or the two end up permanently disagreeing.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: zookeeper-data
+  namespace: credit-card
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 1Gi
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -11,6 +37,10 @@ metadata:
     tier: infra
 spec:
   replicas: 1
+  # Same reason as kafka.yaml: a ReadWriteOnce PVC can't be mounted by an old
+  # and a new pod at the same time, which a RollingUpdate would otherwise try.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: zookeeper
@@ -20,15 +50,24 @@ spec:
         app: zookeeper
         tier: infra
     spec:
+      securityContext:
+        fsGroup: 1000
       containers:
         - name: zookeeper
           image: confluentinc/cp-zookeeper:7.6.0
           env:
             - name: ZOOKEEPER_CLIENT_PORT
               value: "2181"
+            - name: ZOOKEEPER_DATA_DIR
+              value: /var/lib/zookeeper/data
+            - name: ZOOKEEPER_DATA_LOG_DIR
+              value: /var/lib/zookeeper/log
           ports:
             - containerPort: 2181
               name: client
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/zookeeper
           resources:
             requests:
               cpu: 100m
@@ -48,6 +87,10 @@ spec:
             initialDelaySeconds: 20
             periodSeconds: 15
             failureThreshold: 6
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: zookeeper-data
 ---
 apiVersion: v1
 kind: Service
