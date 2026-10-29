@@ -40,17 +40,17 @@ edits to the existing `services/api-gateway/`, `docker-compose.yml`,
 **Purpose**: Scaffold the new Gradle module so it builds (empty) before any real code
 is added.
 
-- [ ] T001 Create the `services/booking-service/` module skeleton (directory tree per
+- [X] T001 Create the `services/booking-service/` module skeleton (directory tree per
       plan.md's Project Structure) and add it to the root `settings.gradle`
-- [ ] T002 [P] Write `services/booking-service/build.gradle`: Spring Boot 3.2.5 (Web,
+- [X] T002 [P] Write `services/booking-service/build.gradle`: Spring Boot 3.2.5 (Web,
       Data JPA, Validation, Actuator), Flyway, `net.devh:grpc-client-spring-boot-starter`,
       Spring Kafka, the `protobuf` plugin pointed at the repo-root `proto/` directory,
       and a JaCoCo exclusion for generated gRPC stubs — mirrors
       `services/api-gateway/build.gradle`'s existing proto/JaCoCo setup exactly
-- [ ] T003 [P] Create `services/booking-service/src/main/resources/application.yml`:
+- [X] T003 [P] Create `services/booking-service/src/main/resources/application.yml`:
       app port 8080, management port 8092, CockroachDB datasource placeholder,
       `booking.merchant-id: HOTEL-001`, `booking.hold-timeout-minutes: 10` (research.md §2)
-- [ ] T004 [P] Create `services/booking-service/src/main/java/com/creditcard/booking/BookingServiceApplication.java`
+- [X] T004 [P] Create `services/booking-service/src/main/java/com/creditcard/booking/BookingServiceApplication.java`
 
 **Checkpoint**: `./gradlew :services:booking-service:build` succeeds on an empty app.
 
@@ -62,31 +62,31 @@ is added.
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete.
 
-- [ ] T005 Flyway migration `services/booking-service/src/main/resources/db/migration/V1__create_rooms.sql`
+- [X] T005 Flyway migration `services/booking-service/src/main/resources/db/migration/V1__create_rooms.sql`
       (rooms table + seed rows — data-model.md Room)
-- [ ] T006 Flyway migration `services/booking-service/src/main/resources/db/migration/V2__create_bookings.sql`
+- [X] T006 Flyway migration `services/booking-service/src/main/resources/db/migration/V2__create_bookings.sql`
       (bookings table, `status`/`cancellation_reason`/`transaction_id` columns —
       data-model.md Booking)
-- [ ] T007 Flyway migration `services/booking-service/src/main/resources/db/migration/V3__create_booking_room_nights.sql`
+- [X] T007 Flyway migration `services/booking-service/src/main/resources/db/migration/V3__create_booking_room_nights.sql`
       (`booking_room_nights` table with `UNIQUE (room_id, stay_date)` — the sole
       double-booking guard, research.md §1)
-- [ ] T008 Flyway migration `services/booking-service/src/main/resources/db/migration/V4__create_processed_events.sql`
+- [X] T008 Flyway migration `services/booking-service/src/main/resources/db/migration/V4__create_processed_events.sql`
       (idempotency table — Principle III)
-- [ ] T009 [P] Domain classes in `services/booking-service/src/main/java/com/creditcard/booking/domain/`:
+- [X] T009 [P] Domain classes in `services/booking-service/src/main/java/com/creditcard/booking/domain/`:
       `Room.java`, `Booking.java`, `BookingStatus.java` (HELD/CONFIRMED/CANCELLED),
       `CancellationReason.java` (PAYMENT_DECLINED/PAYMENT_FAILED/HOLD_EXPIRED/PAYMENT_AFTER_EXPIRY)
-- [ ] T010 [P] Repository interfaces in `services/booking-service/src/main/java/com/creditcard/booking/repository/`:
+- [X] T010 [P] Repository interfaces in `services/booking-service/src/main/java/com/creditcard/booking/repository/`:
       `RoomRepository.java`, `BookingRepository.java` (incl. a query for HELD bookings
       older than a cutoff, for Phase 5), `BookingRoomNightRepository.java` (incl.
       `deleteByBookingId`), `ProcessedEventRepository.java`
-- [ ] T011 `services/booking-service/src/main/java/com/creditcard/booking/grpc/TransactionServiceClientConfig.java`
+- [X] T011 `services/booking-service/src/main/java/com/creditcard/booking/grpc/TransactionServiceClientConfig.java`
       — `@GrpcClient("transaction-service") Channel` bean exposing a
       `TransactionServiceBlockingStub`, mirroring `api-gateway`'s `GrpcClientConfig`
       pattern but with a blocking (not future) stub (research.md §2)
-- [ ] T012 [P] `services/booking-service/src/main/java/com/creditcard/booking/kafka/event/TransactionStatusEvent.java`
+- [X] T012 [P] `services/booking-service/src/main/java/com/creditcard/booking/kafka/event/TransactionStatusEvent.java`
       — local envelope/payload DTO copy, same shape as
       `notification-service`'s (research.md §3)
-- [ ] T013 `services/booking-service/src/main/java/com/creditcard/booking/exception/GlobalExceptionHandler.java`
+- [X] T013 `services/booking-service/src/main/java/com/creditcard/booking/exception/GlobalExceptionHandler.java`
       — maps invalid-date-range → 400, room/booking-not-found → 404, unique-constraint
       violation on `booking_room_nights` → 409 (contracts/api.md)
 
