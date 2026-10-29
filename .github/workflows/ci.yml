@@ -23,17 +23,16 @@ env:
 
 jobs:
   build-test-e2e:
-    # Pinned, not ubuntu-latest: that label started migrating to the
-    # ubuntu-26.04 image around 2026-10-19, and Testcontainers 1.19.7 (the
-    # version every service pins) can't locate a Docker environment on it --
-    # every single Testcontainers-backed test across every service fails
-    # with "java.lang.IllegalStateException at DockerClientProviderStrategy"
-    # before any test code even runs. Confirmed this is unrelated to any
-    # application change: the merge-to-main run for PR #3 (k8s/monitoring),
-    # which predates this PR entirely, failed with the identical signature
-    # the moment it landed on an ubuntu-26.04 runner. ubuntu-24.04 is a
-    # separately-versioned, non-floating image unaffected by this rollout.
-    runs-on: ubuntu-24.04
+    # Was pinned to ubuntu-24.04: ubuntu-latest's migration to the
+    # ubuntu-26.04 image (started ~2026-10-19) shipped a Docker Engine whose
+    # minimum API version Testcontainers 1.19.7's default client fallback
+    # (1.32) couldn't satisfy, so every Testcontainers-backed test failed
+    # with "DockerClientProviderStrategy" before any test code ran. Fixed at
+    # the source instead of staying pinned: Testcontainers 2.0.5 bumped that
+    # default to 1.44, which is what ubuntu-26.04's Docker actually requires.
+    # Back on the floating ubuntu-latest label now that the real
+    # incompatibility is resolved -- see this PR's CI run for confirmation.
+    runs-on: ubuntu-latest
 
     steps:
       # ── 1. Checkout ──────────────────────────────────────────────────────────

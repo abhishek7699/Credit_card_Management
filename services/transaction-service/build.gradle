@@ -14,7 +14,7 @@ ext {
     protobufVersion    = '3.25.3'
     lognetGrpcVersion  = '3.1.0.RELEASE'
     springVaultVersion = '3.1.1'
-    testcontainersVersion = '1.19.7'
+    testcontainersVersion = '2.0.5'
 }
 
 dependencies {
@@ -64,10 +64,10 @@ dependencies {
     // ── Test dependencies ──────────────────────────────────────────────────────
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
     testImplementation 'org.springframework.kafka:spring-kafka-test'
-    testImplementation "org.testcontainers:postgresql:${testcontainersVersion}"
-    testImplementation "org.testcontainers:kafka:${testcontainersVersion}"
+    testImplementation "org.testcontainers:testcontainers-postgresql:${testcontainersVersion}"
+    testImplementation "org.testcontainers:testcontainers-kafka:${testcontainersVersion}"
     testImplementation "org.testcontainers:testcontainers:${testcontainersVersion}"
-    testImplementation "org.testcontainers:junit-jupiter:${testcontainersVersion}"
+    testImplementation "org.testcontainers:testcontainers-junit-jupiter:${testcontainersVersion}"
     testImplementation 'org.mockito:mockito-core'
     testImplementation "io.grpc:grpc-testing:${grpcVersion}"
     testImplementation 'jakarta.annotation:jakarta.annotation-api'

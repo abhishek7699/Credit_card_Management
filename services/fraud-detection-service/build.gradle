@@ -9,7 +9,7 @@ group = 'com.creditcard'
 version = '0.0.1-SNAPSHOT'
 
 ext {
-    testcontainersVersion = '1.19.7'
+    testcontainersVersion = '2.0.5'
 }
 
 dependencies {
@@ -44,9 +44,9 @@ dependencies {
     // ── Test dependencies ──────────────────────────────────────────────────────
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
     testImplementation 'org.springframework.kafka:spring-kafka-test'
-    testImplementation "org.testcontainers:postgresql:${testcontainersVersion}"
+    testImplementation "org.testcontainers:testcontainers-postgresql:${testcontainersVersion}"
     testImplementation "org.testcontainers:testcontainers:${testcontainersVersion}"
-    testImplementation "org.testcontainers:junit-jupiter:${testcontainersVersion}"
+    testImplementation "org.testcontainers:testcontainers-junit-jupiter:${testcontainersVersion}"
     testImplementation 'org.mockito:mockito-core'
     testImplementation 'org.awaitility:awaitility'
 }
