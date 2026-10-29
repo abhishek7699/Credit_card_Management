@@ -46,4 +46,16 @@ public class GlobalExceptionHandler {
     public Map<String, String> handleRoomUnavailable(RoomUnavailableException ex) {
         return Map.of("error", ex.getMessage());
     }
+
+    @ExceptionHandler(InvalidBookingStateException.class)
+    @ResponseStatus(HttpStatus.CONFLICT)
+    public Map<String, String> handleInvalidBookingState(InvalidBookingStateException ex) {
+        return Map.of("error", ex.getMessage());
+    }
+
+    @ExceptionHandler(InvalidRoomStatusTransitionException.class)
+    @ResponseStatus(HttpStatus.CONFLICT)
+    public Map<String, String> handleInvalidRoomStatusTransition(InvalidRoomStatusTransitionException ex) {
+        return Map.of("error", ex.getMessage());
+    }
 }

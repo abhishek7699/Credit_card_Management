@@ -76,6 +76,8 @@ class BookingServiceConcurrencyTest {
         room.setRoomNumber("CONC-" + UUID.randomUUID().toString().substring(0, 8));
         room.setRoomType("STANDARD");
         room.setNightlyRate(new BigDecimal("150.00"));
+        room.setFloor(99); // out of the real 1-3 seeded range, never collides
+        room.setPosition((int) (System.nanoTime() % 1_000_000));
         room = roomRepository.save(room);
 
         BookingRequest request = new BookingRequest(

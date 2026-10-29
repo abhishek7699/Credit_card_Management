@@ -2,6 +2,8 @@ package com.creditcard.booking.domain;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
@@ -28,6 +30,16 @@ public class Room {
     @Column(name = "nightly_rate", nullable = false)
     private BigDecimal nightlyRate;
 
+    @Column(name = "floor", nullable = false)
+    private Integer floor;
+
+    @Column(name = "position", nullable = false)
+    private Integer position;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "status", nullable = false, length = 20)
+    private RoomStatus status = RoomStatus.VACANT_CLEAN;
+
     public Room() {}
 
     public UUID getId() { return id; }
@@ -40,4 +52,13 @@ public class Room {
 
     public BigDecimal getNightlyRate() { return nightlyRate; }
     public void setNightlyRate(BigDecimal nightlyRate) { this.nightlyRate = nightlyRate; }
+
+    public Integer getFloor() { return floor; }
+    public void setFloor(Integer floor) { this.floor = floor; }
+
+    public Integer getPosition() { return position; }
+    public void setPosition(Integer position) { this.position = position; }
+
+    public RoomStatus getStatus() { return status; }
+    public void setStatus(RoomStatus status) { this.status = status; }
 }
