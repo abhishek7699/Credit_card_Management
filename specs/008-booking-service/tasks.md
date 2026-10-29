@@ -177,26 +177,26 @@ room reappears in availability search — per spec.md's Independent Test for thi
 
 ### Tests for User Story 2 ⚠️
 
-- [ ] T030 [P] [US2] Integration test: HELD → DECLINED event → CANCELLED
+- [X] T030 [P] [US2] Integration test: HELD → DECLINED event → CANCELLED
       (`cancellationReason: PAYMENT_DECLINED`), room reappears in `GET /api/v1/rooms`
       in `services/booking-service/src/test/java/com/creditcard/booking/integration/BookingDeclinedFlowIT.java`
-- [ ] T031 [P] [US2] Unit test: `TransactionStatusConsumer` DECLINED/FAILED path deletes
+- [X] T031 [P] [US2] Unit test: `TransactionStatusConsumer` DECLINED/FAILED path deletes
       the booking's `booking_room_nights` rows in the same transaction as the status
       update (Key Design Decision #1); CANCELLED+DECLINED/FAILED is a no-op (FR-021) in
       `services/booking-service/src/test/java/com/creditcard/booking/kafka/TransactionStatusConsumerTest.java`
 
 ### Implementation for User Story 2
 
-- [ ] T032 [US2] Implement `BookingService.cancel(booking, reason)` — one transaction:
+- [X] T032 [US2] Implement `BookingService.cancel(booking, reason)` — one transaction:
       update `status`/`cancellation_reason`, delete this booking's
       `booking_room_nights` rows (research.md "Cleanup on cancellation", Key Design
       Decision #1) in `services/booking-service/src/main/java/com/creditcard/booking/service/BookingService.java`
       (depends on T009, T010)
-- [ ] T033 [US2] Extend `TransactionStatusConsumer`: HELD + DECLINED/FAILED →
+- [X] T033 [US2] Extend `TransactionStatusConsumer`: HELD + DECLINED/FAILED →
       `cancel(booking, PAYMENT_DECLINED|PAYMENT_FAILED)` (FR-011) in
       `services/booking-service/src/main/java/com/creditcard/booking/kafka/TransactionStatusConsumer.java`
       (depends on T027, T032)
-- [ ] T034 [US2] Extend `TransactionStatusConsumer`: any CANCELLED booking +
+- [X] T034 [US2] Extend `TransactionStatusConsumer`: any CANCELLED booking +
       DECLINED/FAILED → no-op, no state change (FR-021) in the same file (depends on T033)
 
 **Checkpoint**: User Stories 1 and 2 both work independently; a declined card never
@@ -214,13 +214,13 @@ CANCELLED + room available — per spec.md's Independent Test for this story.
 
 ### Tests for User Story 3 ⚠️
 
-- [ ] T035 [P] [US3] Unit test: `HoldExpiryService` cancels HELD bookings older than
+- [X] T035 [P] [US3] Unit test: `HoldExpiryService` cancels HELD bookings older than
       `booking.hold-timeout-minutes` with `cancellationReason: HOLD_EXPIRED`; leaves
       fresh HELD and already-CONFIRMED/CANCELLED bookings untouched (spec.md US3
       Acceptance Scenarios 2–3) in `services/booking-service/src/test/java/com/creditcard/booking/service/HoldExpiryServiceTest.java`
-- [ ] T036 [P] [US3] Integration test: expire a booking, then confirm `GET /api/v1/rooms`
+- [X] T036 [P] [US3] Integration test: expire a booking, then confirm `GET /api/v1/rooms`
       shows the room available again in `services/booking-service/src/test/java/com/creditcard/booking/integration/HoldExpiryFlowIT.java`
-- [ ] T037 [P] [US3] Unit test: a late `AUTHORIZED` outcome for an already
+- [X] T037 [P] [US3] Unit test: a late `AUTHORIZED` outcome for an already
       `HOLD_EXPIRED`-cancelled booking stays CANCELLED, with `cancellationReason`
       updated to `PAYMENT_AFTER_EXPIRY` and a WARN logged — never reverses to CONFIRMED,
       regardless of whether the room is still free (FR-019, FR-023) in
@@ -228,12 +228,12 @@ CANCELLED + room available — per spec.md's Independent Test for this story.
 
 ### Implementation for User Story 3
 
-- [ ] T038 [US3] Implement `HoldExpiryService` `@Scheduled(fixedDelay = ...)` job: find
+- [X] T038 [US3] Implement `HoldExpiryService` `@Scheduled(fixedDelay = ...)` job: find
       HELD bookings older than the configured timeout, call
       `BookingService.cancel(booking, HOLD_EXPIRED)` per booking (research.md §5) in
       `services/booking-service/src/main/java/com/creditcard/booking/service/HoldExpiryService.java`
       (depends on T032)
-- [ ] T039 [US3] Extend `TransactionStatusConsumer`: CANCELLED (reason `HOLD_EXPIRED`) +
+- [X] T039 [US3] Extend `TransactionStatusConsumer`: CANCELLED (reason `HOLD_EXPIRED`) +
       `AUTHORIZED` → stay CANCELLED, set `cancellationReason = PAYMENT_AFTER_EXPIRY`, log
       WARN for manual refund; never update `booking_room_nights` (already deleted at
       expiry) (FR-019, FR-023) in `services/booking-service/src/main/java/com/creditcard/booking/kafka/TransactionStatusConsumer.java`

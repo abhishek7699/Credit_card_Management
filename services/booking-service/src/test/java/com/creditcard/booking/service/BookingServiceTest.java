@@ -3,6 +3,7 @@ package com.creditcard.booking.service;
 import com.creditcard.booking.controller.dto.BookingRequest;
 import com.creditcard.booking.domain.Booking;
 import com.creditcard.booking.domain.BookingStatus;
+import com.creditcard.booking.domain.CancellationReason;
 import com.creditcard.booking.domain.Room;
 import com.creditcard.booking.exception.BookingNotFoundException;
 import com.creditcard.booking.exception.InvalidDateRangeException;
@@ -138,6 +139,20 @@ class BookingServiceTest {
                 .isInstanceOf(RoomUnavailableException.class);
     }
 
+    // ── cancel ──────────────────────────────────────────────────────────────────
+
+    @Test
+    void cancel_setsStatusAndReason_andDeletesRoomNightsInSameCall() {
+        Booking booking = booking(UUID.randomUUID(), BookingStatus.HELD, "txn-cancel");
+
+        service.cancel(booking, CancellationReason.HOLD_EXPIRED);
+
+        assertThat(booking.getStatus()).isEqualTo(BookingStatus.CANCELLED);
+        assertThat(booking.getCancellationReason()).isEqualTo(CancellationReason.HOLD_EXPIRED);
+        verify(bookingRepository).save(booking);
+        verify(bookingRoomNightRepository).deleteByBookingId(booking.getId());
+    }
+
     // ── getById ─────────────────────────────────────────────────────────────────
 
     @Test
@@ -194,15 +209,42 @@ class BookingServiceTest {
     }
 
     @Test
-    void handlePaymentOutcome_heldAndDeclined_noStateChangeInThisPhase() {
+    void handlePaymentOutcome_heldAndDeclined_cancelsWithPaymentDeclinedReason() {
         Booking booking = booking(UUID.randomUUID(), BookingStatus.HELD, "txn-2");
         when(bookingRepository.findByTransactionId("txn-2")).thenReturn(Optional.of(booking));
         when(processedEventRepository.insertIfAbsent(any())).thenReturn(1);
 
         service.handlePaymentOutcome(event("txn-2", "DECLINED"));
 
+        assertThat(booking.getStatus()).isEqualTo(BookingStatus.CANCELLED);
+        assertThat(booking.getCancellationReason()).isEqualTo(CancellationReason.PAYMENT_DECLINED);
+        verify(bookingRoomNightRepository).deleteByBookingId(booking.getId());
+    }
+
+    @Test
+    void handlePaymentOutcome_heldAndFailed_cancelsWithPaymentFailedReason() {
+        Booking booking = booking(UUID.randomUUID(), BookingStatus.HELD, "txn-2b");
+        when(bookingRepository.findByTransactionId("txn-2b")).thenReturn(Optional.of(booking));
+        when(processedEventRepository.insertIfAbsent(any())).thenReturn(1);
+
+        service.handlePaymentOutcome(event("txn-2b", "FAILED"));
+
+        assertThat(booking.getStatus()).isEqualTo(BookingStatus.CANCELLED);
+        assertThat(booking.getCancellationReason()).isEqualTo(CancellationReason.PAYMENT_FAILED);
+        verify(bookingRoomNightRepository).deleteByBookingId(booking.getId());
+    }
+
+    @Test
+    void handlePaymentOutcome_heldWithUnrecognizedOutcome_isNoOp() {
+        Booking booking = booking(UUID.randomUUID(), BookingStatus.HELD, "txn-2c");
+        when(bookingRepository.findByTransactionId("txn-2c")).thenReturn(Optional.of(booking));
+        when(processedEventRepository.insertIfAbsent(any())).thenReturn(1);
+
+        service.handlePaymentOutcome(event("txn-2c", "PENDING"));
+
         assertThat(booking.getStatus()).isEqualTo(BookingStatus.HELD);
         verify(bookingRepository, never()).save(booking);
+        verify(bookingRoomNightRepository, never()).deleteByBookingId(any());
     }
 
     @Test
@@ -214,6 +256,48 @@ class BookingServiceTest {
         service.handlePaymentOutcome(event("txn-4", "AUTHORIZED"));
 
         assertThat(booking.getStatus()).isEqualTo(BookingStatus.CONFIRMED);
+        verify(bookingRepository, never()).save(booking);
+        verify(bookingRoomNightRepository, never()).deleteByBookingId(any());
+    }
+
+    @Test
+    void handlePaymentOutcome_lateAuthorizedAfterHoldExpiry_staysCancelled_reasonBecomesPaymentAfterExpiry() {
+        Booking booking = booking(UUID.randomUUID(), BookingStatus.CANCELLED, "txn-5");
+        booking.setCancellationReason(CancellationReason.HOLD_EXPIRED);
+        when(bookingRepository.findByTransactionId("txn-5")).thenReturn(Optional.of(booking));
+        when(processedEventRepository.insertIfAbsent(any())).thenReturn(1);
+
+        service.handlePaymentOutcome(event("txn-5", "AUTHORIZED"));
+
+        assertThat(booking.getStatus()).isEqualTo(BookingStatus.CANCELLED);
+        assertThat(booking.getCancellationReason()).isEqualTo(CancellationReason.PAYMENT_AFTER_EXPIRY);
+        verify(bookingRepository).save(booking);
+        verify(bookingRoomNightRepository, never()).deleteByBookingId(any());
+    }
+
+    @Test
+    void handlePaymentOutcome_cancelledForOtherReason_authorizedOutcome_isNoOp() {
+        Booking booking = booking(UUID.randomUUID(), BookingStatus.CANCELLED, "txn-6");
+        booking.setCancellationReason(CancellationReason.PAYMENT_DECLINED);
+        when(bookingRepository.findByTransactionId("txn-6")).thenReturn(Optional.of(booking));
+        when(processedEventRepository.insertIfAbsent(any())).thenReturn(1);
+
+        service.handlePaymentOutcome(event("txn-6", "AUTHORIZED"));
+
+        assertThat(booking.getCancellationReason()).isEqualTo(CancellationReason.PAYMENT_DECLINED);
+        verify(bookingRepository, never()).save(booking);
+    }
+
+    @Test
+    void handlePaymentOutcome_holdExpired_declinedOutcome_isNoOp() {
+        Booking booking = booking(UUID.randomUUID(), BookingStatus.CANCELLED, "txn-7");
+        booking.setCancellationReason(CancellationReason.HOLD_EXPIRED);
+        when(bookingRepository.findByTransactionId("txn-7")).thenReturn(Optional.of(booking));
+        when(processedEventRepository.insertIfAbsent(any())).thenReturn(1);
+
+        service.handlePaymentOutcome(event("txn-7", "DECLINED"));
+
+        assertThat(booking.getCancellationReason()).isEqualTo(CancellationReason.HOLD_EXPIRED);
         verify(bookingRepository, never()).save(booking);
     }
 

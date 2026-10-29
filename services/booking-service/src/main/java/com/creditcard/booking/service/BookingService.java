@@ -4,6 +4,7 @@ import com.creditcard.booking.controller.dto.BookingRequest;
 import com.creditcard.booking.domain.Booking;
 import com.creditcard.booking.domain.BookingRoomNight;
 import com.creditcard.booking.domain.BookingStatus;
+import com.creditcard.booking.domain.CancellationReason;
 import com.creditcard.booking.domain.Room;
 import com.creditcard.booking.exception.BookingNotFoundException;
 import com.creditcard.booking.exception.InvalidDateRangeException;
@@ -42,6 +43,8 @@ public class BookingService {
     private static final String CURRENCY_CODE = "USD";
     private static final String IDEMPOTENCY_PREFIX = "booking:";
     private static final String OUTCOME_AUTHORIZED = "AUTHORIZED";
+    private static final String OUTCOME_DECLINED = "DECLINED";
+    private static final String OUTCOME_FAILED = "FAILED";
 
     private final BookingRepository bookingRepository;
     private final RoomRepository roomRepository;
@@ -136,14 +139,32 @@ public class BookingService {
     }
 
     /**
+     * Cancels a booking: status + cancellation reason update and the deletion of its
+     * booking_room_nights rows in the SAME transaction (Key Design Decision #1,
+     * plan.md) — the room is immediately re-searchable, never left blocked by a stale
+     * row. Used for a declined/failed payment (FR-011) and for hold expiry (FR-015).
+     */
+    @Transactional
+    public void cancel(Booking booking, CancellationReason reason) {
+        booking.setStatus(BookingStatus.CANCELLED);
+        booking.setCancellationReason(reason);
+        bookingRepository.save(booking);
+        bookingRoomNightRepository.deleteByBookingId(booking.getId());
+    }
+
+    /**
      * Consumes transaction.status.updated (via TransactionStatusConsumer). Looks up the
      * booking by transactionId first: if none matches, throws so the Kafka error
      * handler retries with bounded backoff rather than marking this delivery processed
      * (research.md §3a) — this is the one case that must NOT be a no-op.
      *
-     * <p>This phase implements only the HELD+AUTHORIZED -> CONFIRMED path (FR-010).
-     * HELD+DECLINED/FAILED (US2) and CANCELLED+AUTHORIZED/PAYMENT_AFTER_EXPIRY (US3)
-     * are added in later phases.
+     * <p>Full handling matrix (contracts/events.md): HELD+AUTHORIZED -> CONFIRMED
+     * (FR-010); HELD+DECLINED/FAILED -> CANCELLED, room released (FR-011); a CANCELLED
+     * booking whose reason is HOLD_EXPIRED receiving a late AUTHORIZED outcome stays
+     * CANCELLED — never reverses — only its reason changes to PAYMENT_AFTER_EXPIRY,
+     * with a WARN logged for manual refund (FR-019, FR-023, no reverse transitions);
+     * every other combination (CONFIRMED already reached; CANCELLED for any other
+     * reason; DECLINED/FAILED for an already non-HELD booking) is a no-op (FR-021).
      */
     @Transactional
     public void handlePaymentOutcome(TransactionStatusEvent event) {
@@ -158,9 +179,25 @@ public class BookingService {
             return;
         }
 
-        if (booking.getStatus() == BookingStatus.HELD && OUTCOME_AUTHORIZED.equals(payload.getOutcome())) {
-            booking.setStatus(BookingStatus.CONFIRMED);
+        String outcome = payload.getOutcome();
+        if (booking.getStatus() == BookingStatus.HELD) {
+            if (OUTCOME_AUTHORIZED.equals(outcome)) {
+                booking.setStatus(BookingStatus.CONFIRMED);
+                bookingRepository.save(booking);
+            } else if (OUTCOME_DECLINED.equals(outcome) || OUTCOME_FAILED.equals(outcome)) {
+                cancel(booking, OUTCOME_DECLINED.equals(outcome)
+                        ? CancellationReason.PAYMENT_DECLINED
+                        : CancellationReason.PAYMENT_FAILED);
+            }
+        } else if (booking.getStatus() == BookingStatus.CANCELLED
+                && booking.getCancellationReason() == CancellationReason.HOLD_EXPIRED
+                && OUTCOME_AUTHORIZED.equals(outcome)) {
+            booking.setCancellationReason(CancellationReason.PAYMENT_AFTER_EXPIRY);
             bookingRepository.save(booking);
+            log.warn("AUTHORIZED outcome arrived for booking {} (transactionId={}) after it was already "
+                            + "cancelled by hold expiry — staying CANCELLED (no reverse transition); "
+                            + "manual refund required",
+                    booking.getId(), payload.getTransactionId());
         }
     }
 }

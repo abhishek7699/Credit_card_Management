@@ -60,3 +60,4 @@ grpc:
 
 booking:
   merchant-id: ${BOOKING_MERCHANT_ID:HOTEL-001}
+  hold-timeout-minutes: ${BOOKING_HOLD_TIMEOUT_MINUTES:10}
