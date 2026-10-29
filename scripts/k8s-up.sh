@@ -148,10 +148,13 @@ kubectl wait --for=condition=ready pod -l tier=infra -n "${NAMESPACE}" --timeout
 pass "Infra Ready"
 
 # ── App services ───────────────────────────────────────────────────────────────
-info "Applying service manifests"
-for svc in "${SERVICES[@]}"; do
-  kubectl apply -f "${REPO_ROOT}/k8s/${svc}/"
-done
+# 1 replica per service here (k8s/overlays/kind), not the 2 committed in
+# k8s/base/ -- that default doubles every JVM's startup CPU/memory footprint
+# at once during a rollout, which is what caused the cascading pod-restart
+# instability this cluster used to hit. k8s/overlays/gke applies the same
+# base with no patches, for the GKE/production path (replicas: 2).
+info "Applying service manifests (k8s/overlays/kind: 1 replica per service)"
+kubectl apply -k "${REPO_ROOT}/k8s/overlays/kind"
 
 info "Waiting for every pod in namespace '${NAMESPACE}' to be Ready (this can take a few minutes)"
 kubectl wait --for=condition=ready pod --all -n "${NAMESPACE}" --timeout=300s
