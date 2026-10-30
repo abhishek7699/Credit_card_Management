@@ -49,10 +49,20 @@ The new service:
 **Why `scripts/e2e-test.sh` needs no change**: it already does `docker rm -f
 auth-service` before starting its own container and again in `cleanup()` — so even
 with the compose-managed `auth-service` present, the e2e run forcibly replaces it with
-its own fresh-keypair version for the run's duration and removes it afterward
-(`docker compose down -v` at the very end removes the compose-managed one too). The
+its own fresh-keypair version for the run's duration and removes it afterward. The
 existing 14-step suite's behavior is unaffected; confirmed by reasoning through
 `setup_auth_mock`'s exact teardown/recreate sequence, not by assumption.
+
+**A gap in that same reasoning, caught by an actual CI failure rather than by
+re-reading it closely enough the first time**: "removes it afterward" means exactly
+that — once `scripts/e2e-test.sh` finishes, *nothing* is listening on `:9000` until
+the compose-managed service is explicitly brought back up. That's harmless for
+`scripts/e2e-test.sh` itself, but anything run *after* it in the same job (this
+layer's own Playwright smoke test, added in Phase 8) needs `/dev/login` again and
+got `ECONNREFUSED` through Vite's dev proxy the first time this ran in CI. Fixed
+with an explicit `docker compose up -d auth-mock` (+ a wait for `/dev/login` to
+actually respond) between the e2e step and the Playwright step — see
+`.github/workflows/ci.yml`'s "Restart auth-mock" step.
 
 **Alternatives considered**: Teaching the frontend to mint its own JWT client-side (the
 way the e2e *script* does, on the host) — rejected outright, it would require shipping

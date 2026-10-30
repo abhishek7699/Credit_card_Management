@@ -92,8 +92,13 @@ services:
 
   # Dev-only JWT issuer for the staff frontend (layer 2d) — NOT a real identity
   # provider, see SECURITY.md. Separate from scripts/e2e-test.sh's own ephemeral
-  # auth-mock container: that script force-recreates/removes any container named
-  # auth-service regardless of this one, so the two don't conflict.
+  # auth-mock container, which shares this exact container name on purpose
+  # (matching the hostname api-gateway already expects) and both replaces this
+  # one at its own startup AND removes it again in its exit-trap cleanup, every
+  # run — so after scripts/e2e-test.sh finishes, nothing is listening on :9000
+  # until this service is explicitly brought back up (`docker compose up -d
+  # auth-mock`). CI does this itself; see .github/workflows/ci.yml's "Restart
+  # auth-mock" step for why (found the hard way: ECONNREFUSED on /dev/login).
   auth-mock:
     image: python:3.11-slim
     container_name: auth-service

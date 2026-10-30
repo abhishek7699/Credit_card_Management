@@ -173,9 +173,24 @@ jobs:
         run: docker compose logs api-gateway transaction-service --tail=100
 
       # ── Playwright smoke test (layer 2d) — reuses this job's already-running
-      #    stack (including the auth-mock service e2e-test.sh left standing;
-      #    it tears down its own ephemeral one but auth-mock is docker-compose
-      #    managed, unaffected) instead of standing up a second one ────────────
+      #    stack instead of standing up a second one. scripts/e2e-test.sh's own
+      #    setup_auth_mock/cleanup remove *any* container named auth-service
+      #    (both at its own startup and in its exit trap) — including this
+      #    job's compose-managed one, which shares that exact name on purpose
+      #    (docker-compose.yml's auth-mock service sets container_name:
+      #    auth-service to match the hostname api-gateway already expects).
+      #    So by the time e2e-test.sh finishes, nothing is listening on :9000
+      #    at all — confirmed directly: the first run of this job failed with
+      #    Vite's dev proxy logging "ECONNREFUSED" on /dev/login. Bring it
+      #    back explicitly before Playwright needs it. ───────────────────────
+      - name: Restart auth-mock (removed by scripts/e2e-test.sh's own cleanup)
+        run: |
+          docker compose up -d auth-mock
+          until curl -sf -X POST http://localhost:9000/dev/login \
+            -H 'Content-Type: application/json' -d '{"role":"FRONT_DESK"}' > /dev/null 2>&1; do
+            sleep 2
+          done
+
       - name: Set up Node
         uses: actions/setup-node@v5
         with:
