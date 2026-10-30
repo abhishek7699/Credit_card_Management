@@ -166,4 +166,27 @@ class BookingControllerTest {
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.error").exists());
     }
+
+    @Test
+    void checkOut_succeeds_returns200CheckedOut() throws Exception {
+        UUID bookingId = UUID.randomUUID();
+        Booking checkedOut = heldBooking(UUID.randomUUID());
+        checkedOut.setStatus(BookingStatus.CHECKED_OUT);
+        when(bookingService.checkOut(bookingId)).thenReturn(checkedOut);
+
+        mockMvc.perform(post("/api/v1/bookings/" + bookingId + "/check-out"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("CHECKED_OUT"));
+    }
+
+    @Test
+    void checkOut_invalidState_returns409() throws Exception {
+        UUID bookingId = UUID.randomUUID();
+        when(bookingService.checkOut(bookingId))
+                .thenThrow(new InvalidBookingStateException(bookingId, "booking must be CHECKED_IN"));
+
+        mockMvc.perform(post("/api/v1/bookings/" + bookingId + "/check-out"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error").exists());
+    }
 }

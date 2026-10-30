@@ -48,6 +48,11 @@ class CheckInFlowIT {
         registry.add("spring.datasource.url", () -> CockroachTestContainer.jdbcUrl(cockroach));
         registry.add("spring.datasource.username", () -> "root");
         registry.add("spring.datasource.password", () -> "");
+        // KafkaConsumerConfig's @Value has no default and is always component-scanned
+        // into the full context — this test never sends/consumes anything, so any
+        // address satisfies the bean; Spring Kafka retries connecting in the
+        // background without failing context startup or this test.
+        registry.add("spring.kafka.bootstrap-servers", () -> "localhost:9092");
     }
 
     @Autowired

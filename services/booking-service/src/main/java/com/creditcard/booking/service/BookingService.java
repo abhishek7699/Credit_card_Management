@@ -172,6 +172,34 @@ public class BookingService {
     }
 
     /**
+     * FR-007/FR-008 (layer 2b): checks a CHECKED_IN booking out, transitioning it to
+     * CHECKED_OUT and its room to DIRTY — no payment of any kind (FR-009). Unlike
+     * checkIn, the booking's own conditional update runs first: it is the only
+     * gated step here, so the room (whose update is unconditional — DIRTY applies
+     * regardless of the room's own current status, per spec.md's edge case: booking
+     * state is authoritative for this transition) is only ever touched once that
+     * precondition is confirmed to have genuinely held.
+     */
+    @Transactional
+    public Booking checkOut(UUID bookingId) {
+        Booking booking = getById(bookingId);
+        if (booking.getStatus() != BookingStatus.CHECKED_IN) {
+            throw new InvalidBookingStateException(bookingId,
+                    "booking must be CHECKED_IN to check out (current: " + booking.getStatus() + ")");
+        }
+
+        int bookingUpdated = bookingRepository.updateStatusIfCurrent(
+                bookingId, BookingStatus.CHECKED_OUT, BookingStatus.CHECKED_IN);
+        if (bookingUpdated == 0) {
+            throw new InvalidBookingStateException(bookingId, "booking is no longer CHECKED_IN");
+        }
+
+        roomRepository.setStatus(booking.getRoomId(), RoomStatus.DIRTY);
+
+        return getById(bookingId);
+    }
+
+    /**
      * Cancels a booking: status + cancellation reason update and the deletion of its
      * booking_room_nights rows in the SAME transaction (Key Design Decision #1,
      * plan.md) — the room is immediately re-searchable, never left blocked by a stale

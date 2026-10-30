@@ -39,4 +39,11 @@ public interface RoomRepository extends JpaRepository<Room, UUID> {
     int updateStatusIfCurrent(@Param("id") UUID id,
                               @Param("newStatus") RoomStatus newStatus,
                               @Param("expected") RoomStatus expected);
+
+    /** Unconditional transition — used only by checkOut (FR-007): the room is set
+     *  DIRTY regardless of its own current status, since booking state is
+     *  authoritative for that transition (spec.md edge case). */
+    @Modifying(clearAutomatically = true)
+    @Query("UPDATE Room r SET r.status = :newStatus WHERE r.id = :id")
+    int setStatus(@Param("id") UUID id, @Param("newStatus") RoomStatus newStatus);
 }

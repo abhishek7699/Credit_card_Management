@@ -196,6 +196,21 @@ public class RouteConfig {
                                         .setFallbackUri("forward:/fallback/booking")))
                         .uri(bookingServiceUrl))
 
+                // ── Booking: check-out (POST) — layer 2b ──────────────────────────────
+                // Falls through to the existing broad FRONT_DESK/ADMIN rule, same as
+                // check-in — no new matcher needed.
+                .route("booking-check-out", r -> r
+                        .path("/api/v1/bookings/{id}/check-out")
+                        .and().method(HttpMethod.POST)
+                        .filters(f -> f
+                                .requestRateLimiter(c -> c
+                                        .setRateLimiter(rateLimiter)
+                                        .setKeyResolver(keyResolver))
+                                .circuitBreaker(c -> c
+                                        .setName("booking-service-cb")
+                                        .setFallbackUri("forward:/fallback/booking")))
+                        .uri(bookingServiceUrl))
+
                 // ── Room board (GET) — layer 2b ───────────────────────────────────────
                 // /api/v1/rooms/board is a distinct literal path from room-search's
                 // /api/v1/rooms, so there's no route-matching ambiguity regardless of

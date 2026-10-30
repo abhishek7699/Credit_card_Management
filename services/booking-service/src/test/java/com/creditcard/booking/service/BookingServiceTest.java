@@ -379,6 +379,52 @@ class BookingServiceTest {
         assertThatThrownBy(() -> service.checkIn(bookingId)).isInstanceOf(InvalidBookingStateException.class);
     }
 
+    // ── checkOut (layer 2b) ─────────────────────────────────────────────────────
+
+    @Test
+    void checkOut_checkedIn_succeeds_andSetsRoomDirtyUnconditionally() {
+        UUID bookingId = UUID.randomUUID();
+        UUID roomId = UUID.randomUUID();
+        Booking checkedIn = booking(bookingId, BookingStatus.CHECKED_IN, "txn-co-1");
+        checkedIn.setRoomId(roomId);
+        Booking checkedOut = booking(bookingId, BookingStatus.CHECKED_OUT, "txn-co-1");
+        checkedOut.setRoomId(roomId);
+        when(bookingRepository.findById(bookingId))
+                .thenReturn(Optional.of(checkedIn))
+                .thenReturn(Optional.of(checkedOut));
+        when(bookingRepository.updateStatusIfCurrent(bookingId, BookingStatus.CHECKED_OUT, BookingStatus.CHECKED_IN))
+                .thenReturn(1);
+
+        Booking result = service.checkOut(bookingId);
+
+        assertThat(result.getStatus()).isEqualTo(BookingStatus.CHECKED_OUT);
+        verify(roomRepository).setStatus(roomId, RoomStatus.DIRTY);
+    }
+
+    @Test
+    void checkOut_bookingNotCheckedIn_throwsInvalidBookingState_andNeverTouchesRoom() {
+        UUID bookingId = UUID.randomUUID();
+        Booking confirmed = booking(bookingId, BookingStatus.CONFIRMED, "txn-co-2");
+        when(bookingRepository.findById(bookingId)).thenReturn(Optional.of(confirmed));
+
+        assertThatThrownBy(() -> service.checkOut(bookingId)).isInstanceOf(InvalidBookingStateException.class);
+
+        verify(roomRepository, never()).setStatus(any(), any());
+    }
+
+    @Test
+    void checkOut_lostRaceOnBookingUpdate_throwsInvalidBookingState_andNeverTouchesRoom() {
+        UUID bookingId = UUID.randomUUID();
+        Booking checkedIn = booking(bookingId, BookingStatus.CHECKED_IN, "txn-co-3");
+        when(bookingRepository.findById(bookingId)).thenReturn(Optional.of(checkedIn));
+        when(bookingRepository.updateStatusIfCurrent(bookingId, BookingStatus.CHECKED_OUT, BookingStatus.CHECKED_IN))
+                .thenReturn(0);
+
+        assertThatThrownBy(() -> service.checkOut(bookingId)).isInstanceOf(InvalidBookingStateException.class);
+
+        verify(roomRepository, never()).setStatus(any(), any());
+    }
+
     @Test
     void handlePaymentOutcome_alreadyProcessed_isNoOp() {
         Booking booking = booking(UUID.randomUUID(), BookingStatus.HELD, "txn-3");

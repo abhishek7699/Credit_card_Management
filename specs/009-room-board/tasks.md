@@ -177,22 +177,22 @@ Story 3).
 
 ### Tests for User Story 3 ⚠️
 
-- [ ] T022 [P] [US3] Unit test: `BookingService.checkOut()` — success path, rejection
+- [X] T022 [P] [US3] Unit test: `BookingService.checkOut()` — success path, rejection
       when the booking isn't `CHECKED_IN`, and that the room's update is
       **unconditional** (always `DIRTY`, regardless of the room's own prior status —
       plan.md Key Design Decision #3) in `BookingServiceTest.java`
-- [ ] T023 [P] [US3] Integration test: check-in → check-out, board shows `DIRTY`, no
+- [X] T023 [P] [US3] Integration test: check-in → check-out, board shows `DIRTY`, no
       payment-related side effect, in `services/booking-service/src/test/java/com/creditcard/booking/integration/CheckOutFlowIT.java`
 
 ### Implementation for User Story 3
 
-- [ ] T024 [US3] `BookingService.java` — add `checkOut(bookingId)`: validate
+- [X] T024 [US3] `BookingService.java` — add `checkOut(bookingId)`: validate
       `CHECKED_IN`, conditionally update the booking (`CHECKED_IN`→`CHECKED_OUT`) then
       unconditionally set the room to `DIRTY`, both in one transaction (depends on
       T019 — same file)
-- [ ] T025 [US3] `BookingController.java` — add `POST /api/v1/bookings/{id}/check-out`
+- [X] T025 [US3] `BookingController.java` — add `POST /api/v1/bookings/{id}/check-out`
       (depends on T024)
-- [ ] T026 [US3] Add the `booking-check-out` route in `RouteConfig.java` — same
+- [X] T026 [US3] Add the `booking-check-out` route in `RouteConfig.java` — same
       fall-through as check-in, no `SecurityConfig` change
 
 **Checkpoint**: User Stories 1-3 all independently functional — the full stay

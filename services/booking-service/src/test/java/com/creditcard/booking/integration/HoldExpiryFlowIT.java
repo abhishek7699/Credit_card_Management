@@ -54,6 +54,8 @@ class HoldExpiryFlowIT {
         registry.add("spring.datasource.url", () -> CockroachTestContainer.jdbcUrl(cockroach));
         registry.add("spring.datasource.username", () -> "root");
         registry.add("spring.datasource.password", () -> "");
+        // See CheckInFlowIT's identical property for why this is needed here.
+        registry.add("spring.kafka.bootstrap-servers", () -> "localhost:9092");
     }
 
     @Autowired
