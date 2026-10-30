@@ -6,7 +6,9 @@ import com.creditcard.booking.domain.BookingRoomNight;
 import com.creditcard.booking.domain.BookingStatus;
 import com.creditcard.booking.domain.CancellationReason;
 import com.creditcard.booking.domain.Room;
+import com.creditcard.booking.domain.RoomStatus;
 import com.creditcard.booking.exception.BookingNotFoundException;
+import com.creditcard.booking.exception.InvalidBookingStateException;
 import com.creditcard.booking.exception.InvalidDateRangeException;
 import com.creditcard.booking.exception.RoomNotFoundException;
 import com.creditcard.booking.exception.RoomUnavailableException;
@@ -136,6 +138,37 @@ public class BookingService {
 
     public Booking getById(UUID id) {
         return bookingRepository.findById(id).orElseThrow(() -> new BookingNotFoundException(id));
+    }
+
+    /**
+     * FR-005/FR-006 (layer 2b): checks a CONFIRMED booking in, transitioning its room
+     * VACANT_CLEAN -> OCCUPIED and the booking CONFIRMED -> CHECKED_IN. The room is
+     * updated before the booking, both via the conditional-update pattern
+     * (research.md §2) — a fixed lock order, shared with checkOut, rules out a
+     * cross-operation deadlock (plan.md Key Design Decision #3). Either conditional
+     * update affecting zero rows aborts the whole operation (transaction rolls back).
+     */
+    @Transactional
+    public Booking checkIn(UUID bookingId) {
+        Booking booking = getById(bookingId);
+        if (booking.getStatus() != BookingStatus.CONFIRMED) {
+            throw new InvalidBookingStateException(bookingId,
+                    "booking must be CONFIRMED to check in (current: " + booking.getStatus() + ")");
+        }
+
+        int roomUpdated = roomRepository.updateStatusIfCurrent(
+                booking.getRoomId(), RoomStatus.OCCUPIED, RoomStatus.VACANT_CLEAN);
+        if (roomUpdated == 0) {
+            throw new InvalidBookingStateException(bookingId, "room is not VACANT_CLEAN");
+        }
+
+        int bookingUpdated = bookingRepository.updateStatusIfCurrent(
+                bookingId, BookingStatus.CHECKED_IN, BookingStatus.CONFIRMED);
+        if (bookingUpdated == 0) {
+            throw new InvalidBookingStateException(bookingId, "booking is no longer CONFIRMED");
+        }
+
+        return getById(bookingId);
     }
 
     /**

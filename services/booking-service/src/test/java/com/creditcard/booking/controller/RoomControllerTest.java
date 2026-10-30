@@ -1,8 +1,12 @@
 package com.creditcard.booking.controller;
 
+import com.creditcard.booking.controller.dto.RoomBoardResponse;
+import com.creditcard.booking.controller.dto.RoomBoardResponse.RoomBoardEntry;
 import com.creditcard.booking.domain.Room;
+import com.creditcard.booking.domain.RoomStatus;
 import com.creditcard.booking.exception.InvalidDateRangeException;
 import com.creditcard.booking.service.RoomAvailabilityService;
+import com.creditcard.booking.service.RoomService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -14,6 +18,7 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 
+import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -28,6 +33,9 @@ class RoomControllerTest {
 
     @MockBean
     private RoomAvailabilityService roomAvailabilityService;
+
+    @MockBean
+    private RoomService roomService;
 
     @Test
     void validRange_returnsAvailableRooms() throws Exception {
@@ -69,5 +77,22 @@ class RoomControllerTest {
                         .param("checkOut", "2026-11-03"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$").isEmpty());
+    }
+
+    @Test
+    void board_returnsRoomsGroupedByFloor() throws Exception {
+        RoomBoardEntry occupied = new RoomBoardEntry(UUID.randomUUID(), "101", 1, RoomStatus.OCCUPIED,
+                "Jane Doe", LocalDate.of(2026, 12, 1), LocalDate.of(2026, 12, 3));
+        RoomBoardEntry vacant = new RoomBoardEntry(UUID.randomUUID(), "102", 2, RoomStatus.VACANT_CLEAN,
+                null, null, null);
+        when(roomService.getBoard()).thenReturn(List.of(new RoomBoardResponse(1, List.of(occupied, vacant))));
+
+        mockMvc.perform(get("/api/v1/rooms/board"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].floor").value(1))
+                .andExpect(jsonPath("$[0].rooms[0].status").value("OCCUPIED"))
+                .andExpect(jsonPath("$[0].rooms[0].guestName").value("Jane Doe"))
+                .andExpect(jsonPath("$[0].rooms[1].status").value("VACANT_CLEAN"))
+                .andExpect(jsonPath("$[0].rooms[1].guestName").value(nullValue()));
     }
 }

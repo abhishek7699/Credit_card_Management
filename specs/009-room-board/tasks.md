@@ -39,7 +39,7 @@ plan.md's Project Structure.
 Decision #1) — nothing in Foundational or any user story can build against the new
 `floor`/`position`/`status` columns until this exists.
 
-- [ ] T001 Flyway migration `services/booking-service/src/main/resources/db/migration/V5__add_room_layout_and_status.sql`:
+- [X] T001 Flyway migration `services/booking-service/src/main/resources/db/migration/V5__add_room_layout_and_status.sql`:
       add `floor`/`position` (nullable, then backfilled from each existing room's
       `room_number`, then `NOT NULL`), add `status` (`NOT NULL DEFAULT
       'VACANT_CLEAN'`), insert 4 new rows (`303`-`306`) to reach 18, add
@@ -57,26 +57,26 @@ exist with a unique `(floor, position)` and `status = VACANT_CLEAN`.
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete.
 
-- [ ] T002 [P] `services/booking-service/src/main/java/com/creditcard/booking/domain/RoomStatus.java`
+- [X] T002 [P] `services/booking-service/src/main/java/com/creditcard/booking/domain/RoomStatus.java`
       — `VACANT_CLEAN`, `OCCUPIED`, `DIRTY`, `MAINTENANCE` (data-model.md)
-- [ ] T003 [P] `services/booking-service/src/main/java/com/creditcard/booking/domain/Room.java`
+- [X] T003 [P] `services/booking-service/src/main/java/com/creditcard/booking/domain/Room.java`
       — add `floor` (Integer), `position` (Integer), `status` (RoomStatus) fields +
       getters/setters
-- [ ] T004 [P] `services/booking-service/src/main/java/com/creditcard/booking/domain/BookingStatus.java`
+- [X] T004 [P] `services/booking-service/src/main/java/com/creditcard/booking/domain/BookingStatus.java`
       — add `CHECKED_IN`, `CHECKED_OUT`
-- [ ] T005 `services/booking-service/src/main/java/com/creditcard/booking/repository/RoomRepository.java`
+- [X] T005 `services/booking-service/src/main/java/com/creditcard/booking/repository/RoomRepository.java`
       — add `updateStatusIfCurrent(id, newStatus, expected)` (conditional `@Modifying
       @Query UPDATE`, research.md §2) and `findAllByOrderByFloorAscPositionAsc()`
       (depends on T002, T003)
-- [ ] T006 `services/booking-service/src/main/java/com/creditcard/booking/repository/BookingRepository.java`
+- [X] T006 `services/booking-service/src/main/java/com/creditcard/booking/repository/BookingRepository.java`
       — add `updateStatusIfCurrent(id, newStatus, expected)` (same conditional-update
       pattern), `findByStatus(status)`, `findByRoomIdAndStatus(roomId, status)`
       (depends on T004)
-- [ ] T007 [P] `services/booking-service/src/main/java/com/creditcard/booking/exception/InvalidBookingStateException.java`
+- [X] T007 [P] `services/booking-service/src/main/java/com/creditcard/booking/exception/InvalidBookingStateException.java`
       — check-in/check-out precondition failed (409)
-- [ ] T008 [P] `services/booking-service/src/main/java/com/creditcard/booking/exception/InvalidRoomStatusTransitionException.java`
+- [X] T008 [P] `services/booking-service/src/main/java/com/creditcard/booking/exception/InvalidRoomStatusTransitionException.java`
       — `PATCH /status` rejected (409)
-- [ ] T009 `services/booking-service/src/main/java/com/creditcard/booking/exception/GlobalExceptionHandler.java`
+- [X] T009 `services/booking-service/src/main/java/com/creditcard/booking/exception/GlobalExceptionHandler.java`
       — map the two new exceptions to 409 (depends on T007, T008)
 
 **Checkpoint**: Domain/repository/exception classes compile; user story implementation
@@ -95,26 +95,26 @@ non-occupied room (spec.md Story 1).
 
 ### Tests for User Story 1 ⚠️ (write first, confirm they fail)
 
-- [ ] T010 [P] [US1] Unit test: `RoomService.getBoard()` groups by floor, orders by
+- [X] T010 [P] [US1] Unit test: `RoomService.getBoard()` groups by floor, orders by
       position within each floor, and includes guest name/dates only for `OCCUPIED`
       rooms, in `services/booking-service/src/test/java/com/creditcard/booking/service/RoomServiceTest.java`
-- [ ] T011 [P] [US1] Contract test: `GET /api/v1/rooms/board` in
+- [X] T011 [P] [US1] Contract test: `GET /api/v1/rooms/board` in
       `services/booking-service/src/test/java/com/creditcard/booking/controller/RoomControllerTest.java`
 
 ### Implementation for User Story 1
 
-- [ ] T012 [US1] DTOs `services/booking-service/src/main/java/com/creditcard/booking/controller/dto/RoomBoardResponse.java`
+- [X] T012 [US1] DTOs `services/booking-service/src/main/java/com/creditcard/booking/controller/dto/RoomBoardResponse.java`
       (a floor + its ordered rooms, each with status and optional guest name/dates —
       contracts/api.md)
-- [ ] T013 [US1] `services/booking-service/src/main/java/com/creditcard/booking/service/RoomService.java`
+- [X] T013 [US1] `services/booking-service/src/main/java/com/creditcard/booking/service/RoomService.java`
       (new) — `getBoard()`: two queries (all rooms ordered, all `CHECKED_IN`
       bookings), joined in memory by `roomId` (research.md §3) (depends on T005, T006)
-- [ ] T014 [US1] `services/booking-service/src/main/java/com/creditcard/booking/controller/RoomController.java`
+- [X] T014 [US1] `services/booking-service/src/main/java/com/creditcard/booking/controller/RoomController.java`
       — add `GET /api/v1/rooms/board` (depends on T012, T013)
-- [ ] T015 [US1] Add the `room-board` route in
+- [X] T015 [US1] Add the `room-board` route in
       `services/api-gateway/src/main/java/com/creditcard/gateway/config/RouteConfig.java`
       (existing `booking-service-cb` breaker — this route never calls gRPC)
-- [ ] T016 [US1] Add a `.pathMatchers(GET, "/api/v1/rooms/board").hasAnyRole("FRONT_DESK",
+- [X] T016 [US1] Add a `.pathMatchers(GET, "/api/v1/rooms/board").hasAnyRole("FRONT_DESK",
       "HOUSEKEEPING", "ADMIN")` matcher, placed **before** the existing broad
       `/api/v1/bookings/**`+`/api/v1/rooms/**` rule, in
       `services/api-gateway/src/main/java/com/creditcard/gateway/config/SecurityConfig.java`
@@ -137,25 +137,25 @@ Story 2).
 
 ### Tests for User Story 2 ⚠️
 
-- [ ] T017 [P] [US2] Unit test: `BookingService.checkIn()` — success path (`CONFIRMED`
+- [X] T017 [P] [US2] Unit test: `BookingService.checkIn()` — success path (`CONFIRMED`
       + `VACANT_CLEAN` → `CHECKED_IN`/`OCCUPIED`), rejection when the booking isn't
       `CONFIRMED`, rejection when the room isn't `VACANT_CLEAN`, and the
       conditional-update path that surfaces a lost concurrent race as the same
       rejection (research.md §2) in `services/booking-service/src/test/java/com/creditcard/booking/service/BookingServiceTest.java`
-- [ ] T018 [P] [US2] Integration test (Testcontainers CockroachDB — no Kafka needed
+- [X] T018 [P] [US2] Integration test (Testcontainers CockroachDB — no Kafka needed
       for this layer): full check-in flow reflected on the board in
       `services/booking-service/src/test/java/com/creditcard/booking/integration/CheckInFlowIT.java`
 
 ### Implementation for User Story 2
 
-- [ ] T019 [US2] `services/booking-service/src/main/java/com/creditcard/booking/service/BookingService.java`
+- [X] T019 [US2] `services/booking-service/src/main/java/com/creditcard/booking/service/BookingService.java`
       — add `checkIn(bookingId)`: validate `CONFIRMED`, conditionally update the room
       (`VACANT_CLEAN`→`OCCUPIED`) then the booking (`CONFIRMED`→`CHECKED_IN`), room
       before booking, both in one transaction (plan.md Key Design Decision #3)
       (depends on T005, T006, T007)
-- [ ] T020 [US2] `services/booking-service/src/main/java/com/creditcard/booking/controller/BookingController.java`
+- [X] T020 [US2] `services/booking-service/src/main/java/com/creditcard/booking/controller/BookingController.java`
       — add `POST /api/v1/bookings/{id}/check-in` (depends on T019)
-- [ ] T021 [US2] Add the `booking-check-in` route in `RouteConfig.java` — falls
+- [X] T021 [US2] Add the `booking-check-in` route in `RouteConfig.java` — falls
       through to the existing `FRONT_DESK`/`ADMIN` rule in `SecurityConfig.java`
       unchanged, no new matcher needed (research.md §4)
 

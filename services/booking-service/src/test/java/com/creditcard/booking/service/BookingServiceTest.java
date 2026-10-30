@@ -5,7 +5,9 @@ import com.creditcard.booking.domain.Booking;
 import com.creditcard.booking.domain.BookingStatus;
 import com.creditcard.booking.domain.CancellationReason;
 import com.creditcard.booking.domain.Room;
+import com.creditcard.booking.domain.RoomStatus;
 import com.creditcard.booking.exception.BookingNotFoundException;
+import com.creditcard.booking.exception.InvalidBookingStateException;
 import com.creditcard.booking.exception.InvalidDateRangeException;
 import com.creditcard.booking.exception.RoomNotFoundException;
 import com.creditcard.booking.exception.RoomUnavailableException;
@@ -311,6 +313,70 @@ class BookingServiceTest {
         assertThatThrownBy(() -> service.initiatePayment(booking,
                 new BookingRequest.CardDetails("4111111111111111", "12/28", "123", "Jane")))
                 .isInstanceOf(RoomNotFoundException.class);
+    }
+
+    // ── checkIn (layer 2b) ──────────────────────────────────────────────────────
+
+    @Test
+    void checkIn_confirmedAndVacantClean_succeeds() {
+        UUID bookingId = UUID.randomUUID();
+        UUID roomId = UUID.randomUUID();
+        Booking confirmed = booking(bookingId, BookingStatus.CONFIRMED, "txn-ci-1");
+        confirmed.setRoomId(roomId);
+        Booking checkedIn = booking(bookingId, BookingStatus.CHECKED_IN, "txn-ci-1");
+        checkedIn.setRoomId(roomId);
+        when(bookingRepository.findById(bookingId))
+                .thenReturn(Optional.of(confirmed))
+                .thenReturn(Optional.of(checkedIn));
+        when(roomRepository.updateStatusIfCurrent(roomId, RoomStatus.OCCUPIED, RoomStatus.VACANT_CLEAN))
+                .thenReturn(1);
+        when(bookingRepository.updateStatusIfCurrent(bookingId, BookingStatus.CHECKED_IN, BookingStatus.CONFIRMED))
+                .thenReturn(1);
+
+        Booking result = service.checkIn(bookingId);
+
+        assertThat(result.getStatus()).isEqualTo(BookingStatus.CHECKED_IN);
+    }
+
+    @Test
+    void checkIn_bookingNotConfirmed_throwsInvalidBookingState_andNeverTouchesRoom() {
+        UUID bookingId = UUID.randomUUID();
+        Booking held = booking(bookingId, BookingStatus.HELD, null);
+        when(bookingRepository.findById(bookingId)).thenReturn(Optional.of(held));
+
+        assertThatThrownBy(() -> service.checkIn(bookingId)).isInstanceOf(InvalidBookingStateException.class);
+
+        verify(roomRepository, never()).updateStatusIfCurrent(any(), any(), any());
+    }
+
+    @Test
+    void checkIn_roomNotVacantClean_throwsInvalidBookingState_andNeverTouchesBooking() {
+        UUID bookingId = UUID.randomUUID();
+        UUID roomId = UUID.randomUUID();
+        Booking confirmed = booking(bookingId, BookingStatus.CONFIRMED, "txn-ci-2");
+        confirmed.setRoomId(roomId);
+        when(bookingRepository.findById(bookingId)).thenReturn(Optional.of(confirmed));
+        when(roomRepository.updateStatusIfCurrent(roomId, RoomStatus.OCCUPIED, RoomStatus.VACANT_CLEAN))
+                .thenReturn(0);
+
+        assertThatThrownBy(() -> service.checkIn(bookingId)).isInstanceOf(InvalidBookingStateException.class);
+
+        verify(bookingRepository, never()).updateStatusIfCurrent(any(), any(), any());
+    }
+
+    @Test
+    void checkIn_lostRaceOnBookingUpdate_throwsInvalidBookingState() {
+        UUID bookingId = UUID.randomUUID();
+        UUID roomId = UUID.randomUUID();
+        Booking confirmed = booking(bookingId, BookingStatus.CONFIRMED, "txn-ci-3");
+        confirmed.setRoomId(roomId);
+        when(bookingRepository.findById(bookingId)).thenReturn(Optional.of(confirmed));
+        when(roomRepository.updateStatusIfCurrent(roomId, RoomStatus.OCCUPIED, RoomStatus.VACANT_CLEAN))
+                .thenReturn(1);
+        when(bookingRepository.updateStatusIfCurrent(bookingId, BookingStatus.CHECKED_IN, BookingStatus.CONFIRMED))
+                .thenReturn(0);
+
+        assertThatThrownBy(() -> service.checkIn(bookingId)).isInstanceOf(InvalidBookingStateException.class);
     }
 
     @Test

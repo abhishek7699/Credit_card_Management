@@ -39,7 +39,16 @@ public class BookingController {
 
     @GetMapping("/{id}")
     public BookingDetailResponse get(@PathVariable UUID id) {
-        Booking booking = bookingService.getById(id);
+        return toDetailResponse(bookingService.getById(id));
+    }
+
+    /** FR-005/FR-006 (layer 2b), front-desk only (enforced at the gateway). */
+    @PostMapping("/{id}/check-in")
+    public BookingDetailResponse checkIn(@PathVariable UUID id) {
+        return toDetailResponse(bookingService.checkIn(id));
+    }
+
+    private BookingDetailResponse toDetailResponse(Booking booking) {
         return new BookingDetailResponse(
                 booking.getId(),
                 booking.getRoomId(),

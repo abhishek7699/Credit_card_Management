@@ -32,8 +32,14 @@ public interface BookingRepository extends JpaRepository<Booking, UUID> {
      * precondition didn't hold at the instant of the update, whether it never held or
      * a concurrent request changed it first. Either way, the caller treats it as a
      * rejection, never as a silent no-op or a retry.
+     *
+     * <p>{@code clearAutomatically = true}: this is a bulk JPQL update, which bypasses
+     * the persistence context — without clearing it, an entity already loaded earlier
+     * in the same transaction would keep stale in-memory state after this runs.
+     * Callers that need the post-update row re-fetch it rather than patch the stale
+     * managed instance by hand.
      */
-    @Modifying
+    @Modifying(clearAutomatically = true)
     @Query("UPDATE Booking b SET b.status = :newStatus WHERE b.id = :id AND b.status = :expected")
     int updateStatusIfCurrent(@Param("id") UUID id,
                               @Param("newStatus") BookingStatus newStatus,

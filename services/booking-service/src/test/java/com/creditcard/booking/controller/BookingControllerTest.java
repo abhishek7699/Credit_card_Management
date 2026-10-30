@@ -3,6 +3,7 @@ package com.creditcard.booking.controller;
 import com.creditcard.booking.domain.Booking;
 import com.creditcard.booking.domain.BookingStatus;
 import com.creditcard.booking.exception.BookingNotFoundException;
+import com.creditcard.booking.exception.InvalidBookingStateException;
 import com.creditcard.booking.exception.RoomNotFoundException;
 import com.creditcard.booking.exception.RoomUnavailableException;
 import com.creditcard.booking.service.BookingService;
@@ -129,6 +130,39 @@ class BookingControllerTest {
         when(bookingService.getById(bookingId)).thenThrow(new BookingNotFoundException(bookingId));
 
         mockMvc.perform(get("/api/v1/bookings/" + bookingId))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error").exists());
+    }
+
+    @Test
+    void checkIn_succeeds_returns200CheckedIn() throws Exception {
+        UUID bookingId = UUID.randomUUID();
+        Booking checkedIn = heldBooking(UUID.randomUUID());
+        checkedIn.setStatus(BookingStatus.CHECKED_IN);
+        when(bookingService.checkIn(bookingId)).thenReturn(checkedIn);
+
+        mockMvc.perform(post("/api/v1/bookings/" + bookingId + "/check-in"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("CHECKED_IN"));
+    }
+
+    @Test
+    void checkIn_invalidState_returns409() throws Exception {
+        UUID bookingId = UUID.randomUUID();
+        when(bookingService.checkIn(bookingId))
+                .thenThrow(new InvalidBookingStateException(bookingId, "booking must be CONFIRMED"));
+
+        mockMvc.perform(post("/api/v1/bookings/" + bookingId + "/check-in"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error").exists());
+    }
+
+    @Test
+    void checkIn_bookingNotFound_returns404() throws Exception {
+        UUID bookingId = UUID.randomUUID();
+        when(bookingService.checkIn(bookingId)).thenThrow(new BookingNotFoundException(bookingId));
+
+        mockMvc.perform(post("/api/v1/bookings/" + bookingId + "/check-in"))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.error").exists());
     }

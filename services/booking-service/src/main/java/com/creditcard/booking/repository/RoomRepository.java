@@ -32,8 +32,9 @@ public interface RoomRepository extends JpaRepository<Room, UUID> {
     List<Room> findAllByOrderByFloorAscPositionAsc();
 
     /** Concurrency-safe state transition (research.md §2) — see
-     *  BookingRepository#updateStatusIfCurrent for the full rationale. */
-    @Modifying
+     *  BookingRepository#updateStatusIfCurrent for the full rationale, including why
+     *  clearAutomatically = true. */
+    @Modifying(clearAutomatically = true)
     @Query("UPDATE Room r SET r.status = :newStatus WHERE r.id = :id AND r.status = :expected")
     int updateStatusIfCurrent(@Param("id") UUID id,
                               @Param("newStatus") RoomStatus newStatus,
