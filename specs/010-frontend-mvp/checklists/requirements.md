@@ -37,8 +37,8 @@
   template convention (Input preserves the original request) and is not itself a
   spec-body implementation detail; the Requirements/Success Criteria sections
   themselves stay technology-agnostic.
-- One Assumption (board needs to carry a booking reference for occupied rooms) notes
-  a small, additive extension to the existing room-board API shape as in scope for
-  this layer — flagged explicitly rather than left implicit, since it's the one place
-  this "frontend" layer's real requirements reach back into the existing backend
-  contract. Worth confirming with the user before `/speckit-plan` locks it in.
+- The one open question flagged after `/speckit-specify` — whether a small, additive
+  extension to the room-board API shape was in scope — was resolved in the
+  2026-10-30 Clarifications session: approved, with the exact field shape
+  (`currentBookingId`, `arrivingBookingId` + guest name) now fixed in FR-009a/
+  FR-014/FR-015 and the Assumptions section.

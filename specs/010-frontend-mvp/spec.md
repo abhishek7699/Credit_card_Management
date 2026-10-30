@@ -8,6 +8,12 @@
 
 **Input**: User description: "Build layer 2d: Frontend MVP, connecting the existing React prototype (frontend/) to the real backend. Minimal, B2B staff only. Follow CLAUDE.md working approach. Connection: Replace the RTK Query mock base query with a real fetchBaseQuery against api-gateway. Use a Vite dev proxy (/api -> http://localhost:8088) so no CORS changes are needed. API base URL from env (VITE_API_BASE_URL) for later deployment. Auth (dev only for now): login screen with role picker (FRONT_DESK / HOUSEKEEPING) fetches a JWT from the existing auth-mock, sends it as Bearer on every request. Handle 401 -> back to login, 403 -> 'not allowed' message, 503 -> retry banner. PIN auth backend stays in BACKLOG.md. Screens (real data only): Room board: floor-plan grid by floor (3 x 6), colored by status, guest name if occupied. Polls GET /api/v1/rooms/board every 10s. Click a room: available -> create booking form (guest name, dates, card); confirmed -> check-in; occupied -> check-out; dirty/maintenance -> status change (per role). Booking status view: shows HELD -> CONFIRMED / CANCELLED (poll until final). Rules: Card details go straight to the API; never stored in Redux, localStorage, or logs. TypeScript strict, Vitest + React Testing Library for components (MSW for API mocks). One Playwright smoke test against docker-compose: login -> book -> CONFIRMED -> check-in -> board shows OCCUPIED. Wire into CI (build + tests). README: how to run frontend with the backend. Out of scope: owner dashboard, charges (2c), real auth/PIN, mobile, styling polish."
 
+## Clarifications
+
+### Session 2026-10-30
+
+- Q: Check-out (FR-015) needs a booking reference for any occupied room, not just ones a given staff session created — and check-in (Story 3) similarly needs a way to recognize a room as awaiting arrival without relying on session memory. Is a small, additive extension to the existing `GET /api/v1/rooms/board` response (booking-service only, no payment changes) in scope for this layer to close both gaps? → A: Approved. Each room entry gains `currentBookingId` when `OCCUPIED` (for check-out), and `arrivingBookingId` plus the guest's name when a `CONFIRMED` booking's check-in date is today (for check-in). booking-service's tests are updated to keep 100% coverage, and its e2e coverage is updated if affected.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 — Staff Log In and View the Live Room Board (Priority: P1)
@@ -46,15 +52,15 @@ A front-desk staff member clicks a vacant, clean room on the board, fills in the
 
 ### User Story 3 — Staff Check a Guest In (Priority: P3)
 
-Once a booking staff just created reaches confirmed, front-desk staff check the guest in from the same screen, and the board immediately shows that room as occupied with the guest's name.
+Once a booking reaches confirmed for a guest arriving today, front-desk staff check the guest in directly from the board — whether or not this session is the one that created or confirmed that booking — and the board immediately shows that room as occupied with the guest's name.
 
 **Why this priority**: Completes the arrival half of the stay lifecycle that Story 2 set up; the board (Story 1) and booking (Story 2) are each already useful without it.
 
-**Independent Test**: Carry a booking from Story 2 through to confirmed, check it in, and confirm the room's board entry becomes occupied with the guest's name with no separate lookup step required by staff.
+**Independent Test**: Carry a booking from Story 2 through to confirmed, check it in from the board alone (no separate lookup step), and confirm the room's board entry becomes occupied with the guest's name — repeat starting from a fresh session that did not create the booking, to confirm it's discoverable from the board itself, not session memory.
 
 **Acceptance Scenarios**:
 
-1. **Given** a booking staff just confirmed in this session, **When** front-desk staff check it in, **Then** the board shows that room as occupied with the guest's name on the very next refresh.
+1. **Given** a room with a confirmed booking arriving today, **When** front-desk staff check it in from the board, **Then** the board shows that room as occupied with the guest's name on the very next refresh — regardless of which session created or confirmed that booking.
 2. **Given** a check-in attempt the backend rejects (e.g., a race with another session), **When** it fails, **Then** staff see a clear message and the room's displayed status is corrected to match the backend, not left stale.
 3. **Given** a housekeeping-signed-in session, **When** they view a room with a confirmed booking pending arrival, **Then** no check-in action is offered to them.
 
@@ -119,6 +125,7 @@ A housekeeping or front-desk staff member clicks a dirty or in-maintenance room 
 - **FR-007**: Any room currently occupied MUST show its current guest's name on the board.
 - **FR-008**: The board MUST refresh its data automatically on a fixed, short interval without requiring a manual reload, for as long as it remains open.
 - **FR-009**: The board MUST reflect a room's real backend state — including changes made by other staff sessions or by any other means — not only changes made through this session.
+- **FR-009a**: The board MUST carry enough information for any signed-in staff member to check in or check out a room directly from it — without needing to have personally created or seen the underlying booking earlier — for both an occupied room and a room with a confirmed booking arriving today.
 
 **Booking a room**
 
@@ -129,8 +136,8 @@ A housekeeping or front-desk staff member clicks a dirty or in-maintenance room 
 
 **Check-in and check-out**
 
-- **FR-014**: Front-desk staff MUST be able to check in a confirmed booking for a room they can identify as awaiting arrival, transitioning it to occupied on the board.
-- **FR-015**: Front-desk staff MUST be able to check out any room the board currently shows as occupied, transitioning it to dirty on the board, regardless of which staff session originally checked that guest in.
+- **FR-014**: Front-desk staff MUST be able to check in any room the board shows as having a confirmed booking arriving today, transitioning it to occupied on the board — discoverable directly from the board itself, regardless of which staff session created or confirmed that booking.
+- **FR-015**: Front-desk staff MUST be able to check out any room the board currently shows as occupied, transitioning it to dirty on the board — discoverable directly from the board itself, regardless of which staff session originally checked that guest in.
 - **FR-016**: Checking a guest out MUST NOT involve any payment, charge, or balance step in the app.
 - **FR-017**: Housekeeping sessions MUST NOT be offered the ability to check a guest in or out.
 
@@ -161,8 +168,9 @@ This layer introduces no new business data — it presents data and transitions 
 - **Dev-only sign-in, not real authentication**: the role-picker login is a stand-in that obtains a session credential from the existing development identity mock; it is not a production login, has no password or PIN, and does not replace the existing PIN-based device-pairing screens already in the prototype — those remain as-is, unused by this flow, and a real login/PIN backend stays in the backlog.
 - **A session lasts for one browser session**: closing the browser (or signing out) ends it; reloading the page may require signing in again rather than silently resuming. No "remember me" or long-lived credential storage is introduced.
 - **Only front desk and housekeeping are in scope**: no owner-facing screen, and no third role, is touched by this layer — the existing owner-prototype screens (dashboard, payments, reservations, room management, and the older mock floor plan) are left exactly as they are today and remain on mock data, out of scope for this layer.
-- **The board needs to carry enough information for check-out to work for any occupied room, not just ones this session created**: today's board view already shows an occupied room's guest name, but does not expose which booking that corresponds to — check-out (FR-015) needs that association for *any* occupied room, not only one this same staff session happens to remember creating. This layer assumes a small, additive extension to the existing room-board data (adding the booking reference to an occupied room's entry) is in scope here, the same way earlier layers extended booking-service additively; it does not touch payment handling and does not change any existing field.
-- **Recognizing a room as "awaiting arrival" (confirmed, not yet checked in) relies on this session having just booked or seen it**: no staff-facing booking search/list exists yet (already tracked in BACKLOG.md); discovering a confirmed-but-not-checked-in booking that a *different* staff session created, without that booking's reference, is out of scope here and remains a backlog gap.
+- **The room-board response gains two additive fields (confirmed in Clarifications)**: `currentBookingId` on any `OCCUPIED` entry (for check-out), and `arrivingBookingId` plus the guest's name on any entry with a `CONFIRMED` booking whose check-in date is today (for check-in) — both resolved via booking-service's existing data, with no payment-handling change and no existing field altered. This closes the gap that would otherwise have limited check-in/check-out to bookings a given staff session personally remembered creating, and keeps booking-service's test suite at 100% coverage.
+- **A booking "arriving today" is scoped to its check-in date, not its confirmation date**: a confirmed booking for a future stay does not appear as checkable-in until the day its stay actually begins — matching how front desk already works in practice, and avoiding the board surfacing arrivals staff can't act on yet.
+- **A general staff-facing booking search/list remains out of scope and in the backlog**: this layer only resolves the two specific board-driven cases above (today's arrivals, current occupants); finding any other booking by guest name, date range, or past/future stay still has no screen or endpoint, and stays tracked in BACKLOG.md.
 - **Polling, not push**: both the room board and a booking's in-progress status are kept current by polling on a short fixed interval, matching the backend's own synchronous, non-streaming design — no websocket or server push is introduced.
 - **No styling or mobile polish**: the existing prototype's visual design is reused as-is where it already fits; this layer is about wiring real data and actions into it, not refining its look or making it responsive for small screens.
 - **No charges or balance**: nothing owed beyond the original booking charge is shown or collected anywhere in this layer (layer 2c).
