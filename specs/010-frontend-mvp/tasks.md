@@ -188,35 +188,35 @@ card detail is ever retained anywhere in the app (spec.md Story 2).
 
 ### Tests for User Story 2 ⚠️
 
-- [ ] T028 [P] [US2] `frontend/src/features/booking/BookingForm.test.tsx` (MSW):
+- [X] T028 [P] [US2] `frontend/src/features/booking/BookingForm.test.tsx` (MSW):
       validates required fields; submits the exact payload shape `POST
       /api/v1/bookings` expects; **a dedicated assertion that after submit (success
       and failure both), no substring of the entered card number/CVV appears anywhere
       in `sessionStorage`, `localStorage`, or the Redux store's serialized state**
       (FR-013); HOUSEKEEPING-signed-in sessions never render this form at all
-- [ ] T029 [P] [US2] `frontend/src/features/booking/BookingStatusView.test.tsx` (MSW +
+- [X] T029 [P] [US2] `frontend/src/features/booking/BookingStatusView.test.tsx` (MSW +
       fake timers): polls `GET /api/v1/bookings/{id}` every 10s while `HELD`; stops
       polling once `CONFIRMED` or `CANCELLED`; renders the final state plainly
-- [ ] T030 [P] [US2] `frontend/src/features/room-board/RoomBoard.test.tsx`
+- [X] T030 [P] [US2] `frontend/src/features/room-board/RoomBoard.test.tsx`
       (extended): clicking a `VACANT_CLEAN` room opens `BookingForm` for Front Desk;
       offers no booking action at all for Housekeeping
 
 ### Implementation for User Story 2
 
-- [ ] T031 [US2] `frontend/src/features/booking/bookingApi.ts`: RTK Query mutation
+- [X] T031 [US2] `frontend/src/features/booking/bookingApi.ts`: RTK Query mutation
       `createBooking` (`POST /api/v1/bookings`) and query `getBooking(id)` (`GET
       /api/v1/bookings/{id}`, dynamic `pollingInterval`: `10_000` while `HELD`, `0`
       once final — research.md §5) (depends on T007, T010)
-- [ ] T032 [US2] `frontend/src/features/booking/BookingForm.tsx`: guest name/dates/
+- [X] T032 [US2] `frontend/src/features/booking/BookingForm.tsx`: guest name/dates/
       card fields (local `useState` only, per data-model.md §3 — never dispatched to
       Redux), submits via T031, hands off to `BookingStatusView` on success (depends on T031)
-- [ ] T033 [US2] `frontend/src/features/booking/BookingStatusView.tsx`: renders the
+- [X] T033 [US2] `frontend/src/features/booking/BookingStatusView.tsx`: renders the
       polled booking's progress (`HELD` → `CONFIRMED`/`CANCELLED`) (depends on T031)
-- [ ] T034 [US2] `frontend/src/features/room-board/RoomActionPanel.tsx` (new): the
+- [X] T034 [US2] `frontend/src/features/room-board/RoomActionPanel.tsx` (new): the
       per-room action surface clicking a tile opens — for a `VACANT_CLEAN` room and a
       FRONT_DESK session, renders `BookingForm`; for HOUSEKEEPING, renders nothing
       actionable for that room (depends on T032)
-- [ ] T035 [US2] `RoomTile`/`RoomBoard` wire click-through to `RoomActionPanel`
+- [X] T035 [US2] `RoomTile`/`RoomBoard` wire click-through to `RoomActionPanel`
       (depends on T026, T034)
 
 **Checkpoint — STOP HERE for this turn.** Setup + Foundational + User Story 1 (live

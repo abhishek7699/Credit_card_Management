@@ -1,4 +1,5 @@
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { Provider } from 'react-redux';
 import { beforeEach, expect, test } from 'vitest';
@@ -128,4 +129,40 @@ test('a 401 mid-session ends the session and renders the login screen (via the r
   );
 
   expect(await screen.findByText(/staff sign in/i)).toBeInTheDocument();
+});
+
+test('clicking a VACANT_CLEAN room opens the booking form for a FRONT_DESK session', async () => {
+  server.use(http.get('*/api/v1/rooms/board', () => HttpResponse.json(BOARD)));
+  renderBoard();
+  await screen.findByTestId('room-102');
+
+  await userEvent.click(screen.getByTestId('room-102'));
+
+  expect(screen.getByRole('dialog', { name: /room 102 actions/i })).toBeInTheDocument();
+  expect(screen.getByLabelText(/guest name/i)).toBeInTheDocument();
+});
+
+test('clicking a VACANT_CLEAN room offers no booking action for a HOUSEKEEPING session', async () => {
+  store.dispatch(logout());
+  store.dispatch(login({ role: 'HOUSEKEEPING', token: 'tok-housekeeping-test' }));
+  server.use(http.get('*/api/v1/rooms/board', () => HttpResponse.json(BOARD)));
+  renderBoard();
+  await screen.findByTestId('room-102');
+
+  await userEvent.click(screen.getByTestId('room-102'));
+
+  expect(screen.getByRole('dialog', { name: /room 102 actions/i })).toBeInTheDocument();
+  expect(screen.queryByLabelText(/guest name/i)).not.toBeInTheDocument();
+  expect(screen.getByText(/no action available/i)).toBeInTheDocument();
+});
+
+test('closing the action panel (backdrop or close button) hides it', async () => {
+  server.use(http.get('*/api/v1/rooms/board', () => HttpResponse.json(BOARD)));
+  renderBoard();
+  await screen.findByTestId('room-102');
+  await userEvent.click(screen.getByTestId('room-102'));
+  expect(screen.getByRole('dialog')).toBeInTheDocument();
+
+  await userEvent.click(screen.getByRole('button', { name: /close panel/i }));
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 });

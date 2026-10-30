@@ -1,10 +1,16 @@
+import { useState } from 'react';
+import { useAppSelector } from '../../store';
 import { LoadingSpinner } from '../../components/LoadingSpinner';
 import { RetryBanner } from '../../components/RetryBanner';
 import { useGetRoomBoardQuery } from './roomBoardApi';
+import { RoomActionPanel } from './RoomActionPanel';
 import { RoomTile } from './RoomTile';
+import type { RoomBoardEntry } from '../../types/staff';
 
 export default function RoomBoard() {
   const { data, isLoading, isError, refetch } = useGetRoomBoardQuery();
+  const role = useAppSelector((s) => s.staffSession.role);
+  const [selectedRoom, setSelectedRoom] = useState<RoomBoardEntry | null>(null);
 
   if (isLoading) {
     return <LoadingSpinner />;
@@ -22,11 +28,15 @@ export default function RoomBoard() {
           <h2 className="mb-2 text-sm font-semibold text-gray-500">Floor {floor.floor}</h2>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-6">
             {floor.rooms.map((room) => (
-              <RoomTile key={room.roomId} room={room} />
+              <RoomTile key={room.roomId} room={room} onClick={setSelectedRoom} />
             ))}
           </div>
         </section>
       ))}
+
+      {selectedRoom && role && (
+        <RoomActionPanel room={selectedRoom} role={role} onClose={() => setSelectedRoom(null)} />
+      )}
     </main>
   );
 }

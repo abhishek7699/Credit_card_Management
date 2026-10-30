@@ -136,10 +136,19 @@ make the PIN flow harder to reason about later for no benefit now.
 
 ## 5. Stopping polling once a booking reaches a final state
 
-**Decision**: The booking-status query's `pollingInterval` is computed from the last
-fetched result: `10_000` while `status` is `HELD`, `0` (off) once it's `CONFIRMED` or
-`CANCELLED`. RTK Query supports a function for `pollingInterval` that receives the
-latest cache entry, so no separate timer/effect is needed.
+**Decision**: A small custom hook (`useGetBookingQuery`, wrapping the generated
+`useGetBookingQueryBase`) holds `pollingInterval` in component state, starting at
+`10_000`; a `useEffect` watching the query's own `data.status` calls
+`setPollingInterval(0)` once it's `CONFIRMED` or `CANCELLED`. The state change
+re-renders with the new option value, which RTK Query's subscription picks up.
+
+**Correction to this document's own earlier draft**: an initial version of this
+decision assumed `pollingInterval` itself accepts a function evaluated against the
+latest cache entry. Checked directly against the installed `@reduxjs/toolkit`
+(2.3.x)'s own type definitions (`SubscriptionOptions.pollingInterval?: number` —
+`node_modules/@reduxjs/toolkit/dist/query/index.d.ts`): it's a plain number, nothing
+else. The component-state-driven approach above is the actual, commonly-used RTK
+Query pattern for this — caught before writing any code against the wrong premise.
 
 **Rationale**: Matches FR-012 exactly ("shown... through to its final outcome") without
 an unbounded background poll continuing to hit the backend after there's nothing left

@@ -1,0 +1,36 @@
+import { BookingForm } from '../booking/BookingForm';
+import type { RoomBoardEntry, StaffRole } from '../../types/staff';
+
+interface RoomActionPanelProps {
+  room: RoomBoardEntry;
+  role: StaffRole;
+  onClose: () => void;
+}
+
+function renderAction(room: RoomBoardEntry, role: StaffRole) {
+  if (room.status === 'VACANT_CLEAN' && role === 'FRONT_DESK') {
+    return <BookingForm roomId={room.roomId} />;
+  }
+  return <p className="text-sm text-gray-500">No action available for this room.</p>;
+}
+
+export function RoomActionPanel({ room, role, onClose }: RoomActionPanelProps) {
+  return (
+    <>
+      <div className="fixed inset-0 z-30 bg-black/20" onClick={onClose} aria-hidden="true" />
+      <div
+        role="dialog"
+        aria-label={`Room ${room.roomNumber} actions`}
+        className="fixed inset-y-0 right-0 z-40 w-96 overflow-y-auto border-l border-gray-200 bg-white p-5 shadow-xl"
+      >
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="font-semibold text-gray-900">Room {room.roomNumber}</h2>
+          <button type="button" onClick={onClose} aria-label="Close panel" className="text-gray-400 hover:text-gray-600">
+            ✕
+          </button>
+        </div>
+        {renderAction(room, role)}
+      </div>
+    </>
+  );
+}
