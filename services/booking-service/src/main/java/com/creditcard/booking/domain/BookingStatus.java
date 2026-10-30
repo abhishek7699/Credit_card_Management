@@ -1,12 +1,16 @@
 package com.creditcard.booking.domain;
 
 /**
- * HELD is the only non-terminal state. CONFIRMED and CANCELLED are terminal — once a
- * booking reaches either, no further transition is ever applied (FR-023, no reverse
- * transitions, including for a late AUTHORIZED outcome after expiry — see FR-019).
+ * HELD is the only payment-saga non-terminal state; CANCELLED is terminal (FR-023, no
+ * reverse transitions, including for a late AUTHORIZED outcome after expiry — see
+ * FR-019). CONFIRMED is no longer terminal as of layer 2b: it additionally leads to
+ * CHECKED_IN (via check-in) and then CHECKED_OUT (terminal), the room-board layer's
+ * own lifecycle extension — see specs/009-room-board/data-model.md.
  */
 public enum BookingStatus {
     HELD,
     CONFIRMED,
-    CANCELLED
+    CANCELLED,
+    CHECKED_IN,
+    CHECKED_OUT
 }

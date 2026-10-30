@@ -45,3 +45,29 @@ These were named up front as out of scope for every layer until explicitly start
   booking lifecycle again.
 - **No pagination on `GET /api/v1/rooms`**: fine at the current 14-room seed
   size; would need it before room inventory grows meaningfully.
+
+## Carried from the room-board (layer 2b) work
+
+- **The other 7 services' integration tests still use a generic Postgres
+  Testcontainer, not CockroachDB**: `booking-service`'s own integration tests were
+  switched to a CockroachDB Testcontainer (`CockroachTestContainer`, a plain
+  `GenericContainer` on the exact image docker-compose uses — no official
+  `testcontainers-cockroachdb` module exists on this project's Testcontainers 2.x
+  line) after a real CockroachDB-specific schema bug (a bare `INT` column defaulting
+  to 8-byte `INT8`, which plain Postgres's 4-byte `INT` never would have surfaced)
+  only showed up on a live docker-compose run, not in any test. The same class of
+  bug is equally possible in any of the other 7 services, whose integration tests
+  still run against generic Postgres containers. Not fixed here — flagging the
+  pattern (and the new `booking-service`-local `CockroachTestContainer` helper as a
+  starting point) for whoever picks this up for the rest of the platform.
+
+## Discovered while building the room board (layer 2b)
+
+- **`MAINTENANCE` doesn't check for future `CONFIRMED` bookings**: `PATCH
+  /api/v1/rooms/{id}/status` allows a room to be set to `MAINTENANCE` even if it
+  already has one or more `CONFIRMED` bookings for future dates. Nothing blocks the
+  transition, warns the caller, or reassigns/cancels those bookings — they simply
+  stay `CONFIRMED` against a room that is now out of service. Noted explicitly per
+  this layer's own planning step; needs a real decision (block the transition?
+  surface a warning? reassign automatically?) before it's safe to rely on in
+  practice.

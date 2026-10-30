@@ -5,4 +5,7 @@ spring:
     create-schemas: false
   jpa:
     hibernate:
-      ddl-auto: none
+      # validate, not none: matching the main profile is what actually lets tests
+      # catch a schema/entity mismatch (e.g. the CockroachDB INT-vs-INT4 bug) --
+      # ddl-auto: none would silently skip the exact check that caught it.
+      ddl-auto: validate

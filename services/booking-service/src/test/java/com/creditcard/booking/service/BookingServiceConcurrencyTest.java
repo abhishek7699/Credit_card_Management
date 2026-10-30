@@ -14,9 +14,10 @@ import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import com.creditcard.booking.integration.support.CockroachTestContainer;
+import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.postgresql.PostgreSQLContainer;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -43,13 +44,15 @@ import static org.assertj.core.api.Assertions.assertThat;
 class BookingServiceConcurrencyTest {
 
     @Container
-    static PostgreSQLContainer postgres = new PostgreSQLContainer("postgres:15-alpine");
+    static GenericContainer<?> cockroach = CockroachTestContainer.newContainer();
 
     @DynamicPropertySource
-    static void postgresProps(DynamicPropertyRegistry registry) {
-        registry.add("spring.datasource.url", postgres::getJdbcUrl);
-        registry.add("spring.datasource.username", postgres::getUsername);
-        registry.add("spring.datasource.password", postgres::getPassword);
+    static void cockroachProps(DynamicPropertyRegistry registry) {
+        registry.add("spring.datasource.url", () -> CockroachTestContainer.jdbcUrl(cockroach));
+        registry.add("spring.datasource.username", () -> "root");
+        registry.add("spring.datasource.password", () -> "");
+        // See CheckInFlowIT's identical property for why this is needed here.
+        registry.add("spring.kafka.bootstrap-servers", () -> "localhost:9092");
     }
 
     @Autowired
@@ -76,6 +79,8 @@ class BookingServiceConcurrencyTest {
         room.setRoomNumber("CONC-" + UUID.randomUUID().toString().substring(0, 8));
         room.setRoomType("STANDARD");
         room.setNightlyRate(new BigDecimal("150.00"));
+        room.setFloor(99); // out of the real 1-3 seeded range, never collides
+        room.setPosition((int) (System.nanoTime() % 1_000_000));
         room = roomRepository.save(room);
 
         BookingRequest request = new BookingRequest(

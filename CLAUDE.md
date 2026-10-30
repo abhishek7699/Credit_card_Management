@@ -1,7 +1,7 @@
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan
-at specs/008-booking-service/plan.md
+at specs/009-room-board/plan.md
 <!-- SPECKIT END -->
 
 
@@ -33,14 +33,14 @@ I want to learn the codebase, not just get changes. For every task:
   idempotent consumers, event envelope, 100% JaCoCo).
 
 ## Roadmap (layers on top of the payment core)
-- 2a Booking (current): rooms, availability search, staff create booking for a guest,
+- 2a Booking (done): rooms, availability search, staff create booking for a guest,
   HELD -> charge -> CONFIRMED/CANCELLED saga, no double booking, 10-min hold expiry.
-- 2b Room board: room status (VACANT_CLEAN, OCCUPIED, DIRTY, MAINTENANCE), floor and
-  position (configurable, default 6 rooms per floor), staff update status,
+- 2b Room board (current): room status (VACANT_CLEAN, OCCUPIED, DIRTY, MAINTENANCE),
+  floor and position (configurable, default 6 rooms per floor), staff update status,
   checkout sets DIRTY.
+- 2d Frontend MVP: staff floor-plan grid colored by status (existing React prototype).
 - 2c Charges: extras on a booking (room service etc.), balance due, charge balance at
   checkout via the payment core.
-- 2d Frontend: staff floor-plan grid colored by status (existing React prototype).
 - Later passes (backlog): security hardening (real auth server, Vault prod mode,
   PIN auth backend), k8s/GKE wiring for new services, refunds, pricing rules,
   multi-property.

@@ -49,6 +49,18 @@ public class SecurityConfig {
                         // Reporting — all authenticated roles for per-merchant and transactions
                         .pathMatchers(HttpMethod.GET, "/api/v1/reporting/**")
                                 .authenticated()
+                        // Room board (layer 2b) — front-desk OR housekeeping. Matched
+                        // before the broader booking/room rule below (Spring evaluates
+                        // authorizeExchange matchers in order; first match governs), so
+                        // this one specific route gets HOUSEKEEPING without granting it
+                        // to check-in/check-out/room-search/booking-get too.
+                        .pathMatchers(HttpMethod.GET, "/api/v1/rooms/board")
+                                .hasAnyRole("FRONT_DESK", "HOUSEKEEPING", "ADMIN")
+                        // Room status update (layer 2b) — same front-desk/housekeeping
+                        // split as the board, matched before the broad rule for the same
+                        // reason.
+                        .pathMatchers(HttpMethod.PATCH, "/api/v1/rooms/*/status")
+                                .hasAnyRole("FRONT_DESK", "HOUSEKEEPING", "ADMIN")
                         // Booking — B2B, staff-only (FR-017): front-desk staff create and
                         // manage bookings on a guest's behalf; guests never call this API.
                         .pathMatchers("/api/v1/bookings/**", "/api/v1/rooms/**")

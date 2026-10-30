@@ -181,6 +181,67 @@ public class RouteConfig {
                                         .setFallbackUri("forward:/fallback/booking")))
                         .uri(bookingServiceUrl))
 
+                // ── Booking: check-in (POST) — layer 2b ───────────────────────────────
+                // Falls through to SecurityConfig's existing broad FRONT_DESK/ADMIN
+                // rule for /api/v1/bookings/** — no new matcher needed.
+                .route("booking-check-in", r -> r
+                        .path("/api/v1/bookings/{id}/check-in")
+                        .and().method(HttpMethod.POST)
+                        .filters(f -> f
+                                .requestRateLimiter(c -> c
+                                        .setRateLimiter(rateLimiter)
+                                        .setKeyResolver(keyResolver))
+                                .circuitBreaker(c -> c
+                                        .setName("booking-service-cb")
+                                        .setFallbackUri("forward:/fallback/booking")))
+                        .uri(bookingServiceUrl))
+
+                // ── Booking: check-out (POST) — layer 2b ──────────────────────────────
+                // Falls through to the existing broad FRONT_DESK/ADMIN rule, same as
+                // check-in — no new matcher needed.
+                .route("booking-check-out", r -> r
+                        .path("/api/v1/bookings/{id}/check-out")
+                        .and().method(HttpMethod.POST)
+                        .filters(f -> f
+                                .requestRateLimiter(c -> c
+                                        .setRateLimiter(rateLimiter)
+                                        .setKeyResolver(keyResolver))
+                                .circuitBreaker(c -> c
+                                        .setName("booking-service-cb")
+                                        .setFallbackUri("forward:/fallback/booking")))
+                        .uri(bookingServiceUrl))
+
+                // ── Room board (GET) — layer 2b ───────────────────────────────────────
+                // /api/v1/rooms/board is a distinct literal path from room-search's
+                // /api/v1/rooms, so there's no route-matching ambiguity regardless of
+                // registration order.
+                .route("room-board", r -> r
+                        .path("/api/v1/rooms/board")
+                        .and().method(HttpMethod.GET)
+                        .filters(f -> f
+                                .requestRateLimiter(c -> c
+                                        .setRateLimiter(rateLimiter)
+                                        .setKeyResolver(keyResolver))
+                                .circuitBreaker(c -> c
+                                        .setName("booking-service-cb")
+                                        .setFallbackUri("forward:/fallback/booking")))
+                        .uri(bookingServiceUrl))
+
+                // ── Room status update (PATCH) — layer 2b ─────────────────────────────
+                // Falls under SecurityConfig's dedicated FRONT_DESK/HOUSEKEEPING/ADMIN
+                // matcher for this exact path+method, same pattern as room-board.
+                .route("room-status-update", r -> r
+                        .path("/api/v1/rooms/{id}/status")
+                        .and().method(HttpMethod.PATCH)
+                        .filters(f -> f
+                                .requestRateLimiter(c -> c
+                                        .setRateLimiter(rateLimiter)
+                                        .setKeyResolver(keyResolver))
+                                .circuitBreaker(c -> c
+                                        .setName("booking-service-cb")
+                                        .setFallbackUri("forward:/fallback/booking")))
+                        .uri(bookingServiceUrl))
+
                 .build();
     }
 }
