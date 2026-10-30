@@ -356,20 +356,20 @@ end to end through the UI alone.
 **Purpose**: The one new e2e smoke test, CI wiring, and documentation.
 
 - [ ] T054 [P] Run every scenario in `specs/010-frontend-mvp/quickstart.md` end to end
-- [ ] T055 `frontend/playwright.config.ts` + `frontend/e2e/staff-room-board.spec.ts`:
+- [X] T055 `frontend/playwright.config.ts` + `frontend/e2e/staff-room-board.spec.ts`:
       sign in (Front Desk) → book a vacant room → booking reaches `CONFIRMED` → check
       it in → board shows that room `OCCUPIED` (research.md §9)
-- [ ] T056 `.github/workflows/ci.yml`: new parallel `frontend-build-test` job (Node
+- [X] T056 `.github/workflows/ci.yml`: new parallel `frontend-build-test` job (Node
       setup, `npm ci`, lint, `tsc -b`/`vite build`, `npm run test:coverage`); add the
       Playwright smoke test (T055) as a step inside the existing `build-test-e2e` job,
       immediately after `scripts/e2e-test.sh` passes, reusing that job's already-running
       stack (research.md §9)
-- [ ] T057 [P] `README.md`: add a "Frontend" section — what `/staff` is, the exact
+- [X] T057 [P] `README.md`: add a "Frontend" section — what `/staff` is, the exact
       commands to run it against the real backend, and a pointer to this layer in the
       Roadmap/services list
 - [ ] T058 Verify 100% coverage gates (Vitest for `frontend/`, JaCoCo for
       `booking-service`) and fix any gap
-- [ ] T059 Confirm no change was needed to any other service, `k8s/`, or the owner-\*
+- [X] T059 Confirm no change was needed to any other service, `k8s/`, or the owner-\*
       prototype screens — verify only
 
 ---

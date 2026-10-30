@@ -6,17 +6,19 @@ end-to-end by Kafka — built to rehearse the full lifecycle of a real
 microservices stack: local development, CI with 100% test coverage, a
 Kubernetes dry run on `kind`, and a path to a real GKE deployment. Every
 piece (tokenization, rate limiting, circuit breaking, settlement
-batching) is wired for real, not stubbed, and verified by a 13-step
+batching) is wired for real, not stubbed, and verified by a 14-step
 end-to-end test against a live card submission.
 
 **Layered on top of that payment core** is a hotel booking system,
 added one layer at a time (see `CLAUDE.md`'s Roadmap): `booking-service`
-(layer 2a) is the first layer — rooms, availability search, and a
-front-desk-staff booking saga. Hotel layers never touch card data
-themselves; they only ask the payment core to charge and react to the
-result over the same gRPC/Kafka contracts the original 7 services
-already use. Later layers (room status, charges, a staff frontend) build
-on this one the same way.
+(layers 2a + 2b) is rooms, availability search, the front-desk-staff
+booking saga, room status (check-in/check-out/housekeeping), and the
+room board. Hotel layers never touch card data themselves; they only
+ask the payment core to charge and react to the result over the same
+gRPC/Kafka contracts the original 7 services already use. Layer 2d
+(`frontend/`) connects a real staff UI to that board — see
+[Running locally](#running-locally)'s "Frontend" section. Charges
+(layer 2c) is the one layer not yet built.
 
 ## Services
 
@@ -29,7 +31,7 @@ on this one the same way.
 | `notification-service` | Consumes `transaction.status.updated`, sends email/SMS notifications |
 | `settlement-service` | Batches authorized transactions into settlement runs (Spring Batch) |
 | `reporting-service` | Read-only queries across the other services' data for dashboards/support |
-| `booking-service` | **Layer 2a.** Room inventory, availability search, and the staff booking saga (HELD → charge via `transaction-service` → CONFIRMED/CANCELLED), consuming the same `transaction.status.updated` event |
+| `booking-service` | **Layers 2a + 2b.** Room inventory, availability search, and the staff booking saga (HELD → charge via `transaction-service` → CONFIRMED/CANCELLED); room status, check-in/check-out, and the room board, consuming the same `transaction.status.updated` event |
 
 ## Architecture
 
@@ -125,6 +127,38 @@ alert) is documented in [docs/GKE.md](docs/GKE.md), with
 `scripts/gke-deploy.sh` and `scripts/demo-up.sh` / `demo-down.sh` to
 scale the node pool between demos without tearing anything else down.
 
+### Frontend
+
+The staff room board (layer 2d, `frontend/`) talks to the real backend —
+not mock data — behind a dev-only role-picker login. Needs the Docker
+Compose stack from above (which now also brings up a standing,
+**dev-only** `auth-mock` service for that login — see SECURITY.md; it
+exists only in `docker-compose.yml`/CI, never in `k8s/` or any deployed
+environment):
+
+```bash
+docker compose up -d --build   # brings up auth-mock too
+cd frontend
+npm install
+npm run dev
+```
+
+Open `http://localhost:5173/staff`, pick a role (Front Desk or
+Housekeeping), and sign in. The existing PIN-login prototype at `/`,
+`/dashboard`, etc. is untouched and still runs on mock data — `/staff` is
+a separate area with its own session, talking to the real
+`booking-service`/`api-gateway` through `/api/v1/rooms/board` and the
+booking/check-in/check-out endpoints layers 2a/2b already built.
+
+Tests:
+
+```bash
+npm test               # Vitest + React Testing Library + MSW
+npm run test:coverage  # same, with the 100% coverage gate
+npx playwright install --with-deps chromium   # once, before the next line
+npm run e2e             # Playwright smoke test — needs the stack + `npm run dev` already up
+```
+
 ## How the e2e test works
 
 `scripts/e2e-test.sh` drives one real card transaction through every
@@ -143,6 +177,10 @@ service and asserts on each hop:
 11. **Fraud + notification records** — confirms both side-effects landed in their own services' tables
 12. **Booking confirmed** — a `FRONT_DESK`-role staff JWT books a room through `booking-service` with a card the payment core authorizes; polls until the booking reaches `CONFIRMED` (compose only — `booking-service` has no `kind`/GKE manifests yet)
 13. **Booking declined** — books a different room with a card that has no seeded account (an automatic decline, no extra seeding needed); confirms the booking reaches `CANCELLED` with reason `PAYMENT_DECLINED` and the room reappears in availability search (compose only)
+14. **Room board lifecycle** — book → confirm → check-in (`FRONT_DESK`) → board shows that room `OCCUPIED` with the guest's name → check-out → board shows `DIRTY` → housekeeping marks it `VACANT_CLEAN` → board shows `VACANT_CLEAN` again (compose only)
+
+A separate Playwright smoke test (`frontend/e2e/`) covers the same lifecycle
+through the actual staff UI rather than the raw API — see "Frontend" below.
 
 ## Engineering challenges
 
@@ -211,6 +249,10 @@ with the cluster up, repeatedly, until it recovered on its own.
 ```
 services/<name>/       8 independent Spring Boot services (7-service payment core
                         + booking-service, the first hotel layer on top of it)
+frontend/               React + TypeScript SPA: the existing owner-dashboard/
+                        payment-submission prototype (mock data, PIN login) plus
+                        /staff (layer 2d) — a real staff room board against the
+                        live backend, dev-only role-picker login
 k8s/base/               Kubernetes manifests, replicas: 2 (the GKE default) —
                         the 7 payment-core services; booking-service's k8s/GKE
                         wiring is deferred to the backlog (see CLAUDE.md)

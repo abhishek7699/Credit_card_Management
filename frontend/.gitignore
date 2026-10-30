@@ -3,3 +3,5 @@ dist/
 coverage/
 .tsc-build/
 *.local
+playwright-report/
+test-results/

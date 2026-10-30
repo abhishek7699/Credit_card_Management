@@ -35,6 +35,11 @@ export default defineConfig({
     ),
   },
   test: {
+    // e2e/ is Playwright-only (a different test API — `test`/`expect` from
+    // @playwright/test, not vitest's own globals/fixtures) — excluded here so
+    // vitest doesn't try to run it with its own runner. .tsc-build/ is tsc's
+    // own output directory (tsconfig.node.json), never test source.
+    exclude: ['**/node_modules/**', '**/dist/**', 'e2e/**', '.tsc-build/**'],
     environment: 'jsdom',
     environmentOptions: {
       jsdom: {

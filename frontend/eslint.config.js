@@ -5,7 +5,7 @@ import reactHooks from 'eslint-plugin-react-hooks';
 import reactRefresh from 'eslint-plugin-react-refresh';
 
 export default [
-  { ignores: ['dist/**', 'coverage/**'] },
+  { ignores: ['dist/**', 'coverage/**', '.tsc-build/**'] },
   {
     files: ['**/*.test.{ts,tsx}', 'src/test-utils/**'],
     rules: { '@typescript-eslint/no-explicit-any': 'off' },
