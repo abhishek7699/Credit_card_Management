@@ -31,6 +31,11 @@ export function RoomTile({ room, onClick }: RoomTileProps) {
       <span className="font-semibold">{room.roomNumber}</span>
       <span>{STATUS_LABEL[room.status]}</span>
       {room.status === 'OCCUPIED' && room.guestName && <span className="text-xs">{room.guestName}</span>}
+      {room.hasBalanceDue && (
+        <span className="rounded bg-amber-500 px-1 text-xs font-semibold text-white" data-testid="balance-due-badge">
+          Balance due
+        </span>
+      )}
     </button>
   );
 }

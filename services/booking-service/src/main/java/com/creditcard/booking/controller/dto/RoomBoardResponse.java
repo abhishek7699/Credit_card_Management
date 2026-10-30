@@ -22,6 +22,10 @@ public record RoomBoardResponse(int floor, List<RoomBoardEntry> rooms) {
      * independent of guestName/currentBookingId, since a room can have both an
      * occupant checking out today and a different guest's booking arriving later
      * today (same-day turnover).
+     *
+     * <p>hasBalanceDue (layer 2c, FR-006): true/false only when status == OCCUPIED
+     * (same presence rule as guestName); null otherwise -- a non-occupied room has
+     * no booking to owe anything.
      */
     public record RoomBoardEntry(
             UUID roomId,
@@ -33,7 +37,8 @@ public record RoomBoardResponse(int floor, List<RoomBoardEntry> rooms) {
             LocalDate checkOut,
             UUID currentBookingId,
             UUID arrivingBookingId,
-            String arrivingGuestName
+            String arrivingGuestName,
+            Boolean hasBalanceDue
     ) {
     }
 }
