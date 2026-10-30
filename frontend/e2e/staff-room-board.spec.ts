@@ -18,7 +18,9 @@ test('login, book a room, confirm, check in, board shows OCCUPIED', async ({ pag
   await page.getByLabel('Front Desk').check();
   await page.getByRole('button', { name: 'Sign In' }).click();
 
-  await expect(page.getByText('Room Board')).toBeVisible({ timeout: 15_000 });
+  // Both the sidebar's nav link and the page's own heading say "Room Board" —
+  // scope to the heading to avoid an ambiguous match.
+  await expect(page.getByRole('heading', { name: 'Room Board' })).toBeVisible({ timeout: 15_000 });
 
   // A VACANT_CLEAN room can still have an arriving-today booking pending
   // check-in (that's the normal state right up until check-in happens) — a

@@ -1,7 +1,6 @@
 import { configureStore, isRejectedWithValue, type Middleware } from '@reduxjs/toolkit';
 import { useDispatch, useSelector } from 'react-redux';
 import { api } from './api';
-import authReducer from './authSlice';
 import staffSessionReducer, { sessionExpired } from '../features/staff-session/staffSessionSlice';
 
 /** Any rejected RTK Query request with a 401 ends the staff session uniformly —
@@ -16,7 +15,6 @@ const sessionExpiryMiddleware: Middleware = (storeApi) => (next) => (action) => 
 export const store = configureStore({
   reducer: {
     [api.reducerPath]: api.reducer,
-    auth: authReducer,
     staffSession: staffSessionReducer,
   },
   middleware: (getDefaultMiddleware) =>

@@ -54,16 +54,17 @@ export default defineConfig({
     setupFiles: ['./src/setupTests.ts'],
     globals: true,
     coverage: {
-      // Scoped to this layer's own new files, not the whole repo — the
-      // existing owner-dashboard/payment-submission prototype code predates
-      // this gate and is untouched by this layer (Constitution Principle II
-      // applied the same way JaCoCo applies it on the backend: to the code a
-      // change actually touches).
+      // Scoped to the staff app's own files, not the whole repo (Constitution
+      // Principle II applied the same way JaCoCo applies it on the backend: to
+      // the code a change actually touches). The old owner-dashboard/payment
+      // prototype this once excluded has since been deleted — /staff is the
+      // only app left.
       thresholds: {
         'src/features/staff-session/**': { lines: 100, branches: 100, functions: 100, statements: 100 },
         'src/features/room-board/**': { lines: 100, branches: 100, functions: 100, statements: 100 },
         'src/features/booking/**': { lines: 100, branches: 100, functions: 100, statements: 100 },
         'src/components/RetryBanner.tsx': { lines: 100, branches: 100, functions: 100, statements: 100 },
+        'src/components/StaffShell.tsx': { lines: 100, branches: 100, functions: 100, statements: 100 },
       },
     },
   },

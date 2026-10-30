@@ -38,6 +38,11 @@ test('renders both roles, defaulting to Front Desk', () => {
   expect(screen.getByLabelText(/housekeeping/i)).not.toBeChecked();
 });
 
+test('renders the app name', () => {
+  renderScreen();
+  expect(screen.getByText('Hotel Payment App')).toBeInTheDocument();
+});
+
 test('selecting Housekeeping and submitting calls login with that role', async () => {
   renderScreen();
   await userEvent.click(screen.getByLabelText(/housekeeping/i));

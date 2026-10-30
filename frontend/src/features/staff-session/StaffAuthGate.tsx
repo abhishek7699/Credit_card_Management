@@ -6,9 +6,8 @@ interface Props {
   children: ReactNode;
 }
 
-/** Entirely separate from the existing (PIN-based) AuthGate/authSlice — this gates
- *  only the /staff subtree, against staffSessionSlice, not the PIN device-pairing
- *  flow (research.md §4). */
+/** Gates the whole app against staffSessionSlice — the old PIN device-pairing
+ *  flow this was originally kept separate from has since been removed. */
 export function StaffAuthGate({ children }: Props) {
   const status = useAppSelector((s) => s.staffSession.status);
 
