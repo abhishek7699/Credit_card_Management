@@ -16,11 +16,7 @@ const FloorPlan = lazy(() => import('./features/owner-floor-plan/FloorPlan'));
 const OwnerPayments = lazy(() => import('./features/owner-payments/OwnerPayments'));
 const OwnerReservations = lazy(() => import('./features/owner-reservations/OwnerReservations'));
 const RoomManagement = lazy(() => import('./features/owner-room-management/RoomManagement'));
-
-/** Placeholder until T027 (User Story 1) wires in the real RoomBoard. */
-function StaffHome() {
-  return <p className="p-6 text-gray-900">Signed in.</p>;
-}
+const RoomBoard = lazy(() => import('./features/room-board/RoomBoard'));
 
 function WithTopNav() {
   return (
@@ -67,7 +63,7 @@ export default function App() {
             element={
               <Suspense fallback={<LoadingSpinner />}>
                 <StaffAuthGate>
-                  <StaffHome />
+                  <RoomBoard />
                 </StaffAuthGate>
               </Suspense>
             }

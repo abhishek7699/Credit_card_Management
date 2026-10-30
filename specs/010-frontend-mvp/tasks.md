@@ -150,10 +150,10 @@ change appears within one polling cycle (spec.md Story 1).
 
 ### Tests for User Story 1 ⚠️ (write first, confirm they fail)
 
-- [ ] T022 [P] [US1] `frontend/src/features/room-board/roomBoardApi.test.ts` (MSW):
+- [X] T022 [P] [US1] `frontend/src/features/room-board/roomBoardApi.test.ts` (MSW):
       fetches and shapes `GET /api/v1/rooms/board`; refetches after the polling
       interval elapses (fake timers)
-- [ ] T023 [P] [US1] `frontend/src/features/room-board/RoomBoard.test.tsx` (MSW):
+- [X] T023 [P] [US1] `frontend/src/features/room-board/RoomBoard.test.tsx` (MSW):
       renders every room grouped by floor, ordered by position, colored by status,
       guest name shown only when `OCCUPIED`; a `503`/network error from the mock
       renders `RetryBanner` instead of stale/blank content; a `401` mid-session ends
@@ -161,14 +161,14 @@ change appears within one polling cycle (spec.md Story 1).
 
 ### Implementation for User Story 1
 
-- [ ] T024 [US1] `frontend/src/features/room-board/roomBoardApi.ts`: RTK Query query
+- [X] T024 [US1] `frontend/src/features/room-board/roomBoardApi.ts`: RTK Query query
       `getBoard()` → `GET /api/v1/rooms/board`, `pollingInterval: 10_000` (depends on T007, T010)
-- [ ] T025 [US1] `frontend/src/features/room-board/RoomTile.tsx`: one room cell —
+- [X] T025 [US1] `frontend/src/features/room-board/RoomTile.tsx`: one room cell —
       color by status, guest name only when `OCCUPIED` (depends on T007)
-- [ ] T026 [US1] `frontend/src/features/room-board/RoomBoard.tsx`: renders the grid
+- [X] T026 [US1] `frontend/src/features/room-board/RoomBoard.tsx`: renders the grid
       from T024, floor grouping/position ordering as returned, `RetryBanner` (T012) on
       error, loading state while the first fetch is in flight (depends on T024, T025, T012)
-- [ ] T027 [US1] Wire `RoomBoard` as the `/staff` route's content inside `StaffAuthGate` (depends on T015, T026)
+- [X] T027 [US1] Wire `RoomBoard` as the `/staff` route's content inside `StaffAuthGate` (depends on T015, T026)
 
 **Checkpoint**: `docker compose up -d --build` + `npm run dev` in `frontend/` → sign in
 at `/staff`, see the live board, watch an externally-made status change (via `curl`
