@@ -41,15 +41,15 @@ Structure. No new service, no new module, no new frontend area.
 depends on, nor is depended on by, any user story, but both should land first so
 the rest of this layer is built and verified against a correct foundation.
 
-- [ ] T001 `scripts/e2e-test.sh`: `setup_auth_mock` records whether a container
+- [X] T001 `scripts/e2e-test.sh`: `setup_auth_mock` records whether a container
       named `auth-service` already existed *before* it replaces it
       (`PREEXISTING_AUTH_MOCK=1`/`0`); `cleanup()` runs `docker compose up -d
       auth-mock` to restore it when that flag is set, instead of unconditionally
       leaving nothing behind (research.md's own gap from layer 2d, now fixed at
       the root per this layer's own Clarifications-adjacent instruction)
-- [ ] T002 `.github/workflows/ci.yml`: remove the "Restart auth-mock" step added in
+- [X] T002 `.github/workflows/ci.yml`: remove the "Restart auth-mock" step added in
       layer 2d — no longer needed once T001 lands (depends on T001)
-- [ ] T003 Flyway migration
+- [X] T003 Flyway migration
       `services/booking-service/src/main/resources/db/migration/V6__add_charges_and_checkout_payments.sql`:
       `charges` table, `checkout_payment_attempts` table, `bookings.room_charge_amount`
       column — additive only, no existing column changed or dropped (data-model.md)

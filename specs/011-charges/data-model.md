@@ -41,7 +41,7 @@ fits the new value.
 | Column | Type | Notes |
 |--------|------|-------|
 | `id` | UUID PK | |
-| `booking_id` | UUID, NOT NULL, FK-by-convention to `bookings.id` (no DB-level FK, matching this schema's existing convention — e.g. `booking_room_nights.booking_id`) | |
+| `booking_id` | UUID, NOT NULL, `REFERENCES bookings (id)` | same real FK convention `booking_room_nights.booking_id` already uses |
 | `type` | VARCHAR(20), NOT NULL | `ROOM_SERVICE` \| `MINIBAR` \| `LAUNDRY` \| `OTHER` |
 | `description` | VARCHAR(500), NOT NULL | free text |
 | `amount` | DECIMAL(10,2), NOT NULL | |
@@ -54,7 +54,7 @@ Add-only (Assumptions) — no update or delete path exists anywhere in this laye
 | Column | Type | Notes |
 |--------|------|-------|
 | `id` | UUID PK | |
-| `booking_id` | UUID, NOT NULL | same by-convention reference as `charges.booking_id` |
+| `booking_id` | UUID, NOT NULL, `REFERENCES bookings (id)` | same real FK as `charges.booking_id` |
 | `transaction_id` | VARCHAR(100), nullable | set once the gRPC call returns a transaction id; stays null if the call itself fails outright (mirrors `initiatePayment`'s existing `StatusRuntimeException` handling — research.md §4/plan.md Key Design Decision #4: a null-transactionId attempt is swept the same way a never-answered one is, by the same sweep, after the same window) |
 | `amount` | DECIMAL(10,2), NOT NULL | the balance due at the moment this attempt was created — fixed at creation, not recomputed later |
 | `status` | VARCHAR(20), NOT NULL | see below |

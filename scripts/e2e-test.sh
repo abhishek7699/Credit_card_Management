@@ -351,6 +351,20 @@ PYEOF
   E2E_KEY_DIR="${key_dir}"
   export E2E_KEY_DIR
 
+  # Root-cause fix (layer 2c): a container named auth-service may already be
+  # running here -- docker-compose.yml's own standing "auth-mock" service (for
+  # the staff frontend's dev login, layer 2d) uses this exact name on purpose,
+  # to match the hostname api-gateway already expects. Record whether that's
+  # the case *before* replacing it, so cleanup() can restore it afterward
+  # instead of just leaving nothing behind (the bug that forced a manual
+  # "Restart auth-mock" step in CI after layer 2d -- fixed here instead).
+  if docker inspect "${AUTH_CONTAINER}" >/dev/null 2>&1; then
+    PREEXISTING_AUTH_MOCK=1
+  else
+    PREEXISTING_AUTH_MOCK=0
+  fi
+  export PREEXISTING_AUTH_MOCK
+
   # Stop any existing mock
   docker rm -f "${AUTH_CONTAINER}" 2>/dev/null || true
 
@@ -1169,6 +1183,15 @@ cleanup() {
   info "Cleaning up auth-service mock container"
   docker rm -f "${AUTH_CONTAINER}" 2>/dev/null || true
   [[ -n "${E2E_KEY_DIR:-}" ]] && rm -rf "${E2E_KEY_DIR}"
+  # Root-cause fix (layer 2c): only restore what this script itself preempted --
+  # if docker-compose.yml's standing auth-mock service was already running
+  # before setup_auth_mock replaced it, bring it back; if nothing was there
+  # (e.g. a bare docker-compose stack with no frontend layer, or already torn
+  # down), there's nothing to restore and this is a no-op either way.
+  if [[ "${PREEXISTING_AUTH_MOCK:-0}" == "1" ]]; then
+    info "Restoring the pre-existing auth-mock container this run replaced"
+    docker compose -f "${COMPOSE_FILE}" up -d auth-mock 2>/dev/null || true
+  fi
   if [[ "${TARGET}" == "kind" ]]; then
     info "Stopping kubectl port-forwards"
     for pid in "${PF_PIDS[@]:-}"; do
