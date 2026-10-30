@@ -8,6 +8,24 @@
 
 **Input**: User description: "Build layer 2c: Charges, in booking-service. Minimal, B2B staff only. Follow CLAUDE.md working approach. Staff (FRONT_DESK) add charges to a CHECKED_IN booking: type (ROOM_SERVICE, MINIBAR, LAUNDRY, OTHER), description, amount. POST/GET /api/v1/bookings/{id}/charges. Balance due = room nights x nightly rate + charges - amount already paid at booking. GET /api/v1/bookings/{id} returns line items and balance. Check-out charges the balance through the payment core (gRPC, card re-entered by staff at checkout; never stored). Booking CHECKED_IN -> CHECKOUT_PENDING -> CHECKED_OUT on AUTHORIZED; DECLINED keeps the guest checked in with balance still due. Zero balance -> check out immediately, no charge. Board shows a 'balance due' flag on occupied rooms. Frontend: charges panel on an occupied room (add charge, see balance), card form at check-out, and the payment result. Fix root cause: scripts/e2e-test.sh cleanup must only remove containers it started, then remove the CI auth-mock restart workaround. e2e step 15: check in -> add room service -> check out with balance -> CHECKED_OUT, room DIRTY. Extend Playwright smoke test. Out of scope: refunds, split payments, taxes, invoices/PDF, discounts. Log in BACKLOG.md."
 
+## Clarifications
+
+### Session 2026-10-30
+
+- Q: A checkout payment attempt that never gets an outcome (payment-core timeout)
+  was left as a backlog gap — the booking stuck mid-checkout until a staff member
+  or a future pass addresses it. Should this instead be recoverable automatically
+  now, and if so, how? → A: Yes, recoverable now, reusing the existing hold-expiry
+  sweep's own mechanism and window (10 minutes) rather than building a new one:
+  a checkout payment attempt older than that reverts the booking to checked-in
+  automatically, balance unchanged, so staff can retry. A late outcome for an
+  attempt that already reverted this way is never silently dropped: a late
+  approval is recorded as a payment against the booking (reducing its balance due
+  by that attempt's amount — if that brings the balance to zero, staff can then
+  check out with no further charge), and a late decline or failure is a no-op.
+  Exactly one checkout payment attempt is ever in flight for a given booking at a
+  time — a second attempt while one is already in flight is rejected outright.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 — Staff Add a Charge During a Stay (Priority: P1)
@@ -93,6 +111,17 @@ checked in with the same balance still due.
 5. **Given** a checkout charge still being decided, **When** staff attempt to start
    another checkout for the same booking, **Then** the second attempt is rejected —
    only one checkout charge is ever in flight for a given booking at a time.
+6. **Given** a checkout charge that receives no outcome within the same window the
+   existing hold-expiry check already uses, **When** that window passes, **Then**
+   the booking automatically returns to checked in, its balance due unchanged, so
+   staff can attempt checkout again.
+7. **Given** a checkout charge that reverted this way, **When** an approval for it
+   arrives later anyway, **Then** it is recorded as a payment that reduces the
+   booking's balance due by that charge's amount — never silently discarded — and
+   if that brings the balance to zero, staff can check that guest out with no
+   further charge.
+8. **Given** a checkout charge that reverted this way, **When** a decline or
+   failure for it arrives later, **Then** nothing changes.
 
 ---
 
@@ -129,9 +158,16 @@ payment-core call made.
   charges can only be added to a booking that is fully checked in, not one mid-
   checkout.
 - What happens if the payment core never responds to a checkout charge at all (a
-  timeout, not a decline)? The booking stays in its mid-checkout state rather than
-  silently reverting or silently completing; resolving a stuck case like this needs
-  staff attention and is noted as a gap for a later pass (see Assumptions).
+  timeout, not a decline)? It automatically reverts to checked-in after the same
+  window the hold-expiry check already uses, rather than staying stuck
+  indefinitely — see the Clarifications resolution above.
+- What happens if a late approval arrives for a reverted checkout charge, but the
+  booking has since been checked out some other way entirely (e.g., a later
+  checkout attempt already succeeded, or a zero-balance checkout already
+  completed)? The payment is still recorded, never silently dropped — this is now
+  an overpayment needing a human to notice and refund, the same situation the
+  original booking saga already has for a late-arriving authorization after a
+  hold already expired.
 - What happens if two checkout attempts for the same booking race each other? At
   most one checkout charge is ever actually in flight for a given booking — the
   loser is rejected outright, not silently dropped or double-charged.
@@ -156,9 +192,10 @@ payment-core call made.
 
 - **FR-004**: System MUST compute a booking's balance due as the amount already
   charged at booking time, plus the total of every charge recorded against it,
-  minus the amount already charged at booking time — i.e., the running total of
-  charges not yet collected, since the original room cost was already paid at
-  booking time.
+  minus the amount already charged at booking time and minus every checkout
+  payment successfully recorded against it so far (FR-010, FR-012b) — i.e., the
+  running total of charges not yet collected, since the original room cost was
+  already paid at booking time.
 - **FR-005**: Viewing a booking's details MUST include every charge recorded
   against it and its current balance due.
 - **FR-006**: The room board MUST flag an occupied room whose stay has a balance
@@ -182,6 +219,18 @@ payment-core call made.
 - **FR-012**: A card supplied for a checkout charge MUST be transmitted for that
   charge only and MUST NOT be stored anywhere, at any point before, during, or
   after the charge is decided.
+- **FR-012a**: A checkout charge that receives no outcome within the same window
+  the existing hold-expiry check already uses MUST automatically return its
+  booking to checked in, leaving its balance due unchanged, so staff can attempt
+  checkout again.
+- **FR-012b**: An approval that arrives for a checkout charge after it has already
+  reverted this way MUST be recorded as a payment reducing the booking's balance
+  due by that charge's amount — regardless of the booking's state at that point —
+  never silently discarded. A decline or failure that arrives after reverting
+  MUST be a no-op.
+- **FR-012c**: Once a late-recorded payment (FR-012b) brings a booking's balance
+  due to zero, staff MUST be able to check that booking out with no further
+  charge, the same as any other zero-balance checkout.
 
 **Checking out with no balance**
 
@@ -208,9 +257,17 @@ payment-core call made.
   refund, or correction flow exists in this layer).
 - **Booking** *(extended)*: gains a mid-checkout state, reached only from checked-in
   and left only by resolving the checkout charge it represents (to checked-out on
-  approval, or back to checked-in on decline/failure) — mirroring how the
-  booking's original HELD→charge→confirmed/cancelled lifecycle already works, now
-  repeated once more at the other end of the stay.
+  approval, or back to checked-in on decline/failure, or automatically back to
+  checked-in if nothing is heard within the hold-expiry window) — mirroring how
+  the booking's original HELD→charge→confirmed/cancelled lifecycle already works,
+  now repeated once more at the other end of the stay.
+- **Checkout Payment Attempt**: one attempt to charge a booking's balance at
+  checkout — the amount attempted and its outcome (still deciding, approved,
+  declined/failed, or timed out with no answer heard). A booking can accumulate
+  more than one of these over its lifetime (a timed-out or declined attempt
+  followed later by a successful one); an approved attempt, whenever its outcome
+  actually arrives, always reduces the booking's balance by that attempt's
+  amount.
 
 ## Success Criteria *(mandatory)*
 
@@ -231,6 +288,12 @@ payment-core call made.
 - **SC-005**: Staff can complete the full cycle — check in, add a charge, check out
   with that balance, reach checked-out — using only the staff interface, with no
   tool outside it.
+- **SC-006**: A checkout charge that never receives an outcome does not
+  permanently block its booking — it recovers automatically within the same
+  window the existing hold-expiry check uses, every time. A late outcome for it,
+  whenever it eventually arrives, is always accounted for — approved outcomes
+  always reduce the balance by that attempt's amount, and this never happens
+  twice for the same attempt.
 
 ## Assumptions
 
@@ -240,13 +303,11 @@ payment-core call made.
   simply the running total of charges not yet collected — the general formula in
   FR-004 is kept exact and explicit anyway, so it stays correct even if a future
   layer changes how or when the original room cost is charged.
-- **No automatic recovery for a checkout charge that never gets an outcome**: a
-  booking's original HELD state has an existing automatic hold-expiry sweep for
-  exactly this situation; the new mid-checkout state introduced here has no
-  equivalent in this layer. A checkout charge that times out or is otherwise never
-  resolved leaves that booking stuck mid-checkout until a staff member or a future
-  pass addresses it — logged in BACKLOG.md rather than built now, consistent with
-  not over-building a rare failure path before it's shown to matter in practice.
+- **The checkout-charge recovery sweep reuses the existing hold-expiry mechanism
+  and window**: rather than introducing a second, separately-tuned timeout, a
+  stuck checkout charge is swept on the same schedule and after the same 10
+  minutes the original hold-expiry check already uses (Clarifications above) —
+  one scheduled mechanism covering both cases, not two to keep in sync.
 - **No refunds, split payments, taxes, discounts, or invoices/PDFs**: a charge is a
   flat amount of a fixed type; nothing in this layer computes tax, applies a
   discount, splits a balance across multiple cards, reverses a charge, or produces
