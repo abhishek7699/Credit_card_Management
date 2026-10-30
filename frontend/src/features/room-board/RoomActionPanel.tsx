@@ -1,4 +1,5 @@
 import { BookingForm } from '../booking/BookingForm';
+import { CheckInAction } from './CheckInAction';
 import type { RoomBoardEntry, StaffRole } from '../../types/staff';
 
 interface RoomActionPanelProps {
@@ -8,6 +9,13 @@ interface RoomActionPanelProps {
 }
 
 function renderAction(room: RoomBoardEntry, role: StaffRole) {
+  // A room awaiting arrival takes priority over "book a new reservation" even
+  // if it's still VACANT_CLEAN (which it is, until check-in happens) — check-in
+  // is the action staff actually need for a room that already has a booking
+  // arriving today.
+  if (room.arrivingBookingId && role === 'FRONT_DESK') {
+    return <CheckInAction bookingId={room.arrivingBookingId} guestName={room.arrivingGuestName} />;
+  }
   if (room.status === 'VACANT_CLEAN' && role === 'FRONT_DESK') {
     return <BookingForm roomId={room.roomId} />;
   }

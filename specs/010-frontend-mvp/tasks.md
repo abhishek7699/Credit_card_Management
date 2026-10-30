@@ -250,7 +250,7 @@ occupied with the guest's name (spec.md Story 3).
       (extended): `getBoard()` populates `arrivingBookingId`/`arrivingGuestName` only
       for a room with a `CONFIRMED` booking checking in today; leaves both `null`
       otherwise, including for a `CONFIRMED` booking arriving on a *different* date
-- [ ] T038 [P] [US3] `frontend/src/features/room-board/RoomActionPanel.test.tsx`
+- [X] T038 [P] [US3] `frontend/src/features/room-board/RoomActionPanel.test.tsx`
       (extended, MSW): a room with `arrivingBookingId` set offers check-in for Front
       Desk, calling `POST /api/v1/bookings/{arrivingBookingId}/check-in`; offers
       nothing for Housekeeping; a backend rejection shows a plain message and the
@@ -266,9 +266,9 @@ occupied with the guest's name (spec.md Story 3).
       builds an `arrivingByRoomId` map from T039 (keyed by `roomId`, queried with
       `LocalDate.now()`) and populates the two new fields independently of the
       existing occupant map (depends on T039, T040)
-- [ ] T042 [US3] `frontend/src/features/booking/bookingApi.ts`: add `checkIn(bookingId)`
+- [X] T042 [US3] `frontend/src/features/booking/bookingApi.ts`: add `checkIn(bookingId)`
       mutation (`POST /api/v1/bookings/{id}/check-in`) (depends on T031)
-- [ ] T043 [US3] `frontend/src/features/room-board/RoomActionPanel.tsx`: for a room
+- [X] T043 [US3] `frontend/src/features/room-board/RoomActionPanel.tsx`: for a room
       with `arrivingBookingId` set, Front Desk gets a check-in action calling T042
       (depends on T034, T042)
 
