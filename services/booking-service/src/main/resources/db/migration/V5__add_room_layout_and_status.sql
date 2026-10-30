@@ -3,8 +3,12 @@
 -- (layer 2b) on top of the existing 14 seeded rooms, then completes the 3-floor x
 -- 6-room layout (18 total) with 4 new rows.
 
-ALTER TABLE rooms ADD COLUMN floor INT;
-ALTER TABLE rooms ADD COLUMN position INT;
+-- INT4, not bare INT/INTEGER: CockroachDB's default_int_size makes a bare INT an
+-- 8-byte INT8 column, which Hibernate's schema validation rejects against this
+-- entity's `Integer` fields (expects a 4-byte INTEGER). INT4 is CockroachDB's
+-- explicit 32-bit alias, matching what Hibernate actually validates against.
+ALTER TABLE rooms ADD COLUMN floor INT4;
+ALTER TABLE rooms ADD COLUMN position INT4;
 
 -- Existing room_number already encodes this layout: hundreds digit = floor,
 -- ones digit = position within that floor.
