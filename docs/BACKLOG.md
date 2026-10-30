@@ -71,3 +71,14 @@ These were named up front as out of scope for every layer until explicitly start
   this layer's own planning step; needs a real decision (block the transition?
   surface a warning? reassign automatically?) before it's safe to rely on in
   practice.
+
+## Carried from the Frontend MVP (layer 2d) work
+
+- **Replace dev login with real auth**: the `/staff` area's role-picker login
+  (`LoginScreen`/`staffAuthApi.ts`) and the `auth-mock` service it calls
+  (`scripts/dev-auth-mock.py`) are a deliberate dev-only stand-in — no password,
+  PIN, or real identity check of any kind; anyone can request a token for either
+  role. Both exist only in `docker-compose.yml` and CI, never in `k8s/` or any
+  deployed environment (see SECURITY.md). Replacing this with the project's real
+  auth server (already named as a "later pass" in CLAUDE.md's Roadmap) is required
+  before this frontend could ever be exposed to anyone but a developer or CI.

@@ -18,15 +18,28 @@ never reuse `vault server -dev` for anything that holds real data.
 
 ## 2. Mock JWT issuer
 
-`scripts/e2e-test.sh`'s `setup_auth_mock` function stands in for the real Spring
-Authorization Server api-gateway is designed to validate JWTs against: it generates a fresh
-RSA keypair with `openssl genrsa` on every run, serves a JWKS document from a bare Python
-`http.server` container named `auth-service`, and hand-signs test JWTs against that
-throwaway key. The keypair is deleted in `cleanup()` at the end of every run.
+There are **two** separate, unrelated things standing in for the real Spring
+Authorization Server api-gateway is designed to validate JWTs against — neither is a
+real identity provider, and neither must ever be exposed outside local dev/CI:
 
-This only exists to drive the end-to-end test without a real identity provider running. It
-has no password/MFA/session logic, accepts any subject or role claim the test script asks
-for, and must never be exposed outside the e2e harness.
+- `scripts/e2e-test.sh`'s `setup_auth_mock` function generates a fresh RSA keypair
+  with `openssl genrsa` on the host at the start of every e2e run, serves a JWKS
+  document from a bare Python `http.server` container named `auth-service`, and
+  hand-signs test JWTs **locally in the script itself** (never over HTTP) against
+  that throwaway key. The keypair and the container are both deleted in `cleanup()`
+  at the end of every run. This exists only to drive the end-to-end test.
+- `docker-compose.yml`'s `auth-mock` service (`scripts/dev-auth-mock.py`, also named
+  `auth-service`) is a **standing** version of the same idea, for the staff
+  frontend's dev-only login screen (layer 2d): it generates its own RSA keypair when
+  the container starts, serves the same JWKS shape, and exposes `POST /dev/login`
+  — given `{"role": "FRONT_DESK"|"HOUSEKEEPING"}`, it signs and returns a JWT for
+  that role with **no password, credential, or identity check of any kind**. It
+  stays up for as long as the compose stack does; the e2e script's own container
+  (above) force-recreates/removes anything named `auth-service` regardless, so the
+  two never actually run at the same time despite sharing a name.
+
+Both accept any role claim asked of them and must never be reachable from anywhere
+but a developer's own machine or CI.
 
 ## 3. Frontend PIN login
 
