@@ -212,32 +212,37 @@ a `MAINTENANCE` room disappears from availability search (spec.md Story 4).
 
 ### Tests for User Story 4 ⚠️
 
-- [ ] T027 [P] [US4] Unit test: `RoomService.updateStatus()` — each allowed transition
+- [X] T027 [P] [US4] Unit test: `RoomService.updateStatus()` — each allowed transition
       (`DIRTY→VACANT_CLEAN`, `VACANT_CLEAN/DIRTY→MAINTENANCE`, `MAINTENANCE→VACANT_CLEAN`)
       succeeds; every other transition (including any transition *out of* `OCCUPIED`)
       is rejected with the room's status left unchanged; a lost concurrent race
       surfaces as the same rejection, in `RoomServiceTest.java`
-- [ ] T028 [P] [US4] Unit test: `RoomRepository.findAvailable` excludes a
+- [X] T028 [P] [US4] Unit test: `RoomRepository.findAvailable` excludes a
       `MAINTENANCE` room from a date range even when that room has no conflicting
       `booking_room_nights` row at all, in `services/booking-service/src/test/java/com/creditcard/booking/repository/RoomRepositoryTest.java`
       (or the existing `RoomAvailabilityServiceTest.java`, extended)
-- [ ] T029 [P] [US4] Integration test: the full e2e-step-14 cycle (check-in →
+      — done as an integration test (real CockroachDB query) in `RoomStatusFlowIT.java`
+      instead, per this task's own stated flexibility; proves the exclusion is
+      status-based since neither room has any conflicting booking at all.
+- [X] T029 [P] [US4] Integration test: the full e2e-step-14 cycle (check-in →
       check-out → housekeeping cleans → `VACANT_CLEAN`) and the `MAINTENANCE`/
       availability-search interaction, in `services/booking-service/src/test/java/com/creditcard/booking/integration/RoomStatusFlowIT.java`
 
 ### Implementation for User Story 4
 
-- [ ] T030 [US4] DTO `services/booking-service/src/main/java/com/creditcard/booking/controller/dto/RoomStatusUpdateRequest.java`
-- [ ] T031 [US4] `RoomService.java` — add `updateStatus(roomId, requested)`: validate
+- [X] T030 [US4] DTO `services/booking-service/src/main/java/com/creditcard/booking/controller/dto/RoomStatusUpdateRequest.java`
+- [X] T031 [US4] `RoomService.java` — add `updateStatus(roomId, requested)`: validate
       the `(current, requested)` pair against the fixed allowed-transition set, then
       apply via the same conditional update as check-in/out (plan.md Key Design
       Decision #4) (depends on T005)
-- [ ] T032 [US4] `RoomController.java` — add `PATCH /api/v1/rooms/{id}/status`
+- [X] T032 [US4] `RoomController.java` — add `PATCH /api/v1/rooms/{id}/status`
       (depends on T030, T031)
-- [ ] T033 [US4] `RoomRepository.java` — add the `status <> MAINTENANCE` exclusion to
-      `findAvailable`'s JPQL query (FR-014)
-- [ ] T034 [US4] Add the `room-status-update` route in `RouteConfig.java`
-- [ ] T035 [US4] Add a `.pathMatchers(PATCH, "/api/v1/rooms/{id}/status").hasAnyRole(
+- [X] T033 [US4] `RoomRepository.java` — add the `status <> MAINTENANCE` exclusion to
+      `findAvailable`'s JPQL query (FR-014) — already present since Phase 2
+      (`findAvailable`'s `WHERE r.status <> MAINTENANCE` clause); only test coverage
+      (T028) was outstanding, now added.
+- [X] T034 [US4] Add the `room-status-update` route in `RouteConfig.java`
+- [X] T035 [US4] Add a `.pathMatchers(PATCH, "/api/v1/rooms/{id}/status").hasAnyRole(
       "FRONT_DESK", "HOUSEKEEPING", "ADMIN")` matcher, placed before the broad rule, in
       `SecurityConfig.java` (same pattern as T016)
 

@@ -5,6 +5,7 @@ import com.creditcard.booking.controller.dto.RoomBoardResponse.RoomBoardEntry;
 import com.creditcard.booking.domain.Room;
 import com.creditcard.booking.domain.RoomStatus;
 import com.creditcard.booking.exception.InvalidDateRangeException;
+import com.creditcard.booking.exception.InvalidRoomStatusTransitionException;
 import com.creditcard.booking.service.RoomAvailabilityService;
 import com.creditcard.booking.service.RoomService;
 import org.junit.jupiter.api.Test;
@@ -20,10 +21,13 @@ import java.util.UUID;
 
 import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.springframework.http.MediaType.APPLICATION_JSON;
 
 @WebMvcTest(RoomController.class)
 class RoomControllerTest {
@@ -94,5 +98,44 @@ class RoomControllerTest {
                 .andExpect(jsonPath("$[0].rooms[0].guestName").value("Jane Doe"))
                 .andExpect(jsonPath("$[0].rooms[1].status").value("VACANT_CLEAN"))
                 .andExpect(jsonPath("$[0].rooms[1].guestName").value(nullValue()));
+    }
+
+    @Test
+    void updateStatus_allowedTransition_returns200() throws Exception {
+        UUID roomId = UUID.randomUUID();
+        when(roomService.updateStatus(eq(roomId), eq(RoomStatus.VACANT_CLEAN))).thenAnswer(invocation -> {
+            Room r = new Room();
+            r.setStatus(RoomStatus.VACANT_CLEAN);
+            return r;
+        });
+
+        mockMvc.perform(patch("/api/v1/rooms/{id}/status", roomId)
+                        .contentType(APPLICATION_JSON)
+                        .content("{\"status\":\"VACANT_CLEAN\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("VACANT_CLEAN"));
+    }
+
+    @Test
+    void updateStatus_disallowedTransition_returns409() throws Exception {
+        UUID roomId = UUID.randomUUID();
+        when(roomService.updateStatus(eq(roomId), eq(RoomStatus.OCCUPIED)))
+                .thenThrow(new InvalidRoomStatusTransitionException(roomId, RoomStatus.VACANT_CLEAN, RoomStatus.OCCUPIED));
+
+        mockMvc.perform(patch("/api/v1/rooms/{id}/status", roomId)
+                        .contentType(APPLICATION_JSON)
+                        .content("{\"status\":\"OCCUPIED\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error").exists());
+    }
+
+    @Test
+    void updateStatus_missingStatus_returns400() throws Exception {
+        UUID roomId = UUID.randomUUID();
+
+        mockMvc.perform(patch("/api/v1/rooms/{id}/status", roomId)
+                        .contentType(APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest());
     }
 }

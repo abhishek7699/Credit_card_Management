@@ -227,6 +227,21 @@ public class RouteConfig {
                                         .setFallbackUri("forward:/fallback/booking")))
                         .uri(bookingServiceUrl))
 
+                // ── Room status update (PATCH) — layer 2b ─────────────────────────────
+                // Falls under SecurityConfig's dedicated FRONT_DESK/HOUSEKEEPING/ADMIN
+                // matcher for this exact path+method, same pattern as room-board.
+                .route("room-status-update", r -> r
+                        .path("/api/v1/rooms/{id}/status")
+                        .and().method(HttpMethod.PATCH)
+                        .filters(f -> f
+                                .requestRateLimiter(c -> c
+                                        .setRateLimiter(rateLimiter)
+                                        .setKeyResolver(keyResolver))
+                                .circuitBreaker(c -> c
+                                        .setName("booking-service-cb")
+                                        .setFallbackUri("forward:/fallback/booking")))
+                        .uri(bookingServiceUrl))
+
                 .build();
     }
 }
