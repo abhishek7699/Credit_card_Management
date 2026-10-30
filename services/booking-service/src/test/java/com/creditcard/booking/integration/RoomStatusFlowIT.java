@@ -152,7 +152,7 @@ class RoomStatusFlowIT {
         assertThat(occupiedOnBoard).isTrue();
 
         // check-out -> booking CHECKED_OUT, room DIRTY
-        Booking checkedOut = bookingService.checkOut(booking.getId());
+        Booking checkedOut = bookingService.checkOut(booking.getId(), null);
         assertThat(checkedOut.getStatus()).isEqualTo(BookingStatus.CHECKED_OUT);
         assertThat(roomRepository.findById(roomId).orElseThrow().getStatus())
                 .isEqualTo(RoomStatus.DIRTY);

@@ -91,7 +91,7 @@ class CheckOutFlowIT {
         roomRepository.save(room);
         Booking booking = seedCheckedInBooking(room.getId());
 
-        Booking result = bookingService.checkOut(booking.getId());
+        Booking result = bookingService.checkOut(booking.getId(), null);
 
         assertThat(result.getStatus()).isEqualTo(BookingStatus.CHECKED_OUT);
         assertThat(result.getTransactionId()).isEqualTo("txn-checkout-it"); // unchanged by checkout
@@ -104,7 +104,7 @@ class CheckOutFlowIT {
         Room room = seedRoom(); // left at the seeded VACANT_CLEAN, never checked in
         Booking booking = seedCheckedInBooking(room.getId());
 
-        bookingService.checkOut(booking.getId());
+        bookingService.checkOut(booking.getId(), null);
 
         assertThat(roomRepository.findById(room.getId()).orElseThrow().getStatus())
                 .isEqualTo(RoomStatus.DIRTY);
@@ -123,7 +123,7 @@ class CheckOutFlowIT {
         booking.setStatus(BookingStatus.CONFIRMED);
         Booking savedBooking = bookingRepository.save(booking);
 
-        org.assertj.core.api.Assertions.assertThatThrownBy(() -> bookingService.checkOut(savedBooking.getId()))
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> bookingService.checkOut(savedBooking.getId(), null))
                 .isInstanceOf(com.creditcard.booking.exception.InvalidBookingStateException.class);
 
         assertThat(roomRepository.findById(room.getId()).orElseThrow().getStatus())

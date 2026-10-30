@@ -3,6 +3,9 @@ package com.creditcard.booking.repository;
 import com.creditcard.booking.domain.CheckoutAttemptStatus;
 import com.creditcard.booking.domain.CheckoutPaymentAttempt;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 import java.time.Instant;
 import java.util.List;
@@ -26,4 +29,17 @@ public interface CheckoutPaymentAttemptRepository extends JpaRepository<Checkout
      *  attempts older than the same hold-timeout window already used for HELD
      *  bookings. */
     List<CheckoutPaymentAttempt> findByStatusAndCreatedAtBefore(CheckoutAttemptStatus status, Instant cutoff);
+
+    /**
+     * Concurrency-safe state transition, same pattern as BookingRepository/
+     * RoomRepository's own (research.md §2): guards every attempt transition
+     * (PENDING -> AUTHORIZED/DECLINED/FAILED/EXPIRED, EXPIRED -> LATE_AUTHORIZED) so a
+     * late Kafka outcome and the hold-expiry sweep racing on the same attempt can never
+     * both apply — whichever runs first wins, the other sees 0 rows affected and no-ops.
+     */
+    @Modifying(clearAutomatically = true)
+    @Query("UPDATE CheckoutPaymentAttempt c SET c.status = :newStatus WHERE c.id = :id AND c.status = :expected")
+    int updateStatusIfCurrent(@Param("id") UUID id,
+                              @Param("newStatus") CheckoutAttemptStatus newStatus,
+                              @Param("expected") CheckoutAttemptStatus expected);
 }

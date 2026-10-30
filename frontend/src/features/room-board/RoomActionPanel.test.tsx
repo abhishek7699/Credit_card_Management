@@ -1,10 +1,13 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { http, HttpResponse } from 'msw';
 import { Provider } from 'react-redux';
-import { expect, test, vi } from 'vitest';
+import { beforeEach, expect, test, vi } from 'vitest';
+import { server } from '../../mocks/server';
 import { store } from '../../store';
+import { bookingApi } from '../booking/bookingApi';
 import { RoomActionPanel } from './RoomActionPanel';
-import type { RoomBoardEntry } from '../../types/staff';
+import type { Booking, RoomBoardEntry } from '../../types/staff';
 
 function entry(overrides: Partial<RoomBoardEntry>): RoomBoardEntry {
   return {
@@ -23,6 +26,22 @@ function entry(overrides: Partial<RoomBoardEntry>): RoomBoardEntry {
   };
 }
 
+function booking(overrides: Partial<Booking> = {}): Booking {
+  return {
+    bookingId: 'b-current',
+    roomId: 'r1',
+    guestName: 'Jane Doe',
+    checkIn: '2026-12-01',
+    checkOut: '2026-12-03',
+    status: 'CHECKED_IN',
+    cancellationReason: null,
+    transactionId: 'txn-1',
+    charges: [],
+    balanceDue: 0,
+    ...overrides,
+  };
+}
+
 function renderPanel(room: RoomBoardEntry, role: 'FRONT_DESK' | 'HOUSEKEEPING', onClose = vi.fn()) {
   return render(
     <Provider store={store}>
@@ -30,6 +49,10 @@ function renderPanel(room: RoomBoardEntry, role: 'FRONT_DESK' | 'HOUSEKEEPING', 
     </Provider>,
   );
 }
+
+beforeEach(() => {
+  store.dispatch(bookingApi.util.resetApiState());
+});
 
 test('a room with an arriving-today booking offers check-in for Front Desk, even while still VACANT_CLEAN', () => {
   renderPanel(
@@ -54,12 +77,37 @@ test('a room with an arriving-today booking offers nothing for Housekeeping', ()
   expect(screen.getByText(/no action available/i)).toBeInTheDocument();
 });
 
-test('an OCCUPIED room offers check-out for Front Desk', () => {
+test('an OCCUPIED room offers check-out for Front Desk, once the booking detail loads', async () => {
+  server.use(http.get('*/api/v1/bookings/b-current', () => HttpResponse.json(booking())));
   renderPanel(
     entry({ status: 'OCCUPIED', currentBookingId: 'b-current', guestName: 'Jane Doe' }),
     'FRONT_DESK',
   );
-  expect(screen.getByText(/jane doe is currently occupying/i)).toBeInTheDocument();
+
+  expect(screen.getByText(/loading/i)).toBeInTheDocument();
+  expect(await screen.findByText(/jane doe is currently occupying/i)).toBeInTheDocument();
+});
+
+test('an OCCUPIED room also renders the charges panel for Front Desk', async () => {
+  server.use(
+    http.get('*/api/v1/bookings/b-current', () =>
+      HttpResponse.json(
+        booking({
+          charges: [
+            { chargeId: 'c1', type: 'MINIBAR', description: 'Soda', amount: 6, createdAt: '2026-10-30T19:00:00Z' },
+          ],
+          balanceDue: 6,
+        }),
+      ),
+    ),
+  );
+  renderPanel(
+    entry({ status: 'OCCUPIED', currentBookingId: 'b-current', guestName: 'Jane Doe' }),
+    'FRONT_DESK',
+  );
+
+  expect(await screen.findByText('Soda')).toBeInTheDocument();
+  expect(screen.getByText(/balance due: \$6\.00/i)).toBeInTheDocument();
 });
 
 test('an OCCUPIED room offers nothing for Housekeeping', () => {
@@ -71,7 +119,8 @@ test('an OCCUPIED room offers nothing for Housekeeping', () => {
   expect(screen.getByText(/no action available/i)).toBeInTheDocument();
 });
 
-test('an OCCUPIED room with a same-day arrival still offers check-out, not check-in (check-in cannot succeed yet)', () => {
+test('an OCCUPIED room with a same-day arrival still offers check-out, not check-in (check-in cannot succeed yet)', async () => {
+  server.use(http.get('*/api/v1/bookings/b-current', () => HttpResponse.json(booking())));
   renderPanel(
     entry({
       status: 'OCCUPIED',
@@ -82,7 +131,8 @@ test('an OCCUPIED room with a same-day arrival still offers check-out, not check
     }),
     'FRONT_DESK',
   );
-  expect(screen.getByText(/jane doe is currently occupying/i)).toBeInTheDocument();
+
+  expect(await screen.findByText(/jane doe is currently occupying/i)).toBeInTheDocument();
   expect(screen.queryByText(/john smith is arriving today/i)).not.toBeInTheDocument();
 });
 

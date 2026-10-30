@@ -13,6 +13,7 @@ interface StateWithStaffSession {
 
 export const api = createApi({
   reducerPath: 'api',
+  tagTypes: ['Booking'],
   baseQuery: useMock
     ? mockBaseQuery
     : fetchBaseQuery({

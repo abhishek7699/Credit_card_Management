@@ -124,48 +124,48 @@ each is its own line item and the balance due matches (spec.md Story 1).
 
 ### Tests for User Story 1 ⚠️ (write first, confirm they fail)
 
-- [ ] T018 [P] [US1] Unit test: `BookingService.addCharge()` — succeeds for a
+- [X] T018 [P] [US1] Unit test: `BookingService.addCharge()` — succeeds for a
       `CHECKED_IN` booking; rejects every other status, recording nothing; balance
       calc sums charges correctly (the `roomChargeAmount` terms cancel, per FR-004) —
       in `BookingServiceTest.java`
-- [ ] T019 [P] [US1] Contract test: `POST /api/v1/bookings/{id}/charges` (201 + body
+- [X] T019 [P] [US1] Contract test: `POST /api/v1/bookings/{id}/charges` (201 + body
       shape, 409 for a non-`CHECKED_IN` booking), `GET .../charges` (200, ordered
       list) — in `services/booking-service/src/test/java/com/creditcard/booking/controller/BookingControllerTest.java`
-- [ ] T020 [P] [US1] Integration test (real CockroachDB): check in, add two charges
+- [X] T020 [P] [US1] Integration test (real CockroachDB): check in, add two charges
       of different types, confirm `GET /api/v1/bookings/{id}` returns both as line
       items with the correct `balanceDue` — new
       `services/booking-service/src/test/java/com/creditcard/booking/integration/ChargeFlowIT.java`
-- [ ] T021 [P] [US1] `frontend/src/features/booking/ChargesPanel.test.tsx` (MSW):
+- [X] T021 [P] [US1] `frontend/src/features/booking/ChargesPanel.test.tsx` (MSW):
       renders existing charges and balance; submitting the add-charge form calls
       the mutation with the right payload and the panel updates without a manual
       refresh (cache-tag invalidation, research-adjacent — see T028)
-- [ ] T022 [P] [US1] `frontend/src/features/room-board/RoomActionPanel.test.tsx`
+- [X] T022 [P] [US1] `frontend/src/features/room-board/RoomActionPanel.test.tsx`
       (extended): an `OCCUPIED` room's panel renders `ChargesPanel` with that
       booking's current charges/balance
 
 ### Implementation for User Story 1
 
-- [ ] T023 [US1] `BookingService.java`: `addCharge(bookingId, ChargeRequest)` —
+- [X] T023 [US1] `BookingService.java`: `addCharge(bookingId, ChargeRequest)` —
       validates `CHECKED_IN`, persists a `Charge`, returns it (depends on T006, T014)
-- [ ] T024 [US1] `BookingService.java`: a `getBalanceDue(Booking)` helper — sums
+- [X] T024 [US1] `BookingService.java`: a `getBalanceDue(Booking)` helper — sums
       `ChargeRepository.findByBookingIdOrderByCreatedAtAsc`'s amounts plus
       `roomChargeAmount`, minus `roomChargeAmount` and the sum of `AUTHORIZED`/
       `LATE_AUTHORIZED` `CheckoutPaymentAttempt` amounts (FR-004) (depends on T010, T011)
-- [ ] T025 [US1] `BookingController.java`: `POST /{id}/charges`, `GET /{id}/charges`;
+- [X] T025 [US1] `BookingController.java`: `POST /{id}/charges`, `GET /{id}/charges`;
       extend `GET /{id}` to include `charges`/`balanceDue` via T024 (depends on T023, T024)
-- [ ] T026 [US1] `services/api-gateway/.../config/RouteConfig.java`: add
+- [X] T026 [US1] `services/api-gateway/.../config/RouteConfig.java`: add
       `booking-charges-get`/`booking-charges-post` routes (reuse `booking-service-cb`);
       `SecurityConfig.java`: add `GET /api/v1/bookings/*` and `GET
       /api/v1/bookings/*/charges` matchers (`FRONT_DESK`, `HOUSEKEEPING`, `ADMIN`),
       placed before the existing broad rule — same pattern as the room board's own
       matcher (research.md §ref: layer 2b/2d precedent)
-- [ ] T027 [US1] `frontend/src/features/booking/bookingApi.ts`: `addCharge`
+- [X] T027 [US1] `frontend/src/features/booking/bookingApi.ts`: `addCharge`
       mutation; add RTK Query cache tags (`Booking`) to `getBooking` (`providesTags`)
       and `addCharge`/`checkIn`/`checkOut` (`invalidatesTags`) so adding a charge is
       reflected immediately, no polling wait (spec.md SC-001) (depends on T016)
-- [ ] T028 [US1] `frontend/src/features/booking/ChargesPanel.tsx`: charge-type
+- [X] T028 [US1] `frontend/src/features/booking/ChargesPanel.tsx`: charge-type
       select, description, amount fields; charges list; balance display (depends on T027)
-- [ ] T029 [US1] `frontend/src/features/room-board/RoomActionPanel.tsx`: the
+- [X] T029 [US1] `frontend/src/features/room-board/RoomActionPanel.tsx`: the
       `OCCUPIED` branch fetches that booking's detail (`useGetBookingQuery`) and
       renders `ChargesPanel` alongside the existing check-out action (depends on T028)
 
@@ -184,23 +184,23 @@ confirm a charge-free occupied room is not (spec.md Story 2).
 
 ### Tests for User Story 2 ⚠️
 
-- [ ] T030 [P] [US2] Unit test: `RoomService.getBoard()` sets `hasBalanceDue: true`
+- [X] T030 [P] [US2] Unit test: `RoomService.getBoard()` sets `hasBalanceDue: true`
       for an occupied room with charges, `false` for one without, and leaves it
       absent/null for a non-occupied room — in `RoomServiceTest.java`
-- [ ] T031 [P] [US2] Contract test: board response includes `hasBalanceDue` — in
+- [X] T031 [P] [US2] Contract test: board response includes `hasBalanceDue` — in
       `RoomControllerTest.java`
-- [ ] T032 [P] [US2] `frontend/src/features/room-board/RoomTile.test.tsx`: renders
+- [X] T032 [P] [US2] `frontend/src/features/room-board/RoomTile.test.tsx`: renders
       a visual balance-due indicator when `hasBalanceDue` is true, not otherwise
 
 ### Implementation for User Story 2
 
-- [ ] T033 [US2] `RoomBoardResponse.java`: add `hasBalanceDue` to `RoomBoardEntry`
+- [X] T033 [US2] `RoomBoardResponse.java`: add `hasBalanceDue` to `RoomBoardEntry`
       (depends on T006, T007)
-- [ ] T034 [US2] `RoomService.java`: `getBoard()` bulk-loads charges/authorized
+- [X] T034 [US2] `RoomService.java`: `getBoard()` bulk-loads charges/authorized
       attempts for every occupied room's booking in one pass each
       (`findByBookingIdIn`) and sets `hasBalanceDue` per room (plan.md Key Design
       Decision #5 — no new dependency on `BookingService`) (depends on T010, T011, T033)
-- [ ] T035 [US2] `frontend/src/features/room-board/RoomTile.tsx`: a small visual
+- [X] T035 [US2] `frontend/src/features/room-board/RoomTile.tsx`: a small visual
       flag (e.g., a badge/icon) when `hasBalanceDue` is true (depends on T016)
 
 **Checkpoint**: The board correctly flags/unflags balance-due rooms as charges are
@@ -222,74 +222,74 @@ recorded (spec.md Story 3, Clarifications).
 
 ### Tests for User Story 3 ⚠️
 
-- [ ] T036 [P] [US3] Unit test: `BookingService.checkOut()` with balance > 0 and a
+- [X] T036 [P] [US3] Unit test: `BookingService.checkOut()` with balance > 0 and a
       card — creates a `PENDING` `CheckoutPaymentAttempt` for exactly the current
       balance, transitions the booking to `CHECKOUT_PENDING` via the same
       conditional-update pattern check-in already uses (never a plain read-then-
       write); with balance > 0 and no card — rejected, nothing created; a second
       checkout attempt while one is already pending — rejected (FR-009) — in
       `BookingServiceTest.java`
-- [ ] T037 [P] [US3] Unit test: `BookingService.handlePaymentOutcome()` routes a
+- [X] T037 [P] [US3] Unit test: `BookingService.handlePaymentOutcome()` routes a
       checkout-attempt `transactionId` (not found on any `Booking`) to checkout
       handling — `AUTHORIZED` → attempt `AUTHORIZED`, booking `CHECKED_OUT`, room
       `DIRTY`; `DECLINED`/`FAILED` → attempt `DECLINED`/`FAILED`, booking back to
       `CHECKED_IN`, balance unchanged — in `BookingServiceTest.java`
-- [ ] T038 [P] [US3] Unit test: `HoldExpiryService`'s new sweep method reverts a
+- [X] T038 [P] [US3] Unit test: `HoldExpiryService`'s new sweep method reverts a
       `PENDING` `CheckoutPaymentAttempt` older than the configured timeout to
       `EXPIRED` and the booking to `CHECKED_IN` — in
       `services/booking-service/src/test/java/com/creditcard/booking/service/HoldExpiryServiceTest.java`
       (extended, or a focused new test class if that file doesn't already exist —
       verify first)
-- [ ] T039 [P] [US3] Unit test: a late `AUTHORIZED` outcome for an `EXPIRED`
+- [X] T039 [P] [US3] Unit test: a late `AUTHORIZED` outcome for an `EXPIRED`
       attempt moves it to `LATE_AUTHORIZED` and reduces the booking's balance by
       that attempt's amount (zeroing it out if it was the only charge), logging a
       WARN; a late `DECLINED`/`FAILED` for an `EXPIRED` attempt is a no-op — in
       `BookingServiceTest.java`
-- [ ] T040 [P] [US3] Integration test (real CockroachDB + the existing Kafka
+- [X] T040 [P] [US3] Integration test (real CockroachDB + the existing Kafka
       envelope convention): the full saga — check in, add a charge, checkout with
       a card, simulate the `AUTHORIZED` event arriving, confirm `CHECKED_OUT` +
       room `DIRTY`; a second scenario for `DECLINED`; a third for the stuck→swept→
       late-`AUTHORIZED` path — new
       `services/booking-service/src/test/java/com/creditcard/booking/integration/CheckoutPaymentFlowIT.java`
-- [ ] T041 [P] [US3] `frontend/src/features/booking/CheckOutCardForm.test.tsx`
-- [ ] T042 [P] [US3] `frontend/src/features/room-board/CheckOutAction.test.tsx`
+- [X] T041 [P] [US3] `frontend/src/features/booking/CheckOutCardForm.test.tsx`
+- [X] T042 [P] [US3] `frontend/src/features/room-board/CheckOutAction.test.tsx`
       (extended): balance > 0 renders `CheckOutCardForm` instead of a bare button;
       submitting shows pending, then approved or declined, matching the backend
       outcome
-- [ ] T043 [P] [US3] `frontend/src/features/booking/bookingApi.test.ts` (extended):
+- [X] T043 [P] [US3] `frontend/src/features/booking/bookingApi.test.ts` (extended):
       the booking-detail polling hook keeps polling while `CHECKOUT_PENDING`, same
       as it already does for `HELD`, and stops once resolved either way
 
 ### Implementation for User Story 3
 
-- [ ] T044 [US3] `services/booking-service/src/main/java/com/creditcard/booking/controller/dto/CheckOutRequest.java`
+- [X] T044 [US3] `services/booking-service/src/main/java/com/creditcard/booking/controller/dto/CheckOutRequest.java`
       — optional `card` field (depends on existing `BookingRequest.CardDetails`
       shape, reused)
-- [ ] T045 [US3] `BookingService.java`: `checkOut(bookingId, card)` — branches on
+- [X] T045 [US3] `BookingService.java`: `checkOut(bookingId, card)` — branches on
       `getBalanceDue` (T024); for balance > 0, atomically moves the booking to
       `CHECKOUT_PENDING` (conditional update, same pattern as `checkIn`), creates
       the `CheckoutPaymentAttempt`, and calls the existing gRPC stub for that exact
       amount (reusing `initiatePayment`'s own `StatusRuntimeException` handling —
       a call failure leaves the attempt with no `transactionId`, swept the same as
       a never-answered one) (depends on T007, T011, T024, T044)
-- [ ] T046 [US3] `BookingService.java`: `handlePaymentOutcome()` gains the fallback
+- [X] T046 [US3] `BookingService.java`: `handlePaymentOutcome()` gains the fallback
       lookup (research.md §5) — on a `Booking.transactionId` miss, try
       `CheckoutPaymentAttemptRepository.findByTransactionId`; route a hit to a new
       `handleCheckoutOutcome(attempt, event)` implementing the state machine in
       data-model.md (depends on T011, T045)
-- [ ] T047 [US3] `HoldExpiryService.java`: a second `@Scheduled` method sweeping
+- [X] T047 [US3] `HoldExpiryService.java`: a second `@Scheduled` method sweeping
       `PENDING` `CheckoutPaymentAttempt`s older than the existing
       `booking.hold-timeout-minutes` value — reusing the same `@Value`, not a new
       configuration key (plan.md Key Design Decision #4) (depends on T011)
-- [ ] T048 [US3] `BookingController.java`: `checkOut` accepts an optional
+- [X] T048 [US3] `BookingController.java`: `checkOut` accepts an optional
       `CheckOutRequest` body (depends on T044, T045)
-- [ ] T049 [US3] `frontend/src/features/booking/bookingApi.ts`: `checkOut` mutation
+- [X] T049 [US3] `frontend/src/features/booking/bookingApi.ts`: `checkOut` mutation
       accepts an optional card argument; the booking-detail polling hook's stop
       condition generalizes from "not HELD" to "not HELD and not CHECKOUT_PENDING"
       (depends on T027)
-- [ ] T050 [US3] `frontend/src/features/booking/CheckOutCardForm.tsx`: card fields,
+- [X] T050 [US3] `frontend/src/features/booking/CheckOutCardForm.tsx`: card fields,
       reusing `BookingForm`'s own validation conventions (depends on T049)
-- [ ] T051 [US3] `frontend/src/features/room-board/CheckOutAction.tsx`: renders
+- [X] T051 [US3] `frontend/src/features/room-board/CheckOutAction.tsx`: renders
       `CheckOutCardForm` when the booking's balance is greater than zero, the
       existing plain button otherwise (depends on T050)
 

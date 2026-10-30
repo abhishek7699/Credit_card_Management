@@ -61,6 +61,15 @@ public class SecurityConfig {
                         // reason.
                         .pathMatchers(HttpMethod.PATCH, "/api/v1/rooms/*/status")
                                 .hasAnyRole("FRONT_DESK", "HOUSEKEEPING", "ADMIN")
+                        // Booking detail and charges (layer 2c) — front-desk OR
+                        // housekeeping (contracts/api.md FR-003/FR-014): housekeeping
+                        // needs the balance/charges alongside the booking detail from the
+                        // same screen as the board. Matched before the broad rule below
+                        // for the same reason as room-board/room-status-update.
+                        .pathMatchers(HttpMethod.GET, "/api/v1/bookings/*")
+                                .hasAnyRole("FRONT_DESK", "HOUSEKEEPING", "ADMIN")
+                        .pathMatchers(HttpMethod.GET, "/api/v1/bookings/*/charges")
+                                .hasAnyRole("FRONT_DESK", "HOUSEKEEPING", "ADMIN")
                         // Booking — B2B, staff-only (FR-017): front-desk staff create and
                         // manage bookings on a guest's behalf; guests never call this API.
                         .pathMatchers("/api/v1/bookings/**", "/api/v1/rooms/**")

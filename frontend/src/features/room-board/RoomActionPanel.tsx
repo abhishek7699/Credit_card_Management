@@ -1,4 +1,6 @@
+import { useGetBookingQuery } from '../booking/bookingApi';
 import { BookingForm } from '../booking/BookingForm';
+import { ChargesPanel } from '../booking/ChargesPanel';
 import { CheckInAction } from './CheckInAction';
 import { CheckOutAction } from './CheckOutAction';
 import { StatusChangeAction } from './StatusChangeAction';
@@ -10,6 +12,35 @@ interface RoomActionPanelProps {
   onClose: () => void;
 }
 
+interface OccupiedRoomPanelProps {
+  bookingId: string;
+  guestName: string | null;
+}
+
+/** US1/US3: fetches the booking's own detail (charges, balance, status) so
+ *  CheckOutAction and ChargesPanel both reflect it live — the same
+ *  useGetBookingQuery polling hook the booking-status view already uses,
+ *  which keeps polling while CHECKOUT_PENDING and stops once resolved. */
+function OccupiedRoomPanel({ bookingId, guestName }: OccupiedRoomPanelProps) {
+  const { data: booking, isLoading } = useGetBookingQuery(bookingId);
+
+  if (isLoading || !booking) {
+    return <p className="text-sm text-gray-500">Loading…</p>;
+  }
+
+  return (
+    <>
+      <CheckOutAction
+        bookingId={bookingId}
+        guestName={guestName}
+        status={booking.status}
+        balanceDue={booking.balanceDue}
+      />
+      <ChargesPanel booking={booking} />
+    </>
+  );
+}
+
 function renderAction(room: RoomBoardEntry, role: StaffRole) {
   // An OCCUPIED room takes priority over everything else: check-in can't
   // actually succeed against it yet (the backend requires VACANT_CLEAN),
@@ -17,7 +48,7 @@ function renderAction(room: RoomBoardEntry, role: StaffRole) {
   // arriving later today (same-day turnover) — check-out is the action that
   // applies right now.
   if (room.currentBookingId && role === 'FRONT_DESK') {
-    return <CheckOutAction bookingId={room.currentBookingId} guestName={room.guestName} />;
+    return <OccupiedRoomPanel bookingId={room.currentBookingId} guestName={room.guestName} />;
   }
   // A room awaiting arrival takes priority over "book a new reservation" even
   // if it's still VACANT_CLEAN (which it is, until check-in happens) — check-in

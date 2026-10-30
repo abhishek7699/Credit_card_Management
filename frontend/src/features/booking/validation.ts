@@ -1,31 +1,16 @@
-export interface BookingFormState {
-  guestName: string;
-  checkIn: string;
-  checkOut: string;
+export interface CardFormState {
   cardNumber: string;
   expiry: string;
   cvv: string;
   cardholderName: string;
 }
 
-export type BookingFormErrors = Partial<Record<keyof BookingFormState, string>>;
+export type CardFormErrors = Partial<Record<keyof CardFormState, string>>;
 
-export function validateBookingForm(values: BookingFormState): BookingFormErrors {
-  const errors: BookingFormErrors = {};
-
-  if (!values.guestName.trim()) {
-    errors.guestName = 'Guest name is required';
-  }
-
-  if (!values.checkIn) {
-    errors.checkIn = 'Check-in date is required';
-  }
-
-  if (!values.checkOut) {
-    errors.checkOut = 'Check-out date is required';
-  } else if (values.checkIn && values.checkOut <= values.checkIn) {
-    errors.checkOut = 'Check-out must be after check-in';
-  }
+/** Shared by BookingForm (new booking) and CheckOutCardForm (checkout with a
+ *  balance due, layer 2c) — same card fields, same rules, one place to change. */
+export function validateCardFields(values: CardFormState): CardFormErrors {
+  const errors: CardFormErrors = {};
 
   const digits = values.cardNumber.replace(/\s+/g, '');
   if (digits.length === 0) {
@@ -51,4 +36,32 @@ export function validateBookingForm(values: BookingFormState): BookingFormErrors
   }
 
   return errors;
+}
+
+export interface BookingFormState extends CardFormState {
+  guestName: string;
+  checkIn: string;
+  checkOut: string;
+}
+
+export type BookingFormErrors = Partial<Record<keyof BookingFormState, string>>;
+
+export function validateBookingForm(values: BookingFormState): BookingFormErrors {
+  const errors: BookingFormErrors = {};
+
+  if (!values.guestName.trim()) {
+    errors.guestName = 'Guest name is required';
+  }
+
+  if (!values.checkIn) {
+    errors.checkIn = 'Check-in date is required';
+  }
+
+  if (!values.checkOut) {
+    errors.checkOut = 'Check-out date is required';
+  } else if (values.checkIn && values.checkOut <= values.checkIn) {
+    errors.checkOut = 'Check-out must be after check-in';
+  }
+
+  return { ...errors, ...validateCardFields(values) };
 }

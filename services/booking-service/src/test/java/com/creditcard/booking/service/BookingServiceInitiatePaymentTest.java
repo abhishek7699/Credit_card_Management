@@ -6,6 +6,8 @@ import com.creditcard.booking.domain.BookingStatus;
 import com.creditcard.booking.domain.Room;
 import com.creditcard.booking.repository.BookingRepository;
 import com.creditcard.booking.repository.BookingRoomNightRepository;
+import com.creditcard.booking.repository.ChargeRepository;
+import com.creditcard.booking.repository.CheckoutPaymentAttemptRepository;
 import com.creditcard.booking.repository.ProcessedEventRepository;
 import com.creditcard.booking.repository.RoomRepository;
 import com.creditcard.transaction.grpc.v1.GetTransactionRequest;
@@ -56,6 +58,10 @@ class BookingServiceInitiatePaymentTest {
     private BookingRoomNightRepository bookingRoomNightRepository;
     @Mock
     private ProcessedEventRepository processedEventRepository;
+    @Mock
+    private ChargeRepository chargeRepository;
+    @Mock
+    private CheckoutPaymentAttemptRepository checkoutPaymentAttemptRepository;
 
     private Server fakeServer;
     private ManagedChannel channel;
@@ -76,7 +82,7 @@ class BookingServiceInitiatePaymentTest {
         channel = InProcessChannelBuilder.forName(name).directExecutor().build();
         var stub = TransactionServiceGrpc.newBlockingStub(channel);
         return new BookingService(bookingRepository, roomRepository, bookingRoomNightRepository,
-                processedEventRepository, stub, "HOTEL-001");
+                processedEventRepository, chargeRepository, checkoutPaymentAttemptRepository, stub, "HOTEL-001");
     }
 
     private static Room room(UUID id, String rate) {

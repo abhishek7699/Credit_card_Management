@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { validateBookingForm, type BookingFormState } from './validation';
+import { validateBookingForm, validateCardFields, type BookingFormState, type CardFormState } from './validation';
 
 const VALID: BookingFormState = {
   guestName: 'Jane Doe',
@@ -40,4 +40,21 @@ test('a non-numeric or wrong-length cvv is rejected as an invalid format, not "r
 
 test('whitespace-only cardholder name is treated as missing', () => {
   expect(validateBookingForm({ ...VALID, cardholderName: '   ' }).cardholderName).toBeDefined();
+});
+
+// ── validateCardFields (shared with CheckOutCardForm, layer 2c) ───────────────
+
+const VALID_CARD: CardFormState = {
+  cardNumber: '4111111111111111',
+  expiry: '12/30',
+  cvv: '123',
+  cardholderName: 'Jane Doe',
+};
+
+test('validateCardFields: a fully valid card has no errors', () => {
+  expect(validateCardFields(VALID_CARD)).toEqual({});
+});
+
+test('validateCardFields: missing card number is required, not an invalid format', () => {
+  expect(validateCardFields({ ...VALID_CARD, cardNumber: '' }).cardNumber).toMatch(/required/i);
 });

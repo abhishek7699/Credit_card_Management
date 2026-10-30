@@ -1,12 +1,18 @@
 package com.creditcard.booking.service;
 
 import com.creditcard.booking.controller.dto.BookingRequest;
+import com.creditcard.booking.controller.dto.ChargeRequest;
 import com.creditcard.booking.domain.Booking;
 import com.creditcard.booking.domain.BookingStatus;
 import com.creditcard.booking.domain.CancellationReason;
+import com.creditcard.booking.domain.Charge;
+import com.creditcard.booking.domain.ChargeType;
+import com.creditcard.booking.domain.CheckoutAttemptStatus;
+import com.creditcard.booking.domain.CheckoutPaymentAttempt;
 import com.creditcard.booking.domain.Room;
 import com.creditcard.booking.domain.RoomStatus;
 import com.creditcard.booking.exception.BookingNotFoundException;
+import com.creditcard.booking.exception.CardRequiredException;
 import com.creditcard.booking.exception.InvalidBookingStateException;
 import com.creditcard.booking.exception.InvalidDateRangeException;
 import com.creditcard.booking.exception.RoomNotFoundException;
@@ -15,6 +21,8 @@ import com.creditcard.booking.kafka.BookingNotFoundForTransactionException;
 import com.creditcard.booking.kafka.event.TransactionStatusEvent;
 import com.creditcard.booking.repository.BookingRepository;
 import com.creditcard.booking.repository.BookingRoomNightRepository;
+import com.creditcard.booking.repository.ChargeRepository;
+import com.creditcard.booking.repository.CheckoutPaymentAttemptRepository;
 import com.creditcard.booking.repository.ProcessedEventRepository;
 import com.creditcard.booking.repository.RoomRepository;
 import com.creditcard.transaction.grpc.v1.TransactionServiceGrpc;
@@ -29,12 +37,14 @@ import org.springframework.test.util.ReflectionTestUtils;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -52,6 +62,10 @@ class BookingServiceTest {
     @Mock
     private ProcessedEventRepository processedEventRepository;
     @Mock
+    private ChargeRepository chargeRepository;
+    @Mock
+    private CheckoutPaymentAttemptRepository checkoutPaymentAttemptRepository;
+    @Mock
     private TransactionServiceGrpc.TransactionServiceBlockingStub transactionServiceBlockingStub;
 
     private BookingService service;
@@ -59,7 +73,8 @@ class BookingServiceTest {
     @BeforeEach
     void setUp() {
         service = new BookingService(bookingRepository, roomRepository, bookingRoomNightRepository,
-                processedEventRepository, transactionServiceBlockingStub, "HOTEL-001");
+                processedEventRepository, chargeRepository, checkoutPaymentAttemptRepository,
+                transactionServiceBlockingStub, "HOTEL-001");
     }
 
     private static Room room(UUID id) {
@@ -80,6 +95,11 @@ class BookingServiceTest {
         booking.setCheckOut(LocalDate.of(2026, 11, 3));
         booking.setStatus(status);
         booking.setTransactionId(transactionId);
+        // Set by default so getBalanceDue (used inside checkOut) never needs a Room
+        // lookup in tests unrelated to the legacy-null-roomChargeAmount fallback —
+        // see getBalanceDue_legacyBookingWithNullRoomChargeAmount_fallsBackToRoomLookup
+        // for the one test that deliberately leaves this null.
+        booking.setRoomChargeAmount(new BigDecimal("200.00"));
         return booking;
     }
 
@@ -303,6 +323,318 @@ class BookingServiceTest {
         verify(bookingRepository, never()).save(booking);
     }
 
+    // ── handlePaymentOutcome: checkout saga fallback (layer 2c) ─────────────────
+
+    private static CheckoutPaymentAttempt checkoutAttempt(UUID bookingId, String transactionId,
+                                                            CheckoutAttemptStatus status, String amount) {
+        CheckoutPaymentAttempt attempt = new CheckoutPaymentAttempt();
+        ReflectionTestUtils.setField(attempt, "id", UUID.randomUUID());
+        attempt.setBookingId(bookingId);
+        attempt.setTransactionId(transactionId);
+        attempt.setAmount(new BigDecimal(amount));
+        attempt.setStatus(status);
+        return attempt;
+    }
+
+    @Test
+    void handlePaymentOutcome_transactionIdMatchesNoBooking_fallsBackToCheckoutAttempt_authorized_checksOutAndSetsRoomDirty() {
+        UUID bookingId = UUID.randomUUID();
+        Booking booking = booking(bookingId, BookingStatus.CHECKOUT_PENDING, null);
+        CheckoutPaymentAttempt attempt = checkoutAttempt(bookingId, "txn-co-1", CheckoutAttemptStatus.PENDING, "24.50");
+        when(bookingRepository.findByTransactionId("txn-co-1")).thenReturn(Optional.empty());
+        when(checkoutPaymentAttemptRepository.findByTransactionId("txn-co-1")).thenReturn(Optional.of(attempt));
+        when(processedEventRepository.insertIfAbsent(any())).thenReturn(1);
+        when(checkoutPaymentAttemptRepository.updateStatusIfCurrent(
+                attempt.getId(), CheckoutAttemptStatus.AUTHORIZED, CheckoutAttemptStatus.PENDING)).thenReturn(1);
+        when(bookingRepository.findById(bookingId)).thenReturn(Optional.of(booking));
+
+        service.handlePaymentOutcome(event("txn-co-1", "AUTHORIZED"));
+
+        verify(bookingRepository).updateStatusIfCurrent(bookingId, BookingStatus.CHECKED_OUT, BookingStatus.CHECKOUT_PENDING);
+        verify(roomRepository).setStatus(booking.getRoomId(), RoomStatus.DIRTY);
+    }
+
+    @Test
+    void handlePaymentOutcome_checkoutAttemptPendingDeclined_revertsBookingToCheckedIn() {
+        UUID bookingId = UUID.randomUUID();
+        CheckoutPaymentAttempt attempt = checkoutAttempt(bookingId, "txn-co-2", CheckoutAttemptStatus.PENDING, "24.50");
+        when(bookingRepository.findByTransactionId("txn-co-2")).thenReturn(Optional.empty());
+        when(checkoutPaymentAttemptRepository.findByTransactionId("txn-co-2")).thenReturn(Optional.of(attempt));
+        when(processedEventRepository.insertIfAbsent(any())).thenReturn(1);
+        when(checkoutPaymentAttemptRepository.updateStatusIfCurrent(
+                attempt.getId(), CheckoutAttemptStatus.DECLINED, CheckoutAttemptStatus.PENDING)).thenReturn(1);
+
+        service.handlePaymentOutcome(event("txn-co-2", "DECLINED"));
+
+        verify(bookingRepository).updateStatusIfCurrent(bookingId, BookingStatus.CHECKED_IN, BookingStatus.CHECKOUT_PENDING);
+        verify(roomRepository, never()).setStatus(any(), any());
+    }
+
+    @Test
+    void handlePaymentOutcome_checkoutAttemptPendingFailed_revertsBookingToCheckedIn() {
+        UUID bookingId = UUID.randomUUID();
+        CheckoutPaymentAttempt attempt = checkoutAttempt(bookingId, "txn-co-2f", CheckoutAttemptStatus.PENDING, "24.50");
+        when(bookingRepository.findByTransactionId("txn-co-2f")).thenReturn(Optional.empty());
+        when(checkoutPaymentAttemptRepository.findByTransactionId("txn-co-2f")).thenReturn(Optional.of(attempt));
+        when(processedEventRepository.insertIfAbsent(any())).thenReturn(1);
+        when(checkoutPaymentAttemptRepository.updateStatusIfCurrent(
+                attempt.getId(), CheckoutAttemptStatus.FAILED, CheckoutAttemptStatus.PENDING)).thenReturn(1);
+
+        service.handlePaymentOutcome(event("txn-co-2f", "FAILED"));
+
+        verify(bookingRepository).updateStatusIfCurrent(bookingId, BookingStatus.CHECKED_IN, BookingStatus.CHECKOUT_PENDING);
+    }
+
+    @Test
+    void handlePaymentOutcome_checkoutAttemptAlreadyResolved_raceLost_isNoOp() {
+        UUID bookingId = UUID.randomUUID();
+        CheckoutPaymentAttempt attempt = checkoutAttempt(bookingId, "txn-co-3", CheckoutAttemptStatus.PENDING, "24.50");
+        when(bookingRepository.findByTransactionId("txn-co-3")).thenReturn(Optional.empty());
+        when(checkoutPaymentAttemptRepository.findByTransactionId("txn-co-3")).thenReturn(Optional.of(attempt));
+        when(processedEventRepository.insertIfAbsent(any())).thenReturn(1);
+        // Lost the race (e.g. the hold-expiry sweep already moved it to EXPIRED
+        // between the read above and this update) -- 0 rows affected.
+        when(checkoutPaymentAttemptRepository.updateStatusIfCurrent(
+                attempt.getId(), CheckoutAttemptStatus.AUTHORIZED, CheckoutAttemptStatus.PENDING)).thenReturn(0);
+
+        service.handlePaymentOutcome(event("txn-co-3", "AUTHORIZED"));
+
+        verify(bookingRepository, never()).updateStatusIfCurrent(any(), eq(BookingStatus.CHECKED_OUT), any());
+        verify(roomRepository, never()).setStatus(any(), any());
+    }
+
+    @Test
+    void handlePaymentOutcome_lateAuthorizedAfterSweepExpiry_recordsAsPayment_bookingStaysCheckedIn() {
+        UUID bookingId = UUID.randomUUID();
+        CheckoutPaymentAttempt attempt = checkoutAttempt(bookingId, "txn-co-4", CheckoutAttemptStatus.EXPIRED, "24.50");
+        when(bookingRepository.findByTransactionId("txn-co-4")).thenReturn(Optional.empty());
+        when(checkoutPaymentAttemptRepository.findByTransactionId("txn-co-4")).thenReturn(Optional.of(attempt));
+        when(processedEventRepository.insertIfAbsent(any())).thenReturn(1);
+        when(checkoutPaymentAttemptRepository.updateStatusIfCurrent(
+                attempt.getId(), CheckoutAttemptStatus.LATE_AUTHORIZED, CheckoutAttemptStatus.EXPIRED)).thenReturn(1);
+
+        service.handlePaymentOutcome(event("txn-co-4", "AUTHORIZED"));
+
+        verify(checkoutPaymentAttemptRepository).updateStatusIfCurrent(
+                attempt.getId(), CheckoutAttemptStatus.LATE_AUTHORIZED, CheckoutAttemptStatus.EXPIRED);
+        // Never a reverse transition on the booking itself -- FR-012b records the
+        // payment on the attempt only; the booking already reverted to CHECKED_IN
+        // when the sweep expired this attempt.
+        verify(bookingRepository, never()).updateStatusIfCurrent(any(), any(), any());
+    }
+
+    @Test
+    void handlePaymentOutcome_expiredAttempt_lateDeclined_isTrueNoOp() {
+        UUID bookingId = UUID.randomUUID();
+        CheckoutPaymentAttempt attempt = checkoutAttempt(bookingId, "txn-co-5", CheckoutAttemptStatus.EXPIRED, "24.50");
+        when(bookingRepository.findByTransactionId("txn-co-5")).thenReturn(Optional.empty());
+        when(checkoutPaymentAttemptRepository.findByTransactionId("txn-co-5")).thenReturn(Optional.of(attempt));
+        when(processedEventRepository.insertIfAbsent(any())).thenReturn(1);
+
+        service.handlePaymentOutcome(event("txn-co-5", "DECLINED"));
+
+        verify(checkoutPaymentAttemptRepository, never()).updateStatusIfCurrent(any(), any(), any());
+        verify(bookingRepository, never()).updateStatusIfCurrent(any(), any(), any());
+    }
+
+    @Test
+    void handlePaymentOutcome_expiredAttempt_lateFailed_isTrueNoOp() {
+        UUID bookingId = UUID.randomUUID();
+        CheckoutPaymentAttempt attempt = checkoutAttempt(bookingId, "txn-co-5f", CheckoutAttemptStatus.EXPIRED, "24.50");
+        when(bookingRepository.findByTransactionId("txn-co-5f")).thenReturn(Optional.empty());
+        when(checkoutPaymentAttemptRepository.findByTransactionId("txn-co-5f")).thenReturn(Optional.of(attempt));
+        when(processedEventRepository.insertIfAbsent(any())).thenReturn(1);
+
+        service.handlePaymentOutcome(event("txn-co-5f", "FAILED"));
+
+        verify(checkoutPaymentAttemptRepository, never()).updateStatusIfCurrent(any(), any(), any());
+    }
+
+    @Test
+    void handlePaymentOutcome_noMatchOnEitherBookingOrAttempt_throwsForRetry() {
+        when(bookingRepository.findByTransactionId("txn-co-missing")).thenReturn(Optional.empty());
+        when(checkoutPaymentAttemptRepository.findByTransactionId("txn-co-missing")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.handlePaymentOutcome(event("txn-co-missing", "AUTHORIZED")))
+                .isInstanceOf(BookingNotFoundForTransactionException.class);
+
+        verify(processedEventRepository, never()).insertIfAbsent(any());
+    }
+
+    @Test
+    void handlePaymentOutcome_checkoutAttemptDuplicateEvent_isNoOp() {
+        UUID bookingId = UUID.randomUUID();
+        CheckoutPaymentAttempt attempt = checkoutAttempt(bookingId, "txn-co-dup", CheckoutAttemptStatus.PENDING, "24.50");
+        when(bookingRepository.findByTransactionId("txn-co-dup")).thenReturn(Optional.empty());
+        when(checkoutPaymentAttemptRepository.findByTransactionId("txn-co-dup")).thenReturn(Optional.of(attempt));
+        when(processedEventRepository.insertIfAbsent(any())).thenReturn(0);
+
+        service.handlePaymentOutcome(event("txn-co-dup", "AUTHORIZED"));
+
+        verify(checkoutPaymentAttemptRepository, never()).updateStatusIfCurrent(any(), any(), any());
+    }
+
+    @Test
+    void handleCheckoutOutcome_attemptAlreadyResolved_neitherPendingNorExpired_isNoOp() {
+        UUID bookingId = UUID.randomUUID();
+        // Already AUTHORIZED (e.g. a different, later Kafka message for the same
+        // transactionId) -- status is neither PENDING nor EXPIRED, so neither
+        // branch applies.
+        CheckoutPaymentAttempt attempt = checkoutAttempt(bookingId, "txn-co-9", CheckoutAttemptStatus.AUTHORIZED, "24.50");
+        when(bookingRepository.findByTransactionId("txn-co-9")).thenReturn(Optional.empty());
+        when(checkoutPaymentAttemptRepository.findByTransactionId("txn-co-9")).thenReturn(Optional.of(attempt));
+        when(processedEventRepository.insertIfAbsent(any())).thenReturn(1);
+
+        service.handlePaymentOutcome(event("txn-co-9", "AUTHORIZED"));
+
+        verify(checkoutPaymentAttemptRepository, never()).updateStatusIfCurrent(any(), any(), any());
+        verify(bookingRepository, never()).updateStatusIfCurrent(any(), any(), any());
+    }
+
+    @Test
+    void handleCheckoutOutcome_pendingAttempt_unrecognizedOutcome_isTrueNoOp() {
+        UUID bookingId = UUID.randomUUID();
+        CheckoutPaymentAttempt attempt = checkoutAttempt(bookingId, "txn-co-6", CheckoutAttemptStatus.PENDING, "24.50");
+        when(bookingRepository.findByTransactionId("txn-co-6")).thenReturn(Optional.empty());
+        when(checkoutPaymentAttemptRepository.findByTransactionId("txn-co-6")).thenReturn(Optional.of(attempt));
+        when(processedEventRepository.insertIfAbsent(any())).thenReturn(1);
+
+        service.handlePaymentOutcome(event("txn-co-6", "PENDING"));
+
+        verify(checkoutPaymentAttemptRepository, never()).updateStatusIfCurrent(any(), any(), any());
+        verify(bookingRepository, never()).updateStatusIfCurrent(any(), any(), any());
+    }
+
+    @Test
+    void handleCheckoutOutcome_pendingAttempt_declinedRaceLost_isNoOp() {
+        UUID bookingId = UUID.randomUUID();
+        CheckoutPaymentAttempt attempt = checkoutAttempt(bookingId, "txn-co-7", CheckoutAttemptStatus.PENDING, "24.50");
+        when(bookingRepository.findByTransactionId("txn-co-7")).thenReturn(Optional.empty());
+        when(checkoutPaymentAttemptRepository.findByTransactionId("txn-co-7")).thenReturn(Optional.of(attempt));
+        when(processedEventRepository.insertIfAbsent(any())).thenReturn(1);
+        // Lost the race: the hold-expiry sweep already moved this attempt to EXPIRED
+        // between the read above and this update.
+        when(checkoutPaymentAttemptRepository.updateStatusIfCurrent(
+                attempt.getId(), CheckoutAttemptStatus.DECLINED, CheckoutAttemptStatus.PENDING)).thenReturn(0);
+
+        service.handlePaymentOutcome(event("txn-co-7", "DECLINED"));
+
+        verify(bookingRepository, never()).updateStatusIfCurrent(any(), any(), any());
+    }
+
+    @Test
+    void handleCheckoutOutcome_expiredAttempt_lateAuthorizedRaceLost_isNoOp() {
+        UUID bookingId = UUID.randomUUID();
+        CheckoutPaymentAttempt attempt = checkoutAttempt(bookingId, "txn-co-8", CheckoutAttemptStatus.EXPIRED, "24.50");
+        when(bookingRepository.findByTransactionId("txn-co-8")).thenReturn(Optional.empty());
+        when(checkoutPaymentAttemptRepository.findByTransactionId("txn-co-8")).thenReturn(Optional.of(attempt));
+        when(processedEventRepository.insertIfAbsent(any())).thenReturn(1);
+        // Lost the race: a duplicate late-AUTHORIZED delivery (different eventId,
+        // same transactionId) already resolved this attempt first.
+        when(checkoutPaymentAttemptRepository.updateStatusIfCurrent(
+                attempt.getId(), CheckoutAttemptStatus.LATE_AUTHORIZED, CheckoutAttemptStatus.EXPIRED)).thenReturn(0);
+
+        service.handlePaymentOutcome(event("txn-co-8", "AUTHORIZED"));
+
+        verify(bookingRepository, never()).updateStatusIfCurrent(any(), any(), any());
+    }
+
+    // ── addCharge / getCharges / getBalanceDue (layer 2c, US1) ──────────────────
+
+    @Test
+    void addCharge_checkedInBooking_succeeds_savesCharge() {
+        UUID bookingId = UUID.randomUUID();
+        Booking checkedIn = booking(bookingId, BookingStatus.CHECKED_IN, "txn-charge-1");
+        when(bookingRepository.findById(bookingId)).thenReturn(Optional.of(checkedIn));
+        when(chargeRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        ChargeRequest request = new ChargeRequest(ChargeType.ROOM_SERVICE, "Club sandwich", new BigDecimal("18.50"));
+
+        Charge result = service.addCharge(bookingId, request);
+
+        assertThat(result.getBookingId()).isEqualTo(bookingId);
+        assertThat(result.getType()).isEqualTo(ChargeType.ROOM_SERVICE);
+        assertThat(result.getDescription()).isEqualTo("Club sandwich");
+        assertThat(result.getAmount()).isEqualByComparingTo(new BigDecimal("18.50"));
+    }
+
+    @Test
+    void addCharge_bookingNotCheckedIn_rejected_savesNothing() {
+        UUID bookingId = UUID.randomUUID();
+        Booking confirmed = booking(bookingId, BookingStatus.CONFIRMED, "txn-charge-2");
+        when(bookingRepository.findById(bookingId)).thenReturn(Optional.of(confirmed));
+        ChargeRequest request = new ChargeRequest(ChargeType.MINIBAR, "Soda", new BigDecimal("6.00"));
+
+        assertThatThrownBy(() -> service.addCharge(bookingId, request))
+                .isInstanceOf(InvalidBookingStateException.class);
+
+        verify(chargeRepository, never()).save(any());
+    }
+
+    @Test
+    void getCharges_delegatesToRepository_orderedByCreatedAt() {
+        UUID bookingId = UUID.randomUUID();
+        Charge charge = new Charge();
+        charge.setBookingId(bookingId);
+        when(chargeRepository.findByBookingIdOrderByCreatedAtAsc(bookingId)).thenReturn(List.of(charge));
+
+        assertThat(service.getCharges(bookingId)).containsExactly(charge);
+    }
+
+    @Test
+    void getBalanceDue_sumsChargesAndSubtractsPaidCheckoutAttempts() {
+        UUID bookingId = UUID.randomUUID();
+        Booking checkedIn = booking(bookingId, BookingStatus.CHECKED_IN, "txn-balance-1");
+        Charge roomService = new Charge();
+        roomService.setAmount(new BigDecimal("18.50"));
+        Charge minibar = new Charge();
+        minibar.setAmount(new BigDecimal("6.00"));
+        CheckoutPaymentAttempt paidAttempt = checkoutAttempt(bookingId, "txn-prior", CheckoutAttemptStatus.AUTHORIZED, "10.00");
+        when(chargeRepository.findByBookingIdOrderByCreatedAtAsc(bookingId)).thenReturn(List.of(roomService, minibar));
+        when(checkoutPaymentAttemptRepository.findByBookingIdInAndStatusIn(List.of(bookingId),
+                List.of(CheckoutAttemptStatus.AUTHORIZED, CheckoutAttemptStatus.LATE_AUTHORIZED)))
+                .thenReturn(List.of(paidAttempt));
+
+        BigDecimal balance = service.getBalanceDue(checkedIn);
+
+        // roomChargeAmount's two terms cancel regardless of its own value -- only
+        // charges (24.50) minus what's already been paid at checkout (10.00) survive.
+        assertThat(balance).isEqualByComparingTo(new BigDecimal("14.50"));
+    }
+
+    @Test
+    void getBalanceDue_legacyBookingWithNullRoomChargeAmount_fallsBackToNightsTimesRate() {
+        UUID bookingId = UUID.randomUUID();
+        UUID roomId = UUID.randomUUID();
+        Booking legacyBooking = booking(bookingId, BookingStatus.CHECKED_IN, "txn-legacy-1");
+        legacyBooking.setRoomId(roomId);
+        legacyBooking.setRoomChargeAmount(null); // pre-V6 data -- never had this column
+        Room room = room(roomId); // nightlyRate 100.00; booking() sets 2 nights (Nov 1 -> Nov 3)
+        when(roomRepository.findById(roomId)).thenReturn(Optional.of(room));
+        Charge minibar = new Charge();
+        minibar.setAmount(new BigDecimal("6.00"));
+        when(chargeRepository.findByBookingIdOrderByCreatedAtAsc(bookingId)).thenReturn(List.of(minibar));
+
+        BigDecimal balance = service.getBalanceDue(legacyBooking);
+
+        // The fallback (200.00, recomputed from the room's current rate) cancels out
+        // of the formula exactly the same as a persisted roomChargeAmount would --
+        // only the 6.00 charge (nothing paid yet) survives.
+        assertThat(balance).isEqualByComparingTo(new BigDecimal("6.00"));
+        verify(roomRepository).findById(roomId);
+    }
+
+    @Test
+    void getBalanceDue_legacyBookingWithNullRoomChargeAmount_roomDeleted_throwsRoomNotFound() {
+        UUID bookingId = UUID.randomUUID();
+        UUID roomId = UUID.randomUUID();
+        Booking legacyBooking = booking(bookingId, BookingStatus.CHECKED_IN, "txn-legacy-2");
+        legacyBooking.setRoomId(roomId);
+        legacyBooking.setRoomChargeAmount(null);
+        when(roomRepository.findById(roomId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.getBalanceDue(legacyBooking)).isInstanceOf(RoomNotFoundException.class);
+    }
+
     @Test
     void initiatePayment_roomNoLongerExists_throwsRoomNotFound() {
         UUID roomId = UUID.randomUUID();
@@ -395,7 +727,7 @@ class BookingServiceTest {
         when(bookingRepository.updateStatusIfCurrent(bookingId, BookingStatus.CHECKED_OUT, BookingStatus.CHECKED_IN))
                 .thenReturn(1);
 
-        Booking result = service.checkOut(bookingId);
+        Booking result = service.checkOut(bookingId, null);
 
         assertThat(result.getStatus()).isEqualTo(BookingStatus.CHECKED_OUT);
         verify(roomRepository).setStatus(roomId, RoomStatus.DIRTY);
@@ -407,7 +739,7 @@ class BookingServiceTest {
         Booking confirmed = booking(bookingId, BookingStatus.CONFIRMED, "txn-co-2");
         when(bookingRepository.findById(bookingId)).thenReturn(Optional.of(confirmed));
 
-        assertThatThrownBy(() -> service.checkOut(bookingId)).isInstanceOf(InvalidBookingStateException.class);
+        assertThatThrownBy(() -> service.checkOut(bookingId, null)).isInstanceOf(InvalidBookingStateException.class);
 
         verify(roomRepository, never()).setStatus(any(), any());
     }
@@ -420,9 +752,50 @@ class BookingServiceTest {
         when(bookingRepository.updateStatusIfCurrent(bookingId, BookingStatus.CHECKED_OUT, BookingStatus.CHECKED_IN))
                 .thenReturn(0);
 
-        assertThatThrownBy(() -> service.checkOut(bookingId)).isInstanceOf(InvalidBookingStateException.class);
+        assertThatThrownBy(() -> service.checkOut(bookingId, null)).isInstanceOf(InvalidBookingStateException.class);
 
         verify(roomRepository, never()).setStatus(any(), any());
+    }
+
+    // ── checkOut with a balance due (layer 2c, US3/US4) ─────────────────────────
+    // The success path (gRPC actually called) lives in BookingServiceCheckOutTest,
+    // which uses a real in-process gRPC server -- withDeadlineAfter is final on
+    // grpc-java's AbstractStub, so a bare Mockito mock NPEs on it (same reason
+    // BookingServiceInitiatePaymentTest exists for initiatePayment). Only the
+    // branches that return *before* reaching the gRPC call belong here.
+
+    @Test
+    void checkOut_balanceDue_noCard_throws400_beforeAnyAttemptCreated() {
+        UUID bookingId = UUID.randomUUID();
+        Booking checkedIn = booking(bookingId, BookingStatus.CHECKED_IN, "txn-bal-1");
+        when(bookingRepository.findById(bookingId)).thenReturn(Optional.of(checkedIn));
+        Charge charge = new Charge();
+        charge.setAmount(new BigDecimal("24.50"));
+        when(chargeRepository.findByBookingIdOrderByCreatedAtAsc(bookingId)).thenReturn(List.of(charge));
+
+        assertThatThrownBy(() -> service.checkOut(bookingId, null)).isInstanceOf(CardRequiredException.class);
+
+        verify(checkoutPaymentAttemptRepository, never()).save(any());
+        verify(bookingRepository, never()).updateStatusIfCurrent(any(), eq(BookingStatus.CHECKOUT_PENDING), any());
+    }
+
+    @Test
+    void checkOut_balanceDue_secondAttemptAlreadyInFlight_rejectedWith409_noNewAttemptCreated() {
+        UUID bookingId = UUID.randomUUID();
+        Booking checkedIn = booking(bookingId, BookingStatus.CHECKED_IN, "txn-bal-2");
+        Charge charge = new Charge();
+        charge.setAmount(new BigDecimal("24.50"));
+        when(bookingRepository.findById(bookingId)).thenReturn(Optional.of(checkedIn));
+        when(chargeRepository.findByBookingIdOrderByCreatedAtAsc(bookingId)).thenReturn(List.of(charge));
+        // Lost the race: a concurrent checkOut call already moved the booking to
+        // CHECKOUT_PENDING between this read and the conditional update (FR-009).
+        when(bookingRepository.updateStatusIfCurrent(bookingId, BookingStatus.CHECKOUT_PENDING, BookingStatus.CHECKED_IN))
+                .thenReturn(0);
+        BookingRequest.CardDetails card = new BookingRequest.CardDetails("4111111111111111", "12/30", "123", "Jane");
+
+        assertThatThrownBy(() -> service.checkOut(bookingId, card)).isInstanceOf(InvalidBookingStateException.class);
+
+        verify(checkoutPaymentAttemptRepository, never()).save(any());
     }
 
     @Test
@@ -435,5 +808,33 @@ class BookingServiceTest {
 
         assertThat(booking.getStatus()).isEqualTo(BookingStatus.HELD);
         verify(bookingRepository, never()).save(booking);
+    }
+
+    // ── expireCheckoutAttempt (layer 2c, FR-012a — HoldExpiryService's sweep) ───
+
+    @Test
+    void expireCheckoutAttempt_pendingAttempt_setsExpiredAndRevertsBookingToCheckedIn() {
+        UUID bookingId = UUID.randomUUID();
+        CheckoutPaymentAttempt attempt = checkoutAttempt(bookingId, "txn-sweep-1", CheckoutAttemptStatus.PENDING, "24.50");
+        when(checkoutPaymentAttemptRepository.updateStatusIfCurrent(
+                attempt.getId(), CheckoutAttemptStatus.EXPIRED, CheckoutAttemptStatus.PENDING)).thenReturn(1);
+
+        service.expireCheckoutAttempt(attempt);
+
+        verify(bookingRepository).updateStatusIfCurrent(bookingId, BookingStatus.CHECKED_IN, BookingStatus.CHECKOUT_PENDING);
+    }
+
+    @Test
+    void expireCheckoutAttempt_raceLost_alreadyResolved_isNoOp() {
+        UUID bookingId = UUID.randomUUID();
+        CheckoutPaymentAttempt attempt = checkoutAttempt(bookingId, "txn-sweep-2", CheckoutAttemptStatus.PENDING, "24.50");
+        // Lost the race: a late outcome already resolved this attempt (AUTHORIZED/
+        // DECLINED/FAILED) between the sweep's own query and this update.
+        when(checkoutPaymentAttemptRepository.updateStatusIfCurrent(
+                attempt.getId(), CheckoutAttemptStatus.EXPIRED, CheckoutAttemptStatus.PENDING)).thenReturn(0);
+
+        service.expireCheckoutAttempt(attempt);
+
+        verify(bookingRepository, never()).updateStatusIfCurrent(any(), any(), any());
     }
 }

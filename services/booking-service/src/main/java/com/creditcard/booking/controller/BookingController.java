@@ -3,7 +3,11 @@ package com.creditcard.booking.controller;
 import com.creditcard.booking.controller.dto.BookingCreatedResponse;
 import com.creditcard.booking.controller.dto.BookingDetailResponse;
 import com.creditcard.booking.controller.dto.BookingRequest;
+import com.creditcard.booking.controller.dto.ChargeRequest;
+import com.creditcard.booking.controller.dto.ChargeResponse;
+import com.creditcard.booking.controller.dto.CheckOutRequest;
 import com.creditcard.booking.domain.Booking;
+import com.creditcard.booking.domain.Charge;
 import com.creditcard.booking.service.BookingService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -15,7 +19,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.math.BigDecimal;
 import java.util.List;
 import java.util.UUID;
 
@@ -50,16 +53,36 @@ public class BookingController {
         return toDetailResponse(bookingService.checkIn(id));
     }
 
-    /** FR-007/FR-008/FR-009 (layer 2b), front-desk only (enforced at the gateway). */
+    /**
+     * FR-007/FR-008/FR-009 (layer 2b, extended by layer 2c). {@code request} is
+     * entirely optional — no body, or {@code {}}, is valid for a zero-balance
+     * checkout (contracts/api.md); whether a card is actually required is a
+     * business-logic decision made in BookingService, not bean validation here.
+     */
     @PostMapping("/{id}/check-out")
-    public BookingDetailResponse checkOut(@PathVariable UUID id) {
-        return toDetailResponse(bookingService.checkOut(id));
+    public BookingDetailResponse checkOut(@PathVariable UUID id,
+                                           @Valid @RequestBody(required = false) CheckOutRequest request) {
+        BookingRequest.CardDetails card = request != null ? request.card() : null;
+        return toDetailResponse(bookingService.checkOut(id, card));
     }
 
-    // Placeholder charges/balanceDue (always empty/zero) until US1 (Phase 3) wires in
-    // BookingService's real charge lookup and balance calculation -- kept here only so
-    // BookingDetailResponse's Phase 2 schema change compiles.
+    /** FR-001/FR-002 (layer 2c), front-desk only (enforced at the gateway). */
+    @PostMapping("/{id}/charges")
+    @ResponseStatus(HttpStatus.CREATED)
+    public ChargeResponse addCharge(@PathVariable UUID id, @Valid @RequestBody ChargeRequest request) {
+        return toChargeResponse(bookingService.addCharge(id, request));
+    }
+
+    /** FR-003 (layer 2c), front-desk or housekeeping (enforced at the gateway). */
+    @GetMapping("/{id}/charges")
+    public List<ChargeResponse> getCharges(@PathVariable UUID id) {
+        return bookingService.getCharges(id).stream().map(this::toChargeResponse).toList();
+    }
+
     private BookingDetailResponse toDetailResponse(Booking booking) {
+        List<ChargeResponse> charges = bookingService.getCharges(booking.getId()).stream()
+                .map(this::toChargeResponse)
+                .toList();
         return new BookingDetailResponse(
                 booking.getId(),
                 booking.getRoomId(),
@@ -69,7 +92,12 @@ public class BookingController {
                 booking.getStatus(),
                 booking.getCancellationReason(),
                 booking.getTransactionId(),
-                List.of(),
-                BigDecimal.ZERO);
+                charges,
+                bookingService.getBalanceDue(booking));
+    }
+
+    private ChargeResponse toChargeResponse(Charge charge) {
+        return new ChargeResponse(charge.getId(), charge.getType(), charge.getDescription(),
+                charge.getAmount(), charge.getCreatedAt());
     }
 }

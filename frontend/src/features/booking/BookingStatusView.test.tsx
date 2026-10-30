@@ -91,6 +91,27 @@ test('polls until CANCELLED, then stops, same as CONFIRMED', async () => {
   expect(callCount).toBe(2);
 });
 
+test('polls while CHECKOUT_PENDING, then stops once CHECKED_OUT (layer 2c)', async () => {
+  let callCount = 0;
+  server.use(
+    http.get('*/api/v1/bookings/b1', () => {
+      callCount += 1;
+      return HttpResponse.json(booking(callCount >= 2 ? 'CHECKED_OUT' : 'CHECKOUT_PENDING'));
+    }),
+  );
+  renderView();
+
+  expect(await screen.findByText(/checking out/i)).toBeInTheDocument();
+  expect(callCount).toBe(1);
+
+  await act(() => vi.advanceTimersByTimeAsync(10_000));
+  expect(await screen.findByText('Checked out')).toBeInTheDocument();
+  expect(callCount).toBe(2);
+
+  await act(() => vi.advanceTimersByTimeAsync(10_000));
+  expect(callCount).toBe(2);
+});
+
 test('a 503/unreachable backend shows RetryBanner', async () => {
   server.use(http.get('*/api/v1/bookings/b1', () => HttpResponse.json({ error: 'unavailable' }, { status: 503 })));
   renderView();
