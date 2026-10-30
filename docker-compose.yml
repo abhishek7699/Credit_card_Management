@@ -90,6 +90,19 @@ services:
       timeout: 3s
       retries: 5
 
+  # Dev-only JWT issuer for the staff frontend (layer 2d) — NOT a real identity
+  # provider, see SECURITY.md. Separate from scripts/e2e-test.sh's own ephemeral
+  # auth-mock container: that script force-recreates/removes any container named
+  # auth-service regardless of this one, so the two don't conflict.
+  auth-mock:
+    image: python:3.11-slim
+    container_name: auth-service
+    command: ["sh", "-c", "pip install --quiet --disable-pip-version-check --root-user-action=ignore cryptography && python3 /app/dev-auth-mock.py"]
+    volumes:
+      - ./scripts/dev-auth-mock.py:/app/dev-auth-mock.py:ro
+    ports:
+      - "9000:9000"
+
   # ── Microservices ─────────────────────────────────────────────────────────
 
   transaction-service:
