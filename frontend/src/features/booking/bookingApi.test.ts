@@ -70,3 +70,27 @@ test('checkIn posts to /api/v1/bookings/{id}/check-in', async () => {
   expect(receivedMethod).toBe('POST');
   expect(result.status).toBe('CHECKED_IN');
 });
+
+test('checkOut posts to /api/v1/bookings/{id}/check-out', async () => {
+  let receivedMethod = '';
+  server.use(
+    http.post('*/api/v1/bookings/b1/check-out', ({ request }) => {
+      receivedMethod = request.method;
+      return HttpResponse.json({
+        bookingId: 'b1',
+        roomId: 'room-1',
+        guestName: 'Jane Doe',
+        checkIn: '2026-12-01',
+        checkOut: '2026-12-03',
+        status: 'CHECKED_OUT',
+        cancellationReason: null,
+        transactionId: 'txn-1',
+      });
+    }),
+  );
+
+  const result = await store.dispatch(bookingApi.endpoints.checkOut.initiate('b1')).unwrap();
+
+  expect(receivedMethod).toBe('POST');
+  expect(result.status).toBe('CHECKED_OUT');
+});

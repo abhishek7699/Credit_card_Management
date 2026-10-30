@@ -293,7 +293,7 @@ different session — check it out, confirm the room becomes dirty with no payme
 - [X] T044 [P] [US4] `services/booking-service/.../service/RoomServiceTest.java`
       (extended): `getBoard()` populates `currentBookingId` for an `OCCUPIED` room
       (the same `CHECKED_IN` booking already backing `guestName`), `null` otherwise
-- [ ] T045 [P] [US4] `frontend/src/features/room-board/RoomActionPanel.test.tsx`
+- [X] T045 [P] [US4] `frontend/src/features/room-board/RoomActionPanel.test.tsx`
       (extended, MSW): an `OCCUPIED` room offers check-out for Front Desk, calling
       `POST /api/v1/bookings/{currentBookingId}/check-out`, with no payment-related
       element rendered anywhere in that flow; offers nothing for Housekeeping
@@ -306,9 +306,9 @@ different session — check it out, confirm the room becomes dirty with no payme
       sets `currentBookingId` from the existing `occupantByRoomId` map's entry (the
       booking id was already loaded for `guestName`/`checkIn`/`checkOut` — just also
       expose it) (depends on T046)
-- [ ] T048 [US4] `frontend/src/features/booking/bookingApi.ts`: add `checkOut(bookingId)`
+- [X] T048 [US4] `frontend/src/features/booking/bookingApi.ts`: add `checkOut(bookingId)`
       mutation (`POST /api/v1/bookings/{id}/check-out`) (depends on T031)
-- [ ] T049 [US4] `frontend/src/features/room-board/RoomActionPanel.tsx`: for an
+- [X] T049 [US4] `frontend/src/features/room-board/RoomActionPanel.tsx`: for an
       `OCCUPIED` room, Front Desk gets a check-out action calling T048, rendering no
       payment/charge/balance element (depends on T034, T048)
 

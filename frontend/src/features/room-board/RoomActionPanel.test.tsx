@@ -53,6 +53,38 @@ test('a room with an arriving-today booking offers nothing for Housekeeping', ()
   expect(screen.getByText(/no action available/i)).toBeInTheDocument();
 });
 
+test('an OCCUPIED room offers check-out for Front Desk', () => {
+  renderPanel(
+    entry({ status: 'OCCUPIED', currentBookingId: 'b-current', guestName: 'Jane Doe' }),
+    'FRONT_DESK',
+  );
+  expect(screen.getByText(/jane doe is currently occupying/i)).toBeInTheDocument();
+});
+
+test('an OCCUPIED room offers nothing for Housekeeping', () => {
+  renderPanel(
+    entry({ status: 'OCCUPIED', currentBookingId: 'b-current', guestName: 'Jane Doe' }),
+    'HOUSEKEEPING',
+  );
+  expect(screen.queryByText(/currently occupying/i)).not.toBeInTheDocument();
+  expect(screen.getByText(/no action available/i)).toBeInTheDocument();
+});
+
+test('an OCCUPIED room with a same-day arrival still offers check-out, not check-in (check-in cannot succeed yet)', () => {
+  renderPanel(
+    entry({
+      status: 'OCCUPIED',
+      currentBookingId: 'b-current',
+      guestName: 'Jane Doe',
+      arrivingBookingId: 'b-arriving',
+      arrivingGuestName: 'John Smith',
+    }),
+    'FRONT_DESK',
+  );
+  expect(screen.getByText(/jane doe is currently occupying/i)).toBeInTheDocument();
+  expect(screen.queryByText(/john smith is arriving today/i)).not.toBeInTheDocument();
+});
+
 test('renders the room number and calls onClose from the close button', async () => {
   const onClose = vi.fn();
   renderPanel(entry({ roomNumber: '305' }), 'HOUSEKEEPING', onClose);

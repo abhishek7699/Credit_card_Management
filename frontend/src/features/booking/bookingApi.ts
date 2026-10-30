@@ -30,10 +30,13 @@ export const bookingApi = api.injectEndpoints({
     checkIn: build.mutation<Booking, string>({
       query: (bookingId) => ({ url: `/api/v1/bookings/${bookingId}/check-in`, method: 'POST' }),
     }),
+    checkOut: build.mutation<Booking, string>({
+      query: (bookingId) => ({ url: `/api/v1/bookings/${bookingId}/check-out`, method: 'POST' }),
+    }),
   }),
 });
 
-export const { useCreateBookingMutation, useCheckInMutation } = bookingApi;
+export const { useCreateBookingMutation, useCheckInMutation, useCheckOutMutation } = bookingApi;
 
 const { useGetBookingQuery: useGetBookingQueryBase } = bookingApi;
 
