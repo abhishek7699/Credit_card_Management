@@ -55,7 +55,8 @@ dependencies {
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
     testImplementation 'org.springframework.kafka:spring-kafka-test'
     testImplementation "io.grpc:grpc-testing:${grpcVersion}"
-    testImplementation "org.testcontainers:testcontainers-postgresql:${testcontainersVersion}"
+    // Plain GenericContainer (CockroachTestContainer) -- no testcontainers-cockroachdb
+    // module exists on this 2.x line, see that class's Javadoc.
     testImplementation "org.testcontainers:testcontainers:${testcontainersVersion}"
     testImplementation "org.testcontainers:testcontainers-junit-jupiter:${testcontainersVersion}"
     testImplementation 'org.mockito:mockito-core'

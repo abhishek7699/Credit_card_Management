@@ -16,9 +16,10 @@ import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import com.creditcard.booking.integration.support.CockroachTestContainer;
+import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.postgresql.PostgreSQLContainer;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -40,13 +41,13 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class CheckInFlowIT {
 
     @Container
-    static PostgreSQLContainer postgres = new PostgreSQLContainer("postgres:15-alpine");
+    static GenericContainer<?> cockroach = CockroachTestContainer.newContainer();
 
     @DynamicPropertySource
-    static void postgresProps(DynamicPropertyRegistry registry) {
-        registry.add("spring.datasource.url", postgres::getJdbcUrl);
-        registry.add("spring.datasource.username", postgres::getUsername);
-        registry.add("spring.datasource.password", postgres::getPassword);
+    static void cockroachProps(DynamicPropertyRegistry registry) {
+        registry.add("spring.datasource.url", () -> CockroachTestContainer.jdbcUrl(cockroach));
+        registry.add("spring.datasource.username", () -> "root");
+        registry.add("spring.datasource.password", () -> "");
     }
 
     @Autowired

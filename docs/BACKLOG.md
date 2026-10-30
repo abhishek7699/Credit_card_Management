@@ -46,6 +46,21 @@ These were named up front as out of scope for every layer until explicitly start
 - **No pagination on `GET /api/v1/rooms`**: fine at the current 14-room seed
   size; would need it before room inventory grows meaningfully.
 
+## Carried from the room-board (layer 2b) work
+
+- **The other 7 services' integration tests still use a generic Postgres
+  Testcontainer, not CockroachDB**: `booking-service`'s own integration tests were
+  switched to a CockroachDB Testcontainer (`CockroachTestContainer`, a plain
+  `GenericContainer` on the exact image docker-compose uses — no official
+  `testcontainers-cockroachdb` module exists on this project's Testcontainers 2.x
+  line) after a real CockroachDB-specific schema bug (a bare `INT` column defaulting
+  to 8-byte `INT8`, which plain Postgres's 4-byte `INT` never would have surfaced)
+  only showed up on a live docker-compose run, not in any test. The same class of
+  bug is equally possible in any of the other 7 services, whose integration tests
+  still run against generic Postgres containers. Not fixed here — flagging the
+  pattern (and the new `booking-service`-local `CockroachTestContainer` helper as a
+  starting point) for whoever picks this up for the rest of the platform.
+
 ## Discovered while building the room board (layer 2b)
 
 - **`MAINTENANCE` doesn't check for future `CONFIRMED` bookings**: `PATCH
