@@ -238,10 +238,15 @@ occupied with the guest's name (spec.md Story 3).
 
 ### Tests for User Story 3 ⚠️
 
-- [ ] T036 [P] [US3] `services/booking-service/src/test/java/com/creditcard/booking/repository/BookingRepositoryTest.java`
+- [X] T036 [P] [US3] `services/booking-service/src/test/java/com/creditcard/booking/repository/BookingRepositoryTest.java`
       (extended, or integration-level per existing convention): `findByStatusAndCheckIn`
       returns only `CONFIRMED` bookings whose `checkIn` matches the given date
-- [ ] T037 [P] [US3] `services/booking-service/.../service/RoomServiceTest.java`
+      — done as an integration test (real CockroachDB) in `RoomStatusFlowIT.java`
+      instead, per this task's own stated flexibility; also caught a real bug this
+      way — Spring Data's method-name parser read "...CheckIn" as property "check" +
+      the reserved `In` keyword, not the literal `checkIn` field, failing with
+      `PropertyReferenceException`. Fixed with an explicit `@Query`.
+- [X] T037 [P] [US3] `services/booking-service/.../service/RoomServiceTest.java`
       (extended): `getBoard()` populates `arrivingBookingId`/`arrivingGuestName` only
       for a room with a `CONFIRMED` booking checking in today; leaves both `null`
       otherwise, including for a `CONFIRMED` booking arriving on a *different* date
@@ -253,11 +258,11 @@ occupied with the guest's name (spec.md Story 3).
 
 ### Implementation for User Story 3
 
-- [ ] T039 [US3] `services/booking-service/.../repository/BookingRepository.java`: add
+- [X] T039 [US3] `services/booking-service/.../repository/BookingRepository.java`: add
       `findByStatusAndCheckIn(BookingStatus status, LocalDate checkIn)`
-- [ ] T040 [US3] `services/booking-service/.../controller/dto/RoomBoardResponse.java`:
+- [X] T040 [US3] `services/booking-service/.../controller/dto/RoomBoardResponse.java`:
       add `arrivingBookingId`, `arrivingGuestName` fields to `RoomBoardEntry` (depends on T039)
-- [ ] T041 [US3] `services/booking-service/.../service/RoomService.java`: `getBoard()`
+- [X] T041 [US3] `services/booking-service/.../service/RoomService.java`: `getBoard()`
       builds an `arrivingByRoomId` map from T039 (keyed by `roomId`, queried with
       `LocalDate.now()`) and populates the two new fields independently of the
       existing occupant map (depends on T039, T040)
@@ -285,7 +290,7 @@ different session — check it out, confirm the room becomes dirty with no payme
 
 ### Tests for User Story 4 ⚠️
 
-- [ ] T044 [P] [US4] `services/booking-service/.../service/RoomServiceTest.java`
+- [X] T044 [P] [US4] `services/booking-service/.../service/RoomServiceTest.java`
       (extended): `getBoard()` populates `currentBookingId` for an `OCCUPIED` room
       (the same `CHECKED_IN` booking already backing `guestName`), `null` otherwise
 - [ ] T045 [P] [US4] `frontend/src/features/room-board/RoomActionPanel.test.tsx`
@@ -295,9 +300,9 @@ different session — check it out, confirm the room becomes dirty with no payme
 
 ### Implementation for User Story 4
 
-- [ ] T046 [US4] `services/booking-service/.../controller/dto/RoomBoardResponse.java`:
+- [X] T046 [US4] `services/booking-service/.../controller/dto/RoomBoardResponse.java`:
       add `currentBookingId` to `RoomBoardEntry` (depends on T040)
-- [ ] T047 [US4] `services/booking-service/.../service/RoomService.java`: `getBoard()`
+- [X] T047 [US4] `services/booking-service/.../service/RoomService.java`: `getBoard()`
       sets `currentBookingId` from the existing `occupantByRoomId` map's entry (the
       booking id was already loaded for `guestName`/`checkIn`/`checkOut` — just also
       expose it) (depends on T046)

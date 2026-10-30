@@ -85,10 +85,13 @@ class RoomControllerTest {
 
     @Test
     void board_returnsRoomsGroupedByFloor() throws Exception {
+        UUID currentBookingId = UUID.randomUUID();
+        UUID arrivingBookingId = UUID.randomUUID();
         RoomBoardEntry occupied = new RoomBoardEntry(UUID.randomUUID(), "101", 1, RoomStatus.OCCUPIED,
-                "Jane Doe", LocalDate.of(2026, 12, 1), LocalDate.of(2026, 12, 3));
+                "Jane Doe", LocalDate.of(2026, 12, 1), LocalDate.of(2026, 12, 3),
+                currentBookingId, null, null);
         RoomBoardEntry vacant = new RoomBoardEntry(UUID.randomUUID(), "102", 2, RoomStatus.VACANT_CLEAN,
-                null, null, null);
+                null, null, null, null, arrivingBookingId, "John Smith");
         when(roomService.getBoard()).thenReturn(List.of(new RoomBoardResponse(1, List.of(occupied, vacant))));
 
         mockMvc.perform(get("/api/v1/rooms/board"))
@@ -96,8 +99,13 @@ class RoomControllerTest {
                 .andExpect(jsonPath("$[0].floor").value(1))
                 .andExpect(jsonPath("$[0].rooms[0].status").value("OCCUPIED"))
                 .andExpect(jsonPath("$[0].rooms[0].guestName").value("Jane Doe"))
+                .andExpect(jsonPath("$[0].rooms[0].currentBookingId").value(currentBookingId.toString()))
+                .andExpect(jsonPath("$[0].rooms[0].arrivingBookingId").value(nullValue()))
                 .andExpect(jsonPath("$[0].rooms[1].status").value("VACANT_CLEAN"))
-                .andExpect(jsonPath("$[0].rooms[1].guestName").value(nullValue()));
+                .andExpect(jsonPath("$[0].rooms[1].guestName").value(nullValue()))
+                .andExpect(jsonPath("$[0].rooms[1].currentBookingId").value(nullValue()))
+                .andExpect(jsonPath("$[0].rooms[1].arrivingBookingId").value(arrivingBookingId.toString()))
+                .andExpect(jsonPath("$[0].rooms[1].arrivingGuestName").value("John Smith"));
     }
 
     @Test

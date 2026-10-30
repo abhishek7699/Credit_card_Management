@@ -13,6 +13,7 @@ import com.creditcard.booking.repository.RoomRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -80,13 +81,18 @@ public class RoomService {
 
     /**
      * FR-012/FR-013: every room, grouped by floor and ordered by position, with the
-     * current guest's name/dates present only when OCCUPIED. Two queries, joined in
+     * current guest's name/dates present only when OCCUPIED. Three queries, joined in
      * memory by roomId (research.md §3) — at most one CHECKED_IN booking can exist per
-     * room at a time, by construction.
+     * room at a time, by construction. The arriving-today map (frontend-mvp layer,
+     * specs/010-frontend-mvp) lets any staff session check in or check out a room
+     * directly from the board, not only one it personally created or saw earlier.
      */
     public List<RoomBoardResponse> getBoard() {
         List<Room> rooms = roomRepository.findAllByOrderByFloorAscPositionAsc();
         Map<UUID, Booking> occupantByRoomId = bookingRepository.findByStatus(BookingStatus.CHECKED_IN).stream()
+                .collect(Collectors.toMap(Booking::getRoomId, Function.identity()));
+        Map<UUID, Booking> arrivingByRoomId = bookingRepository
+                .findByStatusAndCheckIn(BookingStatus.CONFIRMED, LocalDate.now()).stream()
                 .collect(Collectors.toMap(Booking::getRoomId, Function.identity()));
 
         List<RoomBoardResponse> board = new ArrayList<>();
@@ -98,12 +104,12 @@ public class RoomService {
                 currentFloorRooms = new ArrayList<>();
                 board.add(new RoomBoardResponse(currentFloor, currentFloorRooms));
             }
-            currentFloorRooms.add(toEntry(room, occupantByRoomId.get(room.getId())));
+            currentFloorRooms.add(toEntry(room, occupantByRoomId.get(room.getId()), arrivingByRoomId.get(room.getId())));
         }
         return board;
     }
 
-    private static RoomBoardEntry toEntry(Room room, Booking occupant) {
+    private static RoomBoardEntry toEntry(Room room, Booking occupant, Booking arriving) {
         return new RoomBoardEntry(
                 room.getId(),
                 room.getRoomNumber(),
@@ -111,6 +117,9 @@ public class RoomService {
                 room.getStatus(),
                 occupant != null ? occupant.getGuestName() : null,
                 occupant != null ? occupant.getCheckIn() : null,
-                occupant != null ? occupant.getCheckOut() : null);
+                occupant != null ? occupant.getCheckOut() : null,
+                occupant != null ? occupant.getId() : null,
+                arriving != null ? arriving.getId() : null,
+                arriving != null ? arriving.getGuestName() : null);
     }
 }

@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -25,6 +26,20 @@ public interface BookingRepository extends JpaRepository<Booking, UUID> {
     Optional<Booking> findByRoomIdAndStatus(UUID roomId, BookingStatus status);
 
     List<Booking> findByStatus(BookingStatus status);
+
+    /**
+     * Used by the room board (frontend-mvp layer) to surface a room's
+     * arriving-today booking for check-in — scoped to the booking's check-in
+     * date, not its confirmation date, so a booking confirmed weeks ahead for a
+     * future stay doesn't show as actionable before its stay actually begins.
+     *
+     * <p>Explicit JPQL rather than a derived method name: Spring Data's method-name
+     * parser reads a trailing "...CheckIn" as the property "check" followed by the
+     * reserved {@code In} (collection) keyword — not the literal {@code checkIn}
+     * field — and fails with a PropertyReferenceException on "check" not existing.
+     */
+    @Query("SELECT b FROM Booking b WHERE b.status = :status AND b.checkIn = :checkIn")
+    List<Booking> findByStatusAndCheckIn(@Param("status") BookingStatus status, @Param("checkIn") LocalDate checkIn);
 
     /**
      * Concurrency-safe state transition (research.md §2, layer 2b): the WHERE clause's

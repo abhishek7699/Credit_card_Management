@@ -58,11 +58,23 @@ class RoomServiceTest {
 
     private static Booking checkedInBooking(UUID roomId) {
         Booking booking = new Booking();
+        ReflectionTestUtils.setField(booking, "id", UUID.randomUUID());
         booking.setRoomId(roomId);
         booking.setGuestName("Jane Doe");
         booking.setCheckIn(LocalDate.of(2026, 12, 1));
         booking.setCheckOut(LocalDate.of(2026, 12, 3));
         booking.setStatus(BookingStatus.CHECKED_IN);
+        return booking;
+    }
+
+    private static Booking arrivingTodayBooking(UUID roomId) {
+        Booking booking = new Booking();
+        ReflectionTestUtils.setField(booking, "id", UUID.randomUUID());
+        booking.setRoomId(roomId);
+        booking.setGuestName("John Smith");
+        booking.setCheckIn(LocalDate.now());
+        booking.setCheckOut(LocalDate.now().plusDays(2));
+        booking.setStatus(BookingStatus.CONFIRMED);
         return booking;
     }
 
@@ -72,10 +84,13 @@ class RoomServiceTest {
         Room floor1Pos1 = room(UUID.randomUUID(), "101", 1, 1, RoomStatus.VACANT_CLEAN);
         Room floor1Pos2 = room(occupiedRoomId, "102", 1, 2, RoomStatus.OCCUPIED);
         Room floor2Pos1 = room(UUID.randomUUID(), "201", 2, 1, RoomStatus.DIRTY);
+        Booking occupant = checkedInBooking(occupiedRoomId);
         when(roomRepository.findAllByOrderByFloorAscPositionAsc())
                 .thenReturn(List.of(floor1Pos1, floor1Pos2, floor2Pos1));
         when(bookingRepository.findByStatus(BookingStatus.CHECKED_IN))
-                .thenReturn(List.of(checkedInBooking(occupiedRoomId)));
+                .thenReturn(List.of(occupant));
+        when(bookingRepository.findByStatusAndCheckIn(BookingStatus.CONFIRMED, LocalDate.now()))
+                .thenReturn(List.of());
 
         List<RoomBoardResponse> board = service.getBoard();
 
@@ -84,11 +99,13 @@ class RoomServiceTest {
         assertThat(board.get(0).rooms()).hasSize(2);
         assertThat(board.get(0).rooms().get(0).roomNumber()).isEqualTo("101");
         assertThat(board.get(0).rooms().get(0).guestName()).isNull();
+        assertThat(board.get(0).rooms().get(0).currentBookingId()).isNull();
         assertThat(board.get(0).rooms().get(1).roomNumber()).isEqualTo("102");
         assertThat(board.get(0).rooms().get(1).status()).isEqualTo(RoomStatus.OCCUPIED);
         assertThat(board.get(0).rooms().get(1).guestName()).isEqualTo("Jane Doe");
         assertThat(board.get(0).rooms().get(1).checkIn()).isEqualTo(LocalDate.of(2026, 12, 1));
         assertThat(board.get(0).rooms().get(1).checkOut()).isEqualTo(LocalDate.of(2026, 12, 3));
+        assertThat(board.get(0).rooms().get(1).currentBookingId()).isEqualTo(occupant.getId());
 
         assertThat(board.get(1).floor()).isEqualTo(2);
         assertThat(board.get(1).rooms()).hasSize(1);
@@ -100,8 +117,52 @@ class RoomServiceTest {
     void getBoard_noRooms_returnsEmptyBoard() {
         when(roomRepository.findAllByOrderByFloorAscPositionAsc()).thenReturn(List.of());
         when(bookingRepository.findByStatus(BookingStatus.CHECKED_IN)).thenReturn(List.of());
+        when(bookingRepository.findByStatusAndCheckIn(BookingStatus.CONFIRMED, LocalDate.now()))
+                .thenReturn(List.of());
 
         assertThat(service.getBoard()).isEmpty();
+    }
+
+    @Test
+    void getBoard_roomWithConfirmedBookingArrivingToday_populatesArrivingFields() {
+        UUID roomId = UUID.randomUUID();
+        Room vacantRoom = room(roomId, "101", 1, 1, RoomStatus.VACANT_CLEAN);
+        Booking arriving = arrivingTodayBooking(roomId);
+        when(roomRepository.findAllByOrderByFloorAscPositionAsc()).thenReturn(List.of(vacantRoom));
+        when(bookingRepository.findByStatus(BookingStatus.CHECKED_IN)).thenReturn(List.of());
+        when(bookingRepository.findByStatusAndCheckIn(BookingStatus.CONFIRMED, LocalDate.now()))
+                .thenReturn(List.of(arriving));
+
+        List<RoomBoardResponse> board = service.getBoard();
+
+        var entry = board.get(0).rooms().get(0);
+        assertThat(entry.arrivingBookingId()).isEqualTo(arriving.getId());
+        assertThat(entry.arrivingGuestName()).isEqualTo("John Smith");
+        // Independent of the occupant fields — this room isn't occupied at all.
+        assertThat(entry.guestName()).isNull();
+        assertThat(entry.currentBookingId()).isNull();
+    }
+
+    @Test
+    void getBoard_occupiedRoomWithDifferentGuestArrivingToday_populatesBothIndependently() {
+        // Same-day turnover: one guest still occupying, a different guest's
+        // booking arriving later today — both must be populated at once.
+        UUID roomId = UUID.randomUUID();
+        Room occupiedRoom = room(roomId, "101", 1, 1, RoomStatus.OCCUPIED);
+        Booking occupant = checkedInBooking(roomId);
+        Booking arriving = arrivingTodayBooking(roomId);
+        when(roomRepository.findAllByOrderByFloorAscPositionAsc()).thenReturn(List.of(occupiedRoom));
+        when(bookingRepository.findByStatus(BookingStatus.CHECKED_IN)).thenReturn(List.of(occupant));
+        when(bookingRepository.findByStatusAndCheckIn(BookingStatus.CONFIRMED, LocalDate.now()))
+                .thenReturn(List.of(arriving));
+
+        List<RoomBoardResponse> board = service.getBoard();
+
+        var entry = board.get(0).rooms().get(0);
+        assertThat(entry.currentBookingId()).isEqualTo(occupant.getId());
+        assertThat(entry.guestName()).isEqualTo("Jane Doe");
+        assertThat(entry.arrivingBookingId()).isEqualTo(arriving.getId());
+        assertThat(entry.arrivingGuestName()).isEqualTo("John Smith");
     }
 
     @Test

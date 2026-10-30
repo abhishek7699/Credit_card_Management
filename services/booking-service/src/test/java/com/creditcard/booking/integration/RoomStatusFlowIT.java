@@ -168,4 +168,62 @@ class RoomStatusFlowIT {
                         && entry.guestName() == null);
         assertThat(vacantOnBoard).isTrue();
     }
+
+    @Test
+    void getBoard_populatesCurrentAndArrivingBookingIds_fromRealQueries() {
+        // currentBookingId, from a real CHECKED_IN row (not just the mocked
+        // RoomServiceTest path) —
+        Room occupiedRoom = seedRoom(RoomStatus.VACANT_CLEAN);
+        Booking confirmedToday = new Booking();
+        confirmedToday.setRoomId(occupiedRoom.getId());
+        confirmedToday.setGuestName("Checked-In Guest");
+        confirmedToday.setCheckIn(LocalDate.now().minusDays(1));
+        confirmedToday.setCheckOut(LocalDate.now().plusDays(1));
+        confirmedToday.setStatus(BookingStatus.CONFIRMED);
+        confirmedToday.setTransactionId("txn-current-it");
+        confirmedToday = bookingRepository.save(confirmedToday);
+        Booking checkedIn = bookingService.checkIn(confirmedToday.getId());
+
+        // arrivingBookingId, from a real CONFIRMED row whose check-in date is
+        // today, against findByStatusAndCheckIn's actual derived query —
+        Room arrivingRoom = seedRoom(RoomStatus.VACANT_CLEAN);
+        Booking arrivingToday = new Booking();
+        arrivingToday.setRoomId(arrivingRoom.getId());
+        arrivingToday.setGuestName("Arriving Guest");
+        arrivingToday.setCheckIn(LocalDate.now());
+        arrivingToday.setCheckOut(LocalDate.now().plusDays(2));
+        arrivingToday.setStatus(BookingStatus.CONFIRMED);
+        arrivingToday.setTransactionId("txn-arriving-it");
+        arrivingToday = bookingRepository.save(arrivingToday);
+
+        // A CONFIRMED booking for a *future* check-in date must NOT appear as
+        // arriving — proves the query is scoped to today, not just CONFIRMED.
+        Room futureRoom = seedRoom(RoomStatus.VACANT_CLEAN);
+        Booking futureBooking = new Booking();
+        futureBooking.setRoomId(futureRoom.getId());
+        futureBooking.setGuestName("Future Guest");
+        futureBooking.setCheckIn(LocalDate.now().plusDays(5));
+        futureBooking.setCheckOut(LocalDate.now().plusDays(7));
+        futureBooking.setStatus(BookingStatus.CONFIRMED);
+        futureBooking.setTransactionId("txn-future-it");
+        bookingRepository.save(futureBooking);
+
+        var board = roomService.getBoard().stream()
+                .flatMap(floor -> floor.rooms().stream())
+                .toList();
+
+        var occupiedEntry = board.stream().filter(e -> e.roomId().equals(occupiedRoom.getId())).findFirst().orElseThrow();
+        assertThat(occupiedEntry.status()).isEqualTo(RoomStatus.OCCUPIED);
+        assertThat(occupiedEntry.currentBookingId()).isEqualTo(checkedIn.getId());
+        assertThat(occupiedEntry.arrivingBookingId()).isNull();
+
+        var arrivingEntry = board.stream().filter(e -> e.roomId().equals(arrivingRoom.getId())).findFirst().orElseThrow();
+        assertThat(arrivingEntry.arrivingBookingId()).isEqualTo(arrivingToday.getId());
+        assertThat(arrivingEntry.arrivingGuestName()).isEqualTo("Arriving Guest");
+        assertThat(arrivingEntry.currentBookingId()).isNull();
+
+        var futureEntry = board.stream().filter(e -> e.roomId().equals(futureRoom.getId())).findFirst().orElseThrow();
+        assertThat(futureEntry.arrivingBookingId()).isNull();
+        assertThat(futureEntry.arrivingGuestName()).isNull();
+    }
 }
