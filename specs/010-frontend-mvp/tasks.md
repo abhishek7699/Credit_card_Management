@@ -355,7 +355,7 @@ end to end through the UI alone.
 
 **Purpose**: The one new e2e smoke test, CI wiring, and documentation.
 
-- [ ] T054 [P] Run every scenario in `specs/010-frontend-mvp/quickstart.md` end to end
+- [X] T054 [P] Run every scenario in `specs/010-frontend-mvp/quickstart.md` end to end
 - [X] T055 `frontend/playwright.config.ts` + `frontend/e2e/staff-room-board.spec.ts`:
       sign in (Front Desk) → book a vacant room → booking reaches `CONFIRMED` → check
       it in → board shows that room `OCCUPIED` (research.md §9)
@@ -367,7 +367,7 @@ end to end through the UI alone.
 - [X] T057 [P] `README.md`: add a "Frontend" section — what `/staff` is, the exact
       commands to run it against the real backend, and a pointer to this layer in the
       Roadmap/services list
-- [ ] T058 Verify 100% coverage gates (Vitest for `frontend/`, JaCoCo for
+- [X] T058 Verify 100% coverage gates (Vitest for `frontend/`, JaCoCo for
       `booking-service`) and fix any gap
 - [X] T059 Confirm no change was needed to any other service, `k8s/`, or the owner-\*
       prototype screens — verify only

@@ -20,10 +20,25 @@ test('login, book a room, confirm, check in, board shows OCCUPIED', async ({ pag
 
   await expect(page.getByText('Room Board')).toBeVisible({ timeout: 15_000 });
 
-  const vacantRoom = page.locator('[data-status="VACANT_CLEAN"]').first();
-  await expect(vacantRoom).toBeVisible({ timeout: 15_000 });
-  const roomNumber = await vacantRoom.getAttribute('data-testid');
-  await vacantRoom.click();
+  // A VACANT_CLEAN room can still have an arriving-today booking pending
+  // check-in (that's the normal state right up until check-in happens) — a
+  // room left in that state by an earlier run offers Check In, not the
+  // booking form. Walk the vacant rooms until one actually opens the form.
+  const vacantRooms = page.locator('[data-status="VACANT_CLEAN"]');
+  const vacantCount = await vacantRooms.count();
+  let roomNumber: string | null = null;
+  for (let i = 0; i < vacantCount; i++) {
+    await vacantRooms.nth(i).click();
+    const isBookable = await page.getByLabel('Guest Name').isVisible({ timeout: 2_000 }).catch(() => false);
+    if (isBookable) {
+      roomNumber = await vacantRooms.nth(i).getAttribute('data-testid');
+      break;
+    }
+    await page.getByRole('button', { name: 'Close panel' }).click();
+  }
+  if (!roomNumber) {
+    throw new Error('No plain-bookable VACANT_CLEAN room found on the board');
+  }
 
   const today = new Date();
   const tomorrow = new Date(today);
@@ -56,9 +71,12 @@ test('login, book a room, confirm, check in, board shows OCCUPIED', async ({ pag
 
   await page.getByRole('button', { name: 'Close panel' }).click();
 
+  // Same margin reasoning as the wait above this one — one 10s poll cycle,
+  // plus headroom for however much of it already elapsed during the
+  // check-in click/render above.
   await expect(page.locator(`[data-testid="${roomNumber}"]`)).toHaveAttribute(
     'data-status',
     'OCCUPIED',
-    { timeout: 15_000 },
+    { timeout: 25_000 },
   );
 });
