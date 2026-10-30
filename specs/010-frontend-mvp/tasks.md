@@ -41,28 +41,28 @@ module), plus one new, independent docker-compose service (`scripts/dev-auth-moc
 human until a standing login mechanism and a correctly-routed dev server exist
 (research.md §0/§1).
 
-- [ ] T001 `scripts/dev-auth-mock.py`: stdlib `http.server`, generates one RSA keypair
+- [X] T001 `scripts/dev-auth-mock.py`: stdlib `http.server`, generates one RSA keypair
       at process start, serves `GET /.well-known/jwks.json` + `GET /oauth2/jwks` (JWKS)
       and `POST /dev/login` (`{"role": "FRONT_DESK"|"HOUSEKEEPING"}` →
       `{"token": "<RS256 JWT>"}`, claims matching `scripts/e2e-test.sh`'s own
       convention: `sub`, `iss: http://auth-service:9000`, `iat`, `exp` (+4h),
       `authorities: ["ROLE_<role>"]`); `400` for a missing/invalid `role` (research.md §0)
-- [ ] T002 `docker-compose.yml`: add an `auth-mock` service (`container_name:
+- [X] T002 `docker-compose.yml`: add an `auth-mock` service (`container_name:
       auth-service`, `image: python:3.11-slim`, `command` pip-installs `cryptography`
       then runs T001's script, mounted read-only), port-mapped for host access —
       `scripts/e2e-test.sh` is NOT modified (it already force-recreates/removes any
       container named `auth-service` regardless of what else is running)
-- [ ] T003 `SECURITY.md`: document the new standing `/dev/login` endpoint under a
+- [X] T003 `SECURITY.md`: document the new standing `/dev/login` endpoint under a
       "Mock JWT issuer" update — dev-only, no password/MFA, must never be exposed
       outside local dev (same spirit as the existing entry, now covering both the
       standing service and `scripts/e2e-test.sh`'s separate ephemeral one)
-- [ ] T004 [P] `frontend/vite.config.ts`: correct the dev proxy — `/api` →
+- [X] T004 [P] `frontend/vite.config.ts`: correct the dev proxy — `/api` →
       `http://localhost:8087` (not `:8088`, research.md §1), add `/dev` →
       `http://localhost:9000` (T001's service) so `staffAuthApi.ts` (T009) can call a
       relative path the same way the rest of the app does
-- [ ] T005 [P] `frontend/.env.example`: document `VITE_API_BASE_URL` (defaults to the
+- [X] T005 [P] `frontend/.env.example`: document `VITE_API_BASE_URL` (defaults to the
       proxy target above) for later non-local deployment
-- [ ] T006 [P] `frontend/package.json`: add `msw` and `@playwright/test` dev
+- [X] T006 [P] `frontend/package.json`: add `msw` and `@playwright/test` dev
       dependencies; add an `"e2e": "playwright test"` script; add
       `coverage.thresholds` (100% lines/branches/functions/statements) to the `test`
       block in `vite.config.ts` (research.md §8)
@@ -80,56 +80,56 @@ story depends on.
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete.
 
-- [ ] T007 [P] `frontend/src/types/staff.ts`: `StaffRole`, `RoomStatus`,
+- [X] T007 [P] `frontend/src/types/staff.ts`: `StaffRole`, `RoomStatus`,
       `RoomBoardEntry` (full extended shape per data-model.md — including
       `currentBookingId`/`arrivingBookingId`/`arrivingGuestName`, even though no story
       before US3/US4 populates the latter two from the backend yet), `RoomBoardFloor`,
       `BookingStatus`, `Booking`, `BookingFormValues`
-- [ ] T008 [P] `frontend/src/features/staff-session/staffSessionSlice.ts`: `{role,
+- [X] T008 [P] `frontend/src/features/staff-session/staffSessionSlice.ts`: `{role,
       token, status: 'anonymous'|'authenticated'|'expired'}`; `login`,
       `sessionExpired`, `logout` reducers; hydrates once from `sessionStorage` at
       construction, persists on `login`/clears on `sessionExpired`/`logout` (data-model.md §3)
-- [ ] T009 `frontend/src/features/staff-session/staffAuthApi.ts`: RTK Query mutation
+- [X] T009 `frontend/src/features/staff-session/staffAuthApi.ts`: RTK Query mutation
       `login(role)` → `POST /dev/login` (via the `/dev` proxy from T004), dispatches
       `staffSession/login` with the returned token on success (depends on T004, T008)
-- [ ] T010 `frontend/src/store/api.ts`: `fetchBaseQuery`'s `prepareHeaders` reads
+- [X] T010 `frontend/src/store/api.ts`: `fetchBaseQuery`'s `prepareHeaders` reads
       `state.staffSession.token` and sets `Authorization: Bearer <token>` when present
       — every other existing consumer of this instance is unaffected when absent
       (research.md §2) (depends on T008)
-- [ ] T011 `frontend/src/store/index.ts`: register the `staffSession` reducer; add a
+- [X] T011 `frontend/src/store/index.ts`: register the `staffSession` reducer; add a
       small RTK middleware that dispatches `staffSession/sessionExpired` whenever a
       rejected action's `error.status === 401` (research.md §6) (depends on T008)
-- [ ] T012 [P] `frontend/src/components/RetryBanner.tsx`: shared "can't reach the
+- [X] T012 [P] `frontend/src/components/RetryBanner.tsx`: shared "can't reach the
       server, retrying…" banner + manual "Retry now" button, used by any view polling
       a now-unreachable endpoint (research.md §6)
-- [ ] T013 `frontend/src/features/staff-session/LoginScreen.tsx`: role picker
+- [X] T013 `frontend/src/features/staff-session/LoginScreen.tsx`: role picker
       (FRONT_DESK/HOUSEKEEPING) + sign-in button, calls T009's mutation, shows its
       error inline on failure (depends on T009)
-- [ ] T014 `frontend/src/features/staff-session/StaffAuthGate.tsx`: renders
+- [X] T014 `frontend/src/features/staff-session/StaffAuthGate.tsx`: renders
       `LoginScreen` unless `staffSession.status === 'authenticated'` (depends on T008, T013)
-- [ ] T015 `frontend/src/App.tsx`: move `<AuthGate>` to wrap only the existing
+- [X] T015 `frontend/src/App.tsx`: move `<AuthGate>` to wrap only the existing
       `<Routes>` tree (every current path unchanged); add a new sibling route,
       `/staff`, rendering `<StaffAuthGate>` (research.md §4) (depends on T014)
-- [ ] T016 [P] `frontend/src/mocks/handlers.ts` + `frontend/src/mocks/server.ts`: MSW
+- [X] T016 [P] `frontend/src/mocks/handlers.ts` + `frontend/src/mocks/server.ts`: MSW
       node server wired into `frontend/src/setupTests.ts`, ready for per-test handler
       overrides
 
 ### Tests for Foundational
 
-- [ ] T017 [P] `frontend/src/features/staff-session/staffSessionSlice.test.ts`: login/
+- [X] T017 [P] `frontend/src/features/staff-session/staffSessionSlice.test.ts`: login/
       sessionExpired/logout transitions; `sessionStorage` is written on login and
       cleared on sessionExpired/logout; a prior `sessionStorage` entry hydrates
       `status: 'authenticated'` on construction
-- [ ] T018 [P] `frontend/src/features/staff-session/LoginScreen.test.tsx`: both roles
+- [X] T018 [P] `frontend/src/features/staff-session/LoginScreen.test.tsx`: both roles
       selectable; submit calls the login mutation with the selected role; a failed
       login shows an inline error and does not navigate anywhere
-- [ ] T019 [P] `frontend/src/features/staff-session/StaffAuthGate.test.tsx`: renders
+- [X] T019 [P] `frontend/src/features/staff-session/StaffAuthGate.test.tsx`: renders
       `LoginScreen` when `status` is `'anonymous'` or `'expired'`; renders children
       when `'authenticated'`
-- [ ] T020 [P] `frontend/src/store/api.test.ts`: a request made with a staff session
+- [X] T020 [P] `frontend/src/store/api.test.ts`: a request made with a staff session
       present carries the bearer header; one made with no session doesn't; a `401`
       response dispatches `sessionExpired`
-- [ ] T021 [P] `frontend/src/App.test.tsx`: visiting any existing route (e.g. `/`,
+- [X] T021 [P] `frontend/src/App.test.tsx`: visiting any existing route (e.g. `/`,
       `/dashboard`) still goes through the PIN `AuthGate` unchanged; visiting `/staff`
       does not
 

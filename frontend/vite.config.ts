@@ -23,12 +23,29 @@ export default defineConfig({
     // cross-origin request, so api-gateway (which defines no CORS policy)
     // never needs one. A real deployment overrides this to the gateway's
     // actual public URL, where CORS is a deployment concern, not a dev one.
+    //
+    // Under Vitest specifically, a relative baseUrl doesn't work the same
+    // way: MSW's Node interceptor constructs a `Request` directly from the
+    // raw string before anything gets a chance to resolve it against a
+    // document location (unlike a real browser's fetch) and throws "Invalid
+    // URL". Vitest always sets process.env.VITEST, so tests get a concrete
+    // dummy origin instead — dev/prod behavior above is unaffected.
     'import.meta.env.VITE_API_BASE_URL': JSON.stringify(
-      process.env['VITE_API_BASE_URL'] ?? '',
+      process.env['VITE_API_BASE_URL'] ?? (process.env['VITEST'] ? 'http://localhost:3000' : ''),
     ),
   },
   test: {
     environment: 'jsdom',
+    environmentOptions: {
+      jsdom: {
+        // Gives a concrete origin so a relative fetchBaseQuery baseUrl (the
+        // real, dev-proxy-friendly default — see the VITE_API_BASE_URL note
+        // above) resolves the same way it would against a real browser's
+        // document location, instead of throwing "Invalid URL" under Node's
+        // undici-backed global fetch.
+        url: 'http://localhost:3000/',
+      },
+    },
     setupFiles: ['./src/setupTests.ts'],
     globals: true,
     coverage: {
