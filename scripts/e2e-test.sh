@@ -448,12 +448,13 @@ step3_obtain_jwt() {
   MERCHANT_JWT=$(make_jwt "merchant-e2e-001" "ROLE_MERCHANT" "merchant-e2e-001")
   ADMIN_JWT=$(make_jwt "admin-e2e-001" "ROLE_ADMIN" "")
   FRONT_DESK_JWT=$(make_jwt "staff-e2e-001" "ROLE_FRONT_DESK" "")
+  HOUSEKEEPING_JWT=$(make_jwt "housekeeping-e2e-001" "ROLE_HOUSEKEEPING" "")
 
-  if [[ -z "$MERCHANT_JWT" || -z "$ADMIN_JWT" || -z "$FRONT_DESK_JWT" ]]; then
+  if [[ -z "$MERCHANT_JWT" || -z "$ADMIN_JWT" || -z "$FRONT_DESK_JWT" || -z "$HOUSEKEEPING_JWT" ]]; then
     fail "Step 3 — JWT generation failed"
     return 1
   fi
-  export MERCHANT_JWT ADMIN_JWT FRONT_DESK_JWT
+  export MERCHANT_JWT ADMIN_JWT FRONT_DESK_JWT HOUSEKEEPING_JWT
   pass "Step 3 — JWT tokens obtained"
 }
 
@@ -973,6 +974,182 @@ sys.exit(0 if any(r.get('roomId') == '${room_id}' for r in rooms) else 1)
   fi
 }
 
+# ── Step 14: Room board lifecycle (layer 2b) ─────────────────────────────────
+# book -> confirm -> check-in -> board shows OCCUPIED -> check-out -> DIRTY ->
+# housekeeping cleans -> VACANT_CLEAN (spec.md Story 1-4, quickstart.md's own
+# end-to-end scenario).
+board_room_entry() {
+  # $1 = JSON board response, $2 = roomId -> prints that room's JSON object, or "" if absent.
+  echo "$1" | python3 -c "
+import sys, json
+board = json.load(sys.stdin)
+room_id = sys.argv[1]
+for floor in board:
+    for room in floor.get('rooms', []):
+        if room.get('roomId') == room_id:
+            print(json.dumps(room))
+            sys.exit(0)
+print('')
+" "$2" 2>/dev/null
+}
+
+step14_room_board_lifecycle() {
+  if [[ "${TARGET}" == "kind" ]]; then
+    skip "Step 14 — booking-service has no k8s manifests yet (deferred to the backlog); compose-only for this layer"
+    return 0
+  fi
+
+  info "Step 14 — Room board lifecycle: check-in -> board -> check-out -> housekeeping clean"
+
+  local check_in="2030-03-10" check_out="2030-03-12"
+  local resp http_code body room_id
+
+  resp=$(curl -s -w '\n%{http_code}' \
+    "http://localhost:${GW_PORT}/api/v1/rooms?checkIn=${check_in}&checkOut=${check_out}" \
+    -H "Authorization: Bearer ${FRONT_DESK_JWT}" 2>/dev/null)
+  http_code=$(echo "$resp" | tail -1)
+  body=$(echo "$resp" | sed '$d')
+  if [[ "$http_code" != "200" ]]; then
+    fail "Step 14 — Room search failed: expected 200, got ${http_code}. Body: ${body}"
+    return 1
+  fi
+
+  room_id=$(echo "$body" | python3 -c "import sys,json; rooms=json.load(sys.stdin); print(rooms[0]['roomId'] if rooms else '')" 2>/dev/null || echo "")
+  if [[ -z "$room_id" ]]; then
+    fail "Step 14 — No available room returned for ${check_in} to ${check_out}"
+    return 1
+  fi
+
+  resp=$(curl -s -w '\n%{http_code}' \
+    -X POST "http://localhost:${GW_PORT}/api/v1/bookings" \
+    -H "Authorization: Bearer ${FRONT_DESK_JWT}" \
+    -H "Content-Type: application/json" \
+    -d "{\"roomId\":\"${room_id}\",\"checkIn\":\"${check_in}\",\"checkOut\":\"${check_out}\",\"guestName\":\"E2E Lifecycle Guest\",\"card\":{\"cardNumber\":\"${CARD_PAN}\",\"expiry\":\"12/27\",\"cvv\":\"123\",\"cardholderName\":\"E2E Lifecycle Guest\"}}" \
+    2>/dev/null)
+  http_code=$(echo "$resp" | tail -1)
+  body=$(echo "$resp" | sed '$d')
+  if [[ "$http_code" != "201" ]]; then
+    fail "Step 14 — Booking submission failed: expected 201, got ${http_code}. Body: ${body}"
+    return 1
+  fi
+
+  local booking_id status=""
+  booking_id=$(echo "$body" | python3 -c "import sys,json; print(json.load(sys.stdin).get('bookingId',''))" 2>/dev/null || echo "")
+  if [[ -z "$booking_id" ]]; then
+    fail "Step 14 — No bookingId in response: ${body}"
+    return 1
+  fi
+
+  local max=60 elapsed=0 interval=3
+  while [[ $elapsed -lt $max ]]; do
+    resp=$(curl -s -w '\n%{http_code}' "http://localhost:${GW_PORT}/api/v1/bookings/${booking_id}" \
+      -H "Authorization: Bearer ${FRONT_DESK_JWT}" 2>/dev/null)
+    http_code=$(echo "$resp" | tail -1)
+    body=$(echo "$resp" | sed '$d')
+    if [[ "$http_code" == "200" ]]; then
+      status=$(echo "$body" | python3 -c "import sys,json; print(json.load(sys.stdin).get('status',''))" 2>/dev/null || echo "")
+      [[ "$status" == "CONFIRMED" ]] && break
+    fi
+    elapsed=$((elapsed + interval))
+    sleep "$interval"
+  done
+  if [[ "$status" != "CONFIRMED" ]]; then
+    fail "Step 14 — Booking ${booking_id} did not reach CONFIRMED within ${max}s (last status=${status})"
+    return 1
+  fi
+
+  # check-in (FRONT_DESK)
+  resp=$(curl -s -w '\n%{http_code}' \
+    -X POST "http://localhost:${GW_PORT}/api/v1/bookings/${booking_id}/check-in" \
+    -H "Authorization: Bearer ${FRONT_DESK_JWT}" 2>/dev/null)
+  http_code=$(echo "$resp" | tail -1)
+  body=$(echo "$resp" | sed '$d')
+  if [[ "$http_code" != "200" ]]; then
+    fail "Step 14 — check-in failed: expected 200, got ${http_code}. Body: ${body}"
+    return 1
+  fi
+  pass "Step 14 — Booking ${booking_id} checked in (room ${room_id})"
+
+  # board (HOUSEKEEPING) shows OCCUPIED with the guest's name
+  resp=$(curl -s -w '\n%{http_code}' "http://localhost:${GW_PORT}/api/v1/rooms/board" \
+    -H "Authorization: Bearer ${HOUSEKEEPING_JWT}" 2>/dev/null)
+  http_code=$(echo "$resp" | tail -1)
+  body=$(echo "$resp" | sed '$d')
+  if [[ "$http_code" != "200" ]]; then
+    fail "Step 14 — Board fetch failed after check-in: expected 200, got ${http_code}. Body: ${body}"
+    return 1
+  fi
+  local entry
+  entry=$(board_room_entry "$body" "$room_id")
+  if ! echo "$entry" | python3 -c "
+import sys, json
+e = json.load(sys.stdin)
+sys.exit(0 if e.get('status') == 'OCCUPIED' and e.get('guestName') == 'E2E Lifecycle Guest' else 1)
+" 2>/dev/null; then
+    fail "Step 14 — Board did not show room ${room_id} as OCCUPIED with the guest's name: ${entry}"
+    return 1
+  fi
+  pass "Step 14 — Board shows room ${room_id} OCCUPIED with guest E2E Lifecycle Guest"
+
+  # check-out (FRONT_DESK)
+  resp=$(curl -s -w '\n%{http_code}' \
+    -X POST "http://localhost:${GW_PORT}/api/v1/bookings/${booking_id}/check-out" \
+    -H "Authorization: Bearer ${FRONT_DESK_JWT}" 2>/dev/null)
+  http_code=$(echo "$resp" | tail -1)
+  body=$(echo "$resp" | sed '$d')
+  if [[ "$http_code" != "200" ]]; then
+    fail "Step 14 — check-out failed: expected 200, got ${http_code}. Body: ${body}"
+    return 1
+  fi
+  pass "Step 14 — Booking ${booking_id} checked out"
+
+  # board shows DIRTY
+  resp=$(curl -s -w '\n%{http_code}' "http://localhost:${GW_PORT}/api/v1/rooms/board" \
+    -H "Authorization: Bearer ${HOUSEKEEPING_JWT}" 2>/dev/null)
+  http_code=$(echo "$resp" | tail -1)
+  body=$(echo "$resp" | sed '$d')
+  entry=$(board_room_entry "$body" "$room_id")
+  if ! echo "$entry" | python3 -c "
+import sys, json
+e = json.load(sys.stdin)
+sys.exit(0 if e.get('status') == 'DIRTY' else 1)
+" 2>/dev/null; then
+    fail "Step 14 — Board did not show room ${room_id} as DIRTY after check-out: ${entry}"
+    return 1
+  fi
+  pass "Step 14 — Board shows room ${room_id} DIRTY after check-out"
+
+  # housekeeping cleans the room (HOUSEKEEPING)
+  resp=$(curl -s -w '\n%{http_code}' \
+    -X PATCH "http://localhost:${GW_PORT}/api/v1/rooms/${room_id}/status" \
+    -H "Authorization: Bearer ${HOUSEKEEPING_JWT}" \
+    -H "Content-Type: application/json" \
+    -d '{"status":"VACANT_CLEAN"}' \
+    2>/dev/null)
+  http_code=$(echo "$resp" | tail -1)
+  body=$(echo "$resp" | sed '$d')
+  if [[ "$http_code" != "200" ]]; then
+    fail "Step 14 — Housekeeping status update failed: expected 200, got ${http_code}. Body: ${body}"
+    return 1
+  fi
+
+  # board shows VACANT_CLEAN again, no guest details
+  resp=$(curl -s -w '\n%{http_code}' "http://localhost:${GW_PORT}/api/v1/rooms/board" \
+    -H "Authorization: Bearer ${FRONT_DESK_JWT}" 2>/dev/null)
+  http_code=$(echo "$resp" | tail -1)
+  body=$(echo "$resp" | sed '$d')
+  entry=$(board_room_entry "$body" "$room_id")
+  if echo "$entry" | python3 -c "
+import sys, json
+e = json.load(sys.stdin)
+sys.exit(0 if e.get('status') == 'VACANT_CLEAN' and e.get('guestName') is None else 1)
+" 2>/dev/null; then
+    pass "Step 14 — Housekeeping cleaned room ${room_id}; board shows VACANT_CLEAN again"
+  else
+    fail "Step 14 — Board did not show room ${room_id} as VACANT_CLEAN with no guest after cleaning: ${entry}"
+  fi
+}
+
 # ── Cleanup ───────────────────────────────────────────────────────────────────
 cleanup() {
   info "Cleaning up auth-service mock container"
@@ -1045,6 +1222,7 @@ main() {
   step11_fraud_and_notification_records
   step12_booking_confirmed
   step13_booking_declined
+  step14_room_board_lifecycle
 
   print_summary
 }

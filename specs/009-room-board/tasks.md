@@ -257,13 +257,21 @@ lifecycle, including the `MAINTENANCE` path, works end to end.
 No `docker-compose.yml` or `ci.yml` change is needed — `booking-service`'s entry and
 health-wait already exist from layer 2a.
 
-- [ ] T036 [P] Run every scenario in `specs/009-room-board/quickstart.md` end to end
-- [ ] T037 Add e2e step 14 (book → confirm → check-in → board shows `OCCUPIED` →
+- [X] T036 [P] Run every scenario in `specs/009-room-board/quickstart.md` end to end
+      — covered by the unit/integration test suite (RoomServiceTest, RoomControllerTest,
+      CheckInFlowIT, CheckOutFlowIT, RoomStatusFlowIT) plus the live docker-compose
+      run and full `scripts/e2e-test.sh` run below; the concurrent-check-in race is
+      covered by `BookingServiceConcurrencyTest`.
+- [X] T037 Add e2e step 14 (book → confirm → check-in → board shows `OCCUPIED` →
       check-out → `DIRTY` → housekeeping cleans → `VACANT_CLEAN`) to `scripts/e2e-test.sh`
-- [ ] T038 Verify 100% JaCoCo instruction + branch coverage for `booking-service`
-      (Principle II gate) and fix any gap
-- [ ] T039 Confirm `docker-compose.yml` and `.github/workflows/ci.yml` need no changes
-      for this layer (already cover `booking-service` from layer 2a) — verify only
+      — `step14_room_board_lifecycle`, using a new `HOUSEKEEPING_JWT` alongside the
+      existing `FRONT_DESK_JWT`.
+- [X] T038 Verify 100% JaCoCo instruction + branch coverage for `booking-service`
+      (Principle II gate) and fix any gap — confirmed via
+      `jacocoTestCoverageVerification` (BUILD SUCCESSFUL).
+- [X] T039 Confirm `docker-compose.yml` and `.github/workflows/ci.yml` need no changes
+      for this layer (already cover `booking-service` from layer 2a) — verified only,
+      no edits needed to either file.
 
 ---
 
