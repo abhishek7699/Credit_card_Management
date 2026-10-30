@@ -328,9 +328,9 @@ from what's bookable (spec.md Story 5).
 
 ### Tests for User Story 5 ⚠️
 
-- [ ] T050 [P] [US5] `frontend/src/features/room-board/roomStatusApi.test.ts` (MSW):
+- [X] T050 [P] [US5] `frontend/src/features/room-board/roomStatusApi.test.ts` (MSW):
       `PATCH /api/v1/rooms/{id}/status` called with the expected body
-- [ ] T051 [P] [US5] `frontend/src/features/room-board/RoomActionPanel.test.tsx`
+- [X] T051 [P] [US5] `frontend/src/features/room-board/RoomActionPanel.test.tsx`
       (extended, MSW): a `DIRTY` room offers "mark clean" for either role; a
       `VACANT_CLEAN`/`DIRTY` room offers "mark maintenance"; a `MAINTENANCE` room
       offers "mark clean"; no status action is ever offered for an `OCCUPIED` room; a
@@ -339,9 +339,9 @@ from what's bookable (spec.md Story 5).
 
 ### Implementation for User Story 5
 
-- [ ] T052 [US5] `frontend/src/features/room-board/roomStatusApi.ts`: RTK Query
+- [X] T052 [US5] `frontend/src/features/room-board/roomStatusApi.ts`: RTK Query
       mutation `updateStatus(roomId, status)` (`PATCH /api/v1/rooms/{id}/status`) (depends on T007, T010)
-- [ ] T053 [US5] `frontend/src/features/room-board/RoomActionPanel.tsx`: status-change
+- [X] T053 [US5] `frontend/src/features/room-board/RoomActionPanel.tsx`: status-change
       actions per FR-018/FR-019's allowed-transition set, offered to both roles,
       calling T052 (depends on T034, T052)
 

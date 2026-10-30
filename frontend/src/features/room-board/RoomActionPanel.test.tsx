@@ -85,6 +85,21 @@ test('an OCCUPIED room with a same-day arrival still offers check-out, not check
   expect(screen.queryByText(/john smith is arriving today/i)).not.toBeInTheDocument();
 });
 
+test('a DIRTY room offers a status-change action for Front Desk', () => {
+  renderPanel(entry({ status: 'DIRTY' }), 'FRONT_DESK');
+  expect(screen.getByRole('button', { name: /mark clean/i })).toBeInTheDocument();
+});
+
+test('a DIRTY room offers a status-change action for Housekeeping too', () => {
+  renderPanel(entry({ status: 'DIRTY' }), 'HOUSEKEEPING');
+  expect(screen.getByRole('button', { name: /mark clean/i })).toBeInTheDocument();
+});
+
+test('a MAINTENANCE room offers a status-change action for either role', () => {
+  renderPanel(entry({ status: 'MAINTENANCE' }), 'HOUSEKEEPING');
+  expect(screen.getByRole('button', { name: /mark clean/i })).toBeInTheDocument();
+});
+
 test('renders the room number and calls onClose from the close button', async () => {
   const onClose = vi.fn();
   renderPanel(entry({ roomNumber: '305' }), 'HOUSEKEEPING', onClose);

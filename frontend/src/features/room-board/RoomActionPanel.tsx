@@ -1,6 +1,7 @@
 import { BookingForm } from '../booking/BookingForm';
 import { CheckInAction } from './CheckInAction';
 import { CheckOutAction } from './CheckOutAction';
+import { StatusChangeAction } from './StatusChangeAction';
 import type { RoomBoardEntry, StaffRole } from '../../types/staff';
 
 interface RoomActionPanelProps {
@@ -27,6 +28,11 @@ function renderAction(room: RoomBoardEntry, role: StaffRole) {
   }
   if (room.status === 'VACANT_CLEAN' && role === 'FRONT_DESK') {
     return <BookingForm roomId={room.roomId} />;
+  }
+  // DIRTY/MAINTENANCE status changes are offered to either role (FR-018) —
+  // unlike booking/check-in/check-out above, which stay front-desk only.
+  if (room.status === 'DIRTY' || room.status === 'MAINTENANCE') {
+    return <StatusChangeAction roomId={room.roomId} status={room.status} />;
   }
   return <p className="text-sm text-gray-500">No action available for this room.</p>;
 }
