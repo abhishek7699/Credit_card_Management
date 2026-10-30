@@ -20,6 +20,7 @@ const BOARD: RoomBoardFloor[] = [
         currentBookingId: null,
         arrivingBookingId: null,
         arrivingGuestName: null,
+        hasBalanceDue: null,
       },
     ],
   },

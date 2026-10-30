@@ -11,6 +11,7 @@ import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.UUID;
@@ -46,6 +47,12 @@ public class Booking {
 
     @Column(name = "transaction_id", length = 100)
     private String transactionId;
+
+    /** Set once, alongside transactionId, inside initiatePayment -- the exact amount
+     *  charged at booking time for the room nights (data-model.md Key Design Decision
+     *  #1). Null until that gRPC call succeeds, same as transactionId. */
+    @Column(name = "room_charge_amount")
+    private BigDecimal roomChargeAmount;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
@@ -89,6 +96,9 @@ public class Booking {
 
     public String getTransactionId() { return transactionId; }
     public void setTransactionId(String transactionId) { this.transactionId = transactionId; }
+
+    public BigDecimal getRoomChargeAmount() { return roomChargeAmount; }
+    public void setRoomChargeAmount(BigDecimal roomChargeAmount) { this.roomChargeAmount = roomChargeAmount; }
 
     public Instant getCreatedAt() { return createdAt; }
 

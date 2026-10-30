@@ -15,6 +15,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.math.BigDecimal;
+import java.util.List;
 import java.util.UUID;
 
 @RestController
@@ -54,6 +56,9 @@ public class BookingController {
         return toDetailResponse(bookingService.checkOut(id));
     }
 
+    // Placeholder charges/balanceDue (always empty/zero) until US1 (Phase 3) wires in
+    // BookingService's real charge lookup and balance calculation -- kept here only so
+    // BookingDetailResponse's Phase 2 schema change compiles.
     private BookingDetailResponse toDetailResponse(Booking booking) {
         return new BookingDetailResponse(
                 booking.getId(),
@@ -63,6 +68,8 @@ public class BookingController {
                 booking.getCheckOut(),
                 booking.getStatus(),
                 booking.getCancellationReason(),
-                booking.getTransactionId());
+                booking.getTransactionId(),
+                List.of(),
+                BigDecimal.ZERO);
     }
 }

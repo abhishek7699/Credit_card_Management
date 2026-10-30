@@ -128,6 +128,7 @@ public class BookingService {
                     .withDeadlineAfter(5, TimeUnit.SECONDS)
                     .initiateTransaction(grpcRequest);
             booking.setTransactionId(response.getTransactionId());
+            booking.setRoomChargeAmount(amount);
             bookingRepository.save(booking);
         } catch (StatusRuntimeException e) {
             log.warn("InitiateTransaction call failed for booking {} (status={}) — booking stays HELD; "

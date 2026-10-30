@@ -67,45 +67,45 @@ cleanly against a fresh CockroachDB.
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete.
 
-- [ ] T004 [P] `services/booking-service/src/main/java/com/creditcard/booking/domain/ChargeType.java`
+- [X] T004 [P] `services/booking-service/src/main/java/com/creditcard/booking/domain/ChargeType.java`
       — `ROOM_SERVICE`, `MINIBAR`, `LAUNDRY`, `OTHER`
-- [ ] T005 [P] `services/booking-service/src/main/java/com/creditcard/booking/domain/CheckoutAttemptStatus.java`
+- [X] T005 [P] `services/booking-service/src/main/java/com/creditcard/booking/domain/CheckoutAttemptStatus.java`
       — `PENDING`, `AUTHORIZED`, `DECLINED`, `FAILED`, `EXPIRED`, `LATE_AUTHORIZED`
       (data-model.md's state machine)
-- [ ] T006 [P] `services/booking-service/src/main/java/com/creditcard/booking/domain/Charge.java`
+- [X] T006 [P] `services/booking-service/src/main/java/com/creditcard/booking/domain/Charge.java`
       — id, bookingId, type, description, amount, createdAt; add-only, no setter
       beyond construction needed
-- [ ] T007 [P] `services/booking-service/src/main/java/com/creditcard/booking/domain/CheckoutPaymentAttempt.java`
+- [X] T007 [P] `services/booking-service/src/main/java/com/creditcard/booking/domain/CheckoutPaymentAttempt.java`
       — id, bookingId, transactionId (nullable), amount, status, createdAt, updatedAt
-- [ ] T008 [P] `services/booking-service/src/main/java/com/creditcard/booking/domain/BookingStatus.java`
+- [X] T008 [P] `services/booking-service/src/main/java/com/creditcard/booking/domain/BookingStatus.java`
       — add `CHECKOUT_PENDING`
-- [ ] T009 `services/booking-service/src/main/java/com/creditcard/booking/domain/Booking.java`
+- [X] T009 `services/booking-service/src/main/java/com/creditcard/booking/domain/Booking.java`
       — add `roomChargeAmount` field (nullable, set once in `initiatePayment`, plan.md
       Key Design Decision #1) (depends on T008 for the status enum it coexists with)
-- [ ] T010 [P] `services/booking-service/src/main/java/com/creditcard/booking/repository/ChargeRepository.java`
+- [X] T010 [P] `services/booking-service/src/main/java/com/creditcard/booking/repository/ChargeRepository.java`
       — `findByBookingIdOrderByCreatedAtAsc(UUID)`, `findByBookingIdIn(List<UUID>)`
       (depends on T006)
-- [ ] T011 [P] `services/booking-service/src/main/java/com/creditcard/booking/repository/CheckoutPaymentAttemptRepository.java`
+- [X] T011 [P] `services/booking-service/src/main/java/com/creditcard/booking/repository/CheckoutPaymentAttemptRepository.java`
       — `findByTransactionId(String)`, `findByBookingIdInAndStatusIn(List<UUID>,
       List<CheckoutAttemptStatus>)` (for board balance calc), `findByStatusAndCreatedAtBefore(CheckoutAttemptStatus,
       Instant)` (for the sweep, research.md §4) (depends on T005, T007)
-- [ ] T012 `services/booking-service/src/main/java/com/creditcard/booking/service/BookingService.java`:
+- [X] T012 `services/booking-service/src/main/java/com/creditcard/booking/service/BookingService.java`:
       `initiatePayment` sets `roomChargeAmount` on the booking alongside `transactionId`
       (depends on T009)
-- [ ] T013 [P] `services/booking-service/src/main/java/com/creditcard/booking/controller/dto/ChargeResponse.java`
+- [X] T013 [P] `services/booking-service/src/main/java/com/creditcard/booking/controller/dto/ChargeResponse.java`
       — chargeId, type, description, amount, createdAt (depends on T004)
-- [ ] T014 [P] `services/booking-service/src/main/java/com/creditcard/booking/controller/dto/ChargeRequest.java`
+- [X] T014 [P] `services/booking-service/src/main/java/com/creditcard/booking/controller/dto/ChargeRequest.java`
       — type, description, amount, all `@NotNull`/`@NotBlank`/`@Positive` as
       appropriate (depends on T004)
-- [ ] T015 `services/booking-service/src/main/java/com/creditcard/booking/controller/dto/BookingDetailResponse.java`
+- [X] T015 `services/booking-service/src/main/java/com/creditcard/booking/controller/dto/BookingDetailResponse.java`
       — add `charges: List<ChargeResponse>`, `balanceDue: BigDecimal` (depends on T013)
-- [ ] T016 [P] `frontend/src/types/staff.ts`: add `Charge`, `ChargeType`; extend
+- [X] T016 [P] `frontend/src/types/staff.ts`: add `Charge`, `ChargeType`; extend
       `Booking` with `charges`/`balanceDue`; extend `RoomBoardEntry` with
       `hasBalanceDue: boolean | null`
 
 ### Tests for Foundational
 
-- [ ] T017 [P] `services/booking-service/src/test/java/com/creditcard/booking/service/BookingServiceTest.java`
+- [X] T017 [P] `services/booking-service/src/test/java/com/creditcard/booking/service/BookingServiceTest.java`
       (extended): `initiatePayment` persists `roomChargeAmount` equal to the exact
       amount the gRPC request was built from
 

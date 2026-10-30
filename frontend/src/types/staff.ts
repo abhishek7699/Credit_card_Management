@@ -13,6 +13,9 @@ export interface RoomBoardEntry {
   currentBookingId: string | null;
   arrivingBookingId: string | null;
   arrivingGuestName: string | null;
+  /** null when the room has no current occupant (not CHECKED_IN) — only ever
+   *  true/false for an occupied room (US2). */
+  hasBalanceDue: boolean | null;
 }
 
 export interface RoomBoardFloor {
@@ -20,7 +23,23 @@ export interface RoomBoardFloor {
   rooms: RoomBoardEntry[];
 }
 
-export type BookingStatus = 'HELD' | 'CONFIRMED' | 'CANCELLED' | 'CHECKED_IN' | 'CHECKED_OUT';
+export type BookingStatus =
+  | 'HELD'
+  | 'CONFIRMED'
+  | 'CANCELLED'
+  | 'CHECKED_IN'
+  | 'CHECKOUT_PENDING'
+  | 'CHECKED_OUT';
+
+export type ChargeType = 'ROOM_SERVICE' | 'MINIBAR' | 'LAUNDRY' | 'OTHER';
+
+export interface Charge {
+  chargeId: string;
+  type: ChargeType;
+  description: string;
+  amount: number;
+  createdAt: string;
+}
 
 export interface Booking {
   bookingId: string;
@@ -31,6 +50,8 @@ export interface Booking {
   status: BookingStatus;
   cancellationReason: string | null;
   transactionId: string | null;
+  charges: Charge[];
+  balanceDue: number;
 }
 
 export interface CardDetails {

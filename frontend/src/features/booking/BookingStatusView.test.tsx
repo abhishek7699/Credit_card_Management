@@ -18,6 +18,8 @@ function booking(status: Booking['status']): Booking {
     status,
     cancellationReason: null,
     transactionId: null,
+    charges: [],
+    balanceDue: 0,
   };
 }
 

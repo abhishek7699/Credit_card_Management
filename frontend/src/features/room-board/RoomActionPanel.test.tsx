@@ -18,6 +18,7 @@ function entry(overrides: Partial<RoomBoardEntry>): RoomBoardEntry {
     currentBookingId: null,
     arrivingBookingId: null,
     arrivingGuestName: null,
+    hasBalanceDue: null,
     ...overrides,
   };
 }

@@ -128,6 +128,33 @@ class BookingServiceInitiatePaymentTest {
     }
 
     @Test
+    void authorizationSucceeds_persistsRoomChargeAmount() throws Exception {
+        UUID roomId = UUID.randomUUID();
+        BookingService service = serviceBackedBy(new TransactionServiceGrpc.TransactionServiceImplBase() {
+            @Override
+            public void initiateTransaction(InitiateTransactionRequest request,
+                                              StreamObserver<InitiateTransactionResponse> responseObserver) {
+                responseObserver.onNext(InitiateTransactionResponse.newBuilder()
+                        .setTransactionId("txn-charges-1").setStatus("PENDING").build());
+                responseObserver.onCompleted();
+            }
+
+            @Override
+            public void getTransaction(GetTransactionRequest request, StreamObserver<GetTransactionResponse> ro) {
+                ro.onNext(GetTransactionResponse.newBuilder().build());
+                ro.onCompleted();
+            }
+        });
+        when(roomRepository.findById(roomId)).thenReturn(Optional.of(room(roomId, "100.00")));
+        when(bookingRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        Booking booking = heldBooking(roomId); // 2 nights (Nov 1 -> Nov 3) at 100.00/night
+
+        service.initiatePayment(booking, new BookingRequest.CardDetails("4111111111111111", "12/28", "123", "Jane"));
+
+        assertThat(booking.getRoomChargeAmount()).isEqualByComparingTo(new BigDecimal("200.00"));
+    }
+
+    @Test
     void transactionServiceUnavailable_leavesBookingHeldWithNoTransactionId() throws Exception {
         UUID roomId = UUID.randomUUID();
         BookingService service = serviceBackedBy(new TransactionServiceGrpc.TransactionServiceImplBase() {

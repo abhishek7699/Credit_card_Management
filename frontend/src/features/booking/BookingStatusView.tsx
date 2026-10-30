@@ -16,6 +16,7 @@ const STATUS_LABEL: Record<BookingStatus, string> = {
   CONFIRMED: 'Confirmed',
   CANCELLED: 'Cancelled',
   CHECKED_IN: 'Checked in',
+  CHECKOUT_PENDING: 'Checking out…',
   CHECKED_OUT: 'Checked out',
 };
 
