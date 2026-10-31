@@ -20,25 +20,56 @@ byte-for-byte identical to `InitiateTransaction` with a different name, violatin
 the same "don't introduce speculative abstraction" discipline this project applies
 everywhere else.
 
-## 2. Persisting `room_charge_amount` instead of recomputing it
+## 2. `room_charge_amount` is a rate lock, set at booking creation — never recomputed from the room's current rate (revised 2026-10-31, tightened same day)
 
-**Decision**: `Booking` gains one new column, `room_charge_amount`, set once inside
-`initiatePayment` (the same place `transactionId` is already set) to the exact
-amount that call's `InitiateTransactionRequest.amount` was built from.
+**Decision**: `room_charge_amount` keeps the exact role it already had before
+this revision's payment-saga removal — the quoted room total, `nights ×
+room.nightlyRate`, computed **once** and persisted — except it is now computed
+and set **inside `createConfirmedBooking`** (at the moment the booking is
+created) instead of inside the now-removed `initiatePayment`. `getBalanceDue`
+reads `booking.getRoomChargeAmount()` directly for the room-cost term — there
+is **no fallback to recomputing from `room.nightlyRate` at balance time**. A
+booking's room cost is locked in the instant it's confirmed and never changes
+again, even if the room's `nightlyRate` changes later.
 
-**Rationale**: FR-004's balance formula needs "the amount already charged at
-booking time" as an input. That figure is *currently* always recomputable as
-`nights × room.nightlyRate` — but only because nothing today ever changes a room's
-`nightlyRate` after a booking exists against it. Persisting the actual historical
-figure once, rather than re-deriving it from current, mutable `Room` state every
-time balance is calculated, is the only version of FR-004 that's actually correct
-regardless of anything a future layer might do to room rates — matching this
-spec's own Assumption that the general formula is "kept exact and explicit anyway."
+`transaction_id` (renamed `legacy_room_payment_transaction_id` — plan.md Key
+Design Decision #2) keeps its role as a pure legacy marker: non-null if and
+only if this booking was created under the pre-revision model and already paid
+its room cost at booking time. Nothing sets it going forward. `getBalanceDue`
+subtracts `roomChargeAmount` back out of the balance **only when**
+`legacyRoomPaymentTransactionId != null` (plan.md Key Design Decision #1) — so
+a legacy booking is never double-charged for a room cost it already paid.
 
-**Alternatives considered**: Recomputing `nights × room.nightlyRate` at balance-
-calculation time — rejected: correct today, silently wrong the moment anything
-ever changes a room's rate after booking, and the fix (persist the real number) is
-one column and zero behavior change today.
+**Rationale**: Two independent requirements, both satisfied by the same
+mechanism. First, "balance uses the stored amount, never the room's current
+rate" — a locked-in quote, not a live join against mutable `Room` state, is
+the only way a later rate change can't retroactively move a guest's balance
+(a dedicated test proves this directly: change the rate after booking,
+confirm the balance is unaffected). Second, the legacy-payment reconciliation
+(research.md's original §2 rationale) needs exactly this same persisted,
+immutable figure to cancel against — reusing one column for both purposes,
+rather than a second "quoted total" column plus the existing legacy figure,
+is the simplest shape: every booking, old or new, has exactly one
+`room_charge_amount`, meaning exactly "what this stay's room cost was locked in
+at," and legacy bookings additionally have a marker saying that figure was
+already paid.
+
+Because `createConfirmedBooking` now sets this column for *every* new booking
+(not only the old `initiatePayment` path), and every pre-revision row already
+had it set by that same old path, there is no longer a real code path that
+reaches balance calculation with a null `room_charge_amount` — the
+previously-considered "recompute from current rate" fallback isn't a fallback
+at all any more, it's a behavior this revision must *not* have. Removing it
+entirely (rather than leaving it as unreachable defensive code) is the direct
+fix for "balance uses that stored amount, never the room's current rate."
+
+**Alternatives considered**: Recomputing `nights × room.nightlyRate` fresh at
+balance-calculation time whenever `room_charge_amount` happens to be unset —
+this was the prior (same-day) version of this decision; explicitly rejected
+now because it means a room-rate change after booking silently moves an
+in-flight guest's balance, which the user flagged as wrong. Adding a new
+`is_legacy_room_payment` boolean, backfilled by migration for existing rows —
+rejected: strictly redundant with `transaction_id`'s existing non-null-ness.
 
 ## 3. `CheckoutPaymentAttempt` as its own table, not a column on `Booking`
 
@@ -146,3 +177,46 @@ already has.
 payment` endpoint only for the balance-due case — rejected: splits one business
 action into two routes for no reason the spec itself draws a line around, and
 would need its own gateway wiring duplicating check-out's existing one.
+
+## 8. Removing only `HELD`, keeping `CANCELLED`/`cancellation_reason` — and migrating stray `HELD` rows, not dropping the column (revised 2026-10-31, second pass)
+
+**Decision**: `BookingStatus.HELD` is removed (nothing can produce it any more
+— there is no booking-time payment saga left to hold a room during). `CANCELLED`
+and the `cancellation_reason` column/`CancellationReason` enum are **kept**,
+unlike the first pass of this revision's plan, which proposed dropping both as
+dead code. `CancellationReason` gains one new value, `MIGRATED_UNPAID_HOLD`,
+used only by the `V7` migration described below. `V7` no longer drops
+`cancellation_reason` — it only adds the guest-detail columns and renames
+`transaction_id`. Any pre-existing `HELD` row (there should be none in any real
+environment, but the migration must not leave the column with a value the new,
+smaller application-level `BookingStatus` enum can't deserialize) is converted
+in the same migration: its `booking_room_nights` rows are deleted first (the
+room-night slots a never-confirmed hold was reserving must be freed), then its
+`status` becomes `CANCELLED` with `cancellation_reason =
+'MIGRATED_UNPAID_HOLD'`. A dedicated migration test seeds a `HELD` row plus its
+`booking_room_nights` rows against the schema at `V6`, then applies `V7` and
+asserts the row is `CANCELLED`/`MIGRATED_UNPAID_HOLD` with its room-night rows
+gone.
+
+**Rationale**: Layer 2f's spec draft (not yet formally specified, but already
+described to this project) has staff cancel a not-yet-checked-in online
+booking — that's a `CANCELLED` status with a reason, the exact mechanism this
+revision was about to delete. Keeping it now means 2f adds its own
+cancellation trigger and reason value later without having to resurrect a
+status/enum this layer had already removed. Converting any stray `HELD` row
+rather than leaving it as-is is necessary because the *value* `HELD` is being
+removed from the application-level enum — any row still carrying it would fail
+to deserialize the moment `BookingStatus.valueOf("HELD")` is attempted; `
+CANCELLED`/`MIGRATED_UNPAID_HOLD` is the correct terminal state for a booking
+that was, by definition, never actually confirmed. Deleting its
+`booking_room_nights` rows in the same step is necessary for the same reason
+`cancel()` always deleted them before this revision — a cancelled booking must
+never continue occupying a room-night slot.
+
+**Alternatives considered**: Dropping `cancellation_reason` and `CANCELLED`
+entirely (this revision's own first-pass decision, superseded here) —
+rejected once it became clear layer 2f needs exactly this mechanism; re-adding
+it later would mean undoing a deletion one layer after making it. Leaving any
+stray `HELD` row alone, unconverted — rejected: `V7` removes `HELD` from the
+set of values the application will ever recognize, so an unconverted row
+would become unreadable, not merely stale.
