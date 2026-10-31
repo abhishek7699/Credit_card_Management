@@ -115,7 +115,7 @@ public class RoomService {
                 .findByStatusAndCheckIn(BookingStatus.CONFIRMED, LocalDate.now()).stream()
                 .collect(Collectors.toMap(Booking::getRoomId, Function.identity()));
         Map<UUID, Boolean> hasBalanceDueByBookingId = hasBalanceDueByBookingId(
-                occupantByRoomId.values().stream().map(Booking::getId).toList());
+                List.copyOf(occupantByRoomId.values()));
 
         List<RoomBoardResponse> board = new ArrayList<>();
         Integer currentFloor = null;
@@ -134,17 +134,21 @@ public class RoomService {
     }
 
     /**
-     * FR-006 (layer 2c), one bulk pass per board refresh, not N+1 (plan.md Key Design
-     * Decision #5): sums each occupied booking's charges minus its already-paid
-     * checkout attempts. {@code roomChargeAmount} never enters this calculation — it
-     * cancels out of the balance formula identically regardless of its value (see
-     * BookingService#getBalanceDue's own javadoc), so unlike that method this bulk
-     * variant never needs a per-booking Room lookup, legacy or not.
+     * FR-006, one bulk pass per board refresh, not N+1 (plan.md Key Design Decision
+     * #5): sums each occupied booking's room cost plus charges minus its legacy
+     * payment (if any) and its already-paid checkout attempts — the same formula as
+     * {@link BookingService#getBalanceDue}, just batched. No per-booking Room lookup
+     * is needed: {@code roomChargeAmount} and {@code legacyRoomPaymentTransactionId}
+     * are already loaded on each {@code Booking} passed in (research.md §2). Since
+     * room cost now counts toward the balance for every non-legacy booking (the
+     * central behavior change of the 2026-10-31 rework), a freshly checked-in booking
+     * with no charges is flagged {@code true} here, not {@code false} as it was before.
      */
-    private Map<UUID, Boolean> hasBalanceDueByBookingId(List<UUID> occupiedBookingIds) {
-        if (occupiedBookingIds.isEmpty()) {
+    private Map<UUID, Boolean> hasBalanceDueByBookingId(List<Booking> occupiedBookings) {
+        if (occupiedBookings.isEmpty()) {
             return Map.of();
         }
+        List<UUID> occupiedBookingIds = occupiedBookings.stream().map(Booking::getId).toList();
         Map<UUID, BigDecimal> chargesByBookingId = chargeRepository.findByBookingIdIn(occupiedBookingIds).stream()
                 .collect(Collectors.groupingBy(Charge::getBookingId,
                         Collectors.reducing(BigDecimal.ZERO, Charge::getAmount, BigDecimal::add)));
@@ -152,10 +156,14 @@ public class RoomService {
                 .findByBookingIdInAndStatusIn(occupiedBookingIds, PAID_CHECKOUT_STATUSES).stream()
                 .collect(Collectors.groupingBy(CheckoutPaymentAttempt::getBookingId,
                         Collectors.reducing(BigDecimal.ZERO, CheckoutPaymentAttempt::getAmount, BigDecimal::add)));
-        return occupiedBookingIds.stream().collect(Collectors.toMap(Function.identity(), bookingId -> {
-            BigDecimal charges = chargesByBookingId.getOrDefault(bookingId, BigDecimal.ZERO);
-            BigDecimal paid = paidByBookingId.getOrDefault(bookingId, BigDecimal.ZERO);
-            return charges.subtract(paid).compareTo(BigDecimal.ZERO) > 0;
+        return occupiedBookings.stream().collect(Collectors.toMap(Booking::getId, booking -> {
+            BigDecimal roomCharge = booking.getRoomChargeAmount();
+            BigDecimal charges = chargesByBookingId.getOrDefault(booking.getId(), BigDecimal.ZERO);
+            BigDecimal legacyPaidAmount = booking.getLegacyRoomPaymentTransactionId() != null
+                    ? roomCharge
+                    : BigDecimal.ZERO;
+            BigDecimal paid = paidByBookingId.getOrDefault(booking.getId(), BigDecimal.ZERO);
+            return roomCharge.add(charges).subtract(legacyPaidAmount).subtract(paid).compareTo(BigDecimal.ZERO) > 0;
         }));
     }
 

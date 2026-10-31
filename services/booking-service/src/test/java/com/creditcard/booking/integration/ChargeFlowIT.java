@@ -78,14 +78,18 @@ class ChargeFlowIT {
         return roomRepository.save(room);
     }
 
+    /** {@code legacyRoomPaymentTransactionId} is set so the room cost cancels back out
+     *  of {@code getBalanceDue} (as it did under the pre-rework model) -- this test is
+     *  about charges, not the balance formula itself. */
     private Booking seedCheckedInBooking(UUID roomId) {
         Booking booking = new Booking();
         booking.setRoomId(roomId);
         booking.setGuestName("Jane Doe");
+        booking.setGuestPhone("+1-555-0100");
         booking.setCheckIn(LocalDate.of(2026, 12, 1));
         booking.setCheckOut(LocalDate.of(2026, 12, 3));
         booking.setStatus(BookingStatus.CHECKED_IN);
-        booking.setTransactionId("txn-charge-it");
+        booking.setLegacyRoomPaymentTransactionId("txn-charge-it");
         booking.setRoomChargeAmount(new BigDecimal("200.00"));
         return bookingRepository.save(booking);
     }
@@ -116,9 +120,11 @@ class ChargeFlowIT {
         Booking booking = new Booking();
         booking.setRoomId(room.getId());
         booking.setGuestName("Jane Doe");
+        booking.setGuestPhone("+1-555-0100");
         booking.setCheckIn(LocalDate.of(2026, 12, 5));
         booking.setCheckOut(LocalDate.of(2026, 12, 6));
         booking.setStatus(BookingStatus.CONFIRMED);
+        booking.setRoomChargeAmount(new BigDecimal("100.00"));
         Booking savedBooking = bookingRepository.save(booking);
 
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> bookingService.addCharge(savedBooking.getId(),

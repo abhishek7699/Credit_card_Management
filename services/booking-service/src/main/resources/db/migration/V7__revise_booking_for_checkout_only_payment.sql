@@ -10,8 +10,12 @@ ALTER TABLE bookings
     ADD COLUMN guest_phone VARCHAR(30) NOT NULL DEFAULT '',
     ADD COLUMN guest_email VARCHAR(320),
     ADD COLUMN visiting_from VARCHAR(200),
-    ADD COLUMN adults INT NOT NULL DEFAULT 1 CHECK (adults >= 1),
-    ADD COLUMN children INT NOT NULL DEFAULT 0 CHECK (children >= 0),
+    -- INT4, not bare INT: CockroachDB's default_int_size makes a bare INT an alias
+    -- for INT8/BIGINT, which then fails Hibernate's schema validation against the
+    -- entity's `int` fields (expects a 4-byte INTEGER) -- same pitfall V5 already
+    -- documented for rooms.floor/position.
+    ADD COLUMN adults INT4 NOT NULL DEFAULT 1 CHECK (adults >= 1),
+    ADD COLUMN children INT4 NOT NULL DEFAULT 0 CHECK (children >= 0),
     ADD COLUMN expected_arrival_time TIME,
     ADD COLUMN expected_departure_time TIME,
     ADD COLUMN notes VARCHAR(2000);

@@ -1,6 +1,6 @@
 package com.creditcard.booking.controller;
 
-import com.creditcard.booking.controller.dto.BookingRequest;
+import com.creditcard.booking.controller.dto.CardDetails;
 import com.creditcard.booking.domain.Booking;
 import com.creditcard.booking.domain.BookingStatus;
 import com.creditcard.booking.domain.Charge;
@@ -43,13 +43,15 @@ class BookingControllerTest {
     @MockBean
     private BookingService bookingService;
 
-    private static Booking heldBooking(UUID roomId) {
+    private static Booking confirmedBooking(UUID roomId) {
         Booking booking = new Booking();
         booking.setRoomId(roomId);
         booking.setGuestName("Jane Doe");
+        booking.setGuestPhone("+1-555-0100");
         booking.setCheckIn(LocalDate.of(2026, 11, 1));
         booking.setCheckOut(LocalDate.of(2026, 11, 3));
-        booking.setStatus(BookingStatus.HELD);
+        booking.setStatus(BookingStatus.CONFIRMED);
+        booking.setRoomChargeAmount(new BigDecimal("200.00"));
         return booking;
     }
 
@@ -60,28 +62,28 @@ class BookingControllerTest {
                   "checkIn": "2026-11-01",
                   "checkOut": "2026-11-03",
                   "guestName": "Jane Doe",
-                  "card": {"cardNumber": "4111111111111111", "expiry": "12/28", "cvv": "123", "cardholderName": "Jane Doe"}
+                  "guestPhone": "+1-555-0100"
                 }
                 """.formatted(roomId);
     }
 
     @Test
-    void validRequest_returns201Held() throws Exception {
+    void validRequest_returns201Confirmed() throws Exception {
         UUID roomId = UUID.randomUUID();
-        Booking booking = heldBooking(roomId);
-        when(bookingService.createHeldBooking(any())).thenReturn(booking);
+        Booking booking = confirmedBooking(roomId);
+        when(bookingService.createConfirmedBooking(any())).thenReturn(booking);
 
         mockMvc.perform(post("/api/v1/bookings")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(bookingRequestJson(roomId)))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.status").value("HELD"));
+                .andExpect(jsonPath("$.status").value("CONFIRMED"));
     }
 
     @Test
     void nonexistentRoom_returns404() throws Exception {
         UUID roomId = UUID.randomUUID();
-        when(bookingService.createHeldBooking(any())).thenThrow(new RoomNotFoundException(roomId));
+        when(bookingService.createConfirmedBooking(any())).thenThrow(new RoomNotFoundException(roomId));
 
         mockMvc.perform(post("/api/v1/bookings")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -93,7 +95,7 @@ class BookingControllerTest {
     @Test
     void roomUnavailable_returns409() throws Exception {
         UUID roomId = UUID.randomUUID();
-        when(bookingService.createHeldBooking(any())).thenThrow(
+        when(bookingService.createConfirmedBooking(any())).thenThrow(
                 new RoomUnavailableException(roomId, LocalDate.of(2026, 11, 1), LocalDate.of(2026, 11, 3)));
 
         mockMvc.perform(post("/api/v1/bookings")
@@ -112,7 +114,26 @@ class BookingControllerTest {
                   "checkIn": "2026-11-01",
                   "checkOut": "2026-11-03",
                   "guestName": "",
-                  "card": {"cardNumber": "4111111111111111", "expiry": "12/28", "cvv": "123", "cardholderName": "Jane Doe"}
+                  "guestPhone": "+1-555-0100"
+                }
+                """.formatted(roomId);
+
+        mockMvc.perform(post("/api/v1/bookings")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void missingGuestPhone_returns400() throws Exception {
+        UUID roomId = UUID.randomUUID();
+        String json = """
+                {
+                  "roomId": "%s",
+                  "checkIn": "2026-11-01",
+                  "checkOut": "2026-11-03",
+                  "guestName": "Jane Doe",
+                  "guestPhone": ""
                 }
                 """.formatted(roomId);
 
@@ -125,13 +146,13 @@ class BookingControllerTest {
     @Test
     void getById_found_returnsDetail() throws Exception {
         UUID bookingId = UUID.randomUUID();
-        Booking booking = heldBooking(UUID.randomUUID());
+        Booking booking = confirmedBooking(UUID.randomUUID());
         when(bookingService.getById(bookingId)).thenReturn(booking);
 
         mockMvc.perform(get("/api/v1/bookings/" + bookingId))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.guestName").value("Jane Doe"))
-                .andExpect(jsonPath("$.status").value("HELD"));
+                .andExpect(jsonPath("$.status").value("CONFIRMED"));
     }
 
     @Test
@@ -147,7 +168,7 @@ class BookingControllerTest {
     @Test
     void checkIn_succeeds_returns200CheckedIn() throws Exception {
         UUID bookingId = UUID.randomUUID();
-        Booking checkedIn = heldBooking(UUID.randomUUID());
+        Booking checkedIn = confirmedBooking(UUID.randomUUID());
         checkedIn.setStatus(BookingStatus.CHECKED_IN);
         when(bookingService.checkIn(bookingId)).thenReturn(checkedIn);
 
@@ -180,7 +201,7 @@ class BookingControllerTest {
     @Test
     void checkOut_noBody_zeroBalance_returns200CheckedOut() throws Exception {
         UUID bookingId = UUID.randomUUID();
-        Booking checkedOut = heldBooking(UUID.randomUUID());
+        Booking checkedOut = confirmedBooking(UUID.randomUUID());
         checkedOut.setStatus(BookingStatus.CHECKED_OUT);
         when(bookingService.checkOut(eq(bookingId), isNull())).thenReturn(checkedOut);
 
@@ -192,7 +213,7 @@ class BookingControllerTest {
     @Test
     void checkOut_emptyBody_zeroBalance_returns200CheckedOut() throws Exception {
         UUID bookingId = UUID.randomUUID();
-        Booking checkedOut = heldBooking(UUID.randomUUID());
+        Booking checkedOut = confirmedBooking(UUID.randomUUID());
         checkedOut.setStatus(BookingStatus.CHECKED_OUT);
         when(bookingService.checkOut(eq(bookingId), isNull())).thenReturn(checkedOut);
 
@@ -206,9 +227,9 @@ class BookingControllerTest {
     @Test
     void checkOut_withCard_balanceDue_returns200CheckoutPending() throws Exception {
         UUID bookingId = UUID.randomUUID();
-        Booking pending = heldBooking(UUID.randomUUID());
+        Booking pending = confirmedBooking(UUID.randomUUID());
         pending.setStatus(BookingStatus.CHECKOUT_PENDING);
-        when(bookingService.checkOut(eq(bookingId), any(BookingRequest.CardDetails.class))).thenReturn(pending);
+        when(bookingService.checkOut(eq(bookingId), any(CardDetails.class))).thenReturn(pending);
 
         mockMvc.perform(post("/api/v1/bookings/" + bookingId + "/check-out")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -329,7 +350,7 @@ class BookingControllerTest {
     @Test
     void getById_includesChargesAndBalanceDue() throws Exception {
         UUID bookingId = UUID.randomUUID();
-        Booking booking = heldBooking(UUID.randomUUID());
+        Booking booking = confirmedBooking(UUID.randomUUID());
         ReflectionTestUtils.setField(booking, "id", bookingId);
         booking.setStatus(BookingStatus.CHECKED_IN);
         Charge onlyCharge = charge(bookingId, ChargeType.MINIBAR, "Two sodas", "6.00");

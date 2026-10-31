@@ -1,6 +1,6 @@
 package com.creditcard.booking.service;
 
-import com.creditcard.booking.controller.dto.BookingRequest;
+import com.creditcard.booking.controller.dto.CardDetails;
 import com.creditcard.booking.domain.Booking;
 import com.creditcard.booking.domain.BookingStatus;
 import com.creditcard.booking.domain.Charge;
@@ -42,11 +42,10 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
 /**
- * {@link BookingService#checkOut} calls the same gRPC stub chain as
- * {@link BookingService#initiatePayment} when the balance due is greater than zero --
- * see {@link BookingServiceInitiatePaymentTest}'s own javadoc for why a bare Mockito
- * mock of the stub can't exercise this (withDeadlineAfter is final on grpc-java's
- * AbstractStub). A real in-process gRPC server is used here for the same reason.
+ * {@link BookingService#checkOut} calls the gRPC stub chain directly when the balance
+ * due is greater than zero. A bare Mockito mock of the stub can't exercise this --
+ * {@code withDeadlineAfter} is final on grpc-java's {@code AbstractStub} -- so a real
+ * in-process gRPC server is used here instead.
  */
 @ExtendWith(MockitoExtension.class)
 class BookingServiceCheckOutTest {
@@ -86,14 +85,19 @@ class BookingServiceCheckOutTest {
                 processedEventRepository, chargeRepository, checkoutPaymentAttemptRepository, stub, "HOTEL-001");
     }
 
+    /** {@code legacyRoomPaymentTransactionId} is set so the room cost cancels back out
+     *  of {@code getBalanceDue} -- these tests are about the checkout gRPC call itself,
+     *  not the balance formula, so the balance here is exactly the charge amount. */
     private static Booking checkedInBooking(UUID bookingId) {
         Booking booking = new Booking();
         ReflectionTestUtils.setField(booking, "id", bookingId);
         booking.setRoomId(UUID.randomUUID());
         booking.setGuestName("Jane Doe");
+        booking.setGuestPhone("+1-555-0100");
         booking.setCheckIn(LocalDate.of(2026, 11, 1));
         booking.setCheckOut(LocalDate.of(2026, 11, 3));
         booking.setStatus(BookingStatus.CHECKED_IN);
+        booking.setLegacyRoomPaymentTransactionId("txn-legacy-checkout-test");
         booking.setRoomChargeAmount(new BigDecimal("200.00"));
         return booking;
     }
@@ -128,7 +132,7 @@ class BookingServiceCheckOutTest {
         when(bookingRepository.updateStatusIfCurrent(bookingId, BookingStatus.CHECKOUT_PENDING, BookingStatus.CHECKED_IN))
                 .thenReturn(1);
         when(checkoutPaymentAttemptRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
-        BookingRequest.CardDetails card = new BookingRequest.CardDetails("4111111111111111", "12/30", "123", "Jane Doe");
+        CardDetails card = new CardDetails("4111111111111111", "12/30", "123", "Jane Doe");
 
         service.checkOut(bookingId, card);
 
@@ -157,7 +161,7 @@ class BookingServiceCheckOutTest {
         when(bookingRepository.updateStatusIfCurrent(bookingId, BookingStatus.CHECKOUT_PENDING, BookingStatus.CHECKED_IN))
                 .thenReturn(1);
         when(checkoutPaymentAttemptRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
-        BookingRequest.CardDetails card = new BookingRequest.CardDetails("4111111111111111", "12/30", "123", "Jane Doe");
+        CardDetails card = new CardDetails("4111111111111111", "12/30", "123", "Jane Doe");
 
         service.checkOut(bookingId, card);
 

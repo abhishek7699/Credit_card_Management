@@ -1,6 +1,6 @@
 package com.creditcard.booking.integration;
 
-import com.creditcard.booking.controller.dto.BookingRequest;
+import com.creditcard.booking.controller.dto.CardDetails;
 import com.creditcard.booking.controller.dto.ChargeRequest;
 import com.creditcard.booking.domain.Booking;
 import com.creditcard.booking.domain.BookingStatus;
@@ -191,14 +191,18 @@ class CheckoutPaymentFlowIT {
         return roomRepository.save(room);
     }
 
+    /** {@code legacyRoomPaymentTransactionId} is set so the room cost cancels back out
+     *  of {@code getBalanceDue} -- these tests are about the checkout-attempt saga
+     *  reacting to charges, not the balance formula itself. */
     private Booking seedCheckedInBooking(UUID roomId) {
         Booking booking = new Booking();
         booking.setRoomId(roomId);
         booking.setGuestName("Jane Doe");
+        booking.setGuestPhone("+1-555-0100");
         booking.setCheckIn(LocalDate.of(2026, 12, 1));
         booking.setCheckOut(LocalDate.of(2026, 12, 3));
         booking.setStatus(BookingStatus.CHECKED_IN);
-        booking.setTransactionId("txn-room-charge-" + UUID.randomUUID());
+        booking.setLegacyRoomPaymentTransactionId("txn-room-charge-" + UUID.randomUUID());
         booking.setRoomChargeAmount(new BigDecimal("200.00"));
         return bookingRepository.save(booking);
     }
@@ -222,7 +226,7 @@ class CheckoutPaymentFlowIT {
         Booking booking = seedCheckedInBooking(room.getId());
         bookingService.addCharge(booking.getId(),
                 new ChargeRequest(ChargeType.ROOM_SERVICE, "Club sandwich", new BigDecimal("18.50")));
-        BookingRequest.CardDetails card = new BookingRequest.CardDetails("4111111111111111", "12/30", "123", "Jane Doe");
+        CardDetails card = new CardDetails("4111111111111111", "12/30", "123", "Jane Doe");
 
         Booking afterCheckout = bookingService.checkOut(booking.getId(), card);
         assertThat(afterCheckout.getStatus()).isEqualTo(BookingStatus.CHECKOUT_PENDING);
@@ -247,7 +251,7 @@ class CheckoutPaymentFlowIT {
         Booking booking = seedCheckedInBooking(room.getId());
         bookingService.addCharge(booking.getId(),
                 new ChargeRequest(ChargeType.MINIBAR, "Soda", new BigDecimal("6.00")));
-        BookingRequest.CardDetails card = new BookingRequest.CardDetails("4111111111111111", "12/30", "123", "Jane Doe");
+        CardDetails card = new CardDetails("4111111111111111", "12/30", "123", "Jane Doe");
 
         bookingService.checkOut(booking.getId(), card);
         CheckoutPaymentAttempt attempt = checkoutPaymentAttemptRepository
@@ -274,7 +278,7 @@ class CheckoutPaymentFlowIT {
         Booking booking = seedCheckedInBooking(room.getId());
         bookingService.addCharge(booking.getId(),
                 new ChargeRequest(ChargeType.LAUNDRY, "Dry cleaning", new BigDecimal("12.00")));
-        BookingRequest.CardDetails card = new BookingRequest.CardDetails("4111111111111111", "12/30", "123", "Jane Doe");
+        CardDetails card = new CardDetails("4111111111111111", "12/30", "123", "Jane Doe");
 
         bookingService.checkOut(booking.getId(), card);
         CheckoutPaymentAttempt attempt = checkoutPaymentAttemptRepository

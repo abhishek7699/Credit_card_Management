@@ -130,10 +130,15 @@ class RoomStatusFlowIT {
         Booking booking = new Booking();
         booking.setRoomId(room.getId());
         booking.setGuestName("Jane Doe");
+        booking.setGuestPhone("+1-555-0100");
         booking.setCheckIn(LocalDate.of(2027, 2, 1));
         booking.setCheckOut(LocalDate.of(2027, 2, 3));
         booking.setStatus(BookingStatus.CONFIRMED);
-        booking.setTransactionId("txn-lifecycle-it");
+        // Legacy marker so this test's no-card checkout (zero-balance path) still
+        // succeeds -- this test is about the lifecycle transitions, not the balance
+        // formula itself.
+        booking.setLegacyRoomPaymentTransactionId("txn-lifecycle-it");
+        booking.setRoomChargeAmount(new BigDecimal("200.00"));
         booking = bookingRepository.save(booking);
 
         // check-in -> booking CHECKED_IN, room OCCUPIED
@@ -177,10 +182,11 @@ class RoomStatusFlowIT {
         Booking confirmedToday = new Booking();
         confirmedToday.setRoomId(occupiedRoom.getId());
         confirmedToday.setGuestName("Checked-In Guest");
+        confirmedToday.setGuestPhone("+1-555-0100");
         confirmedToday.setCheckIn(LocalDate.now().minusDays(1));
         confirmedToday.setCheckOut(LocalDate.now().plusDays(1));
         confirmedToday.setStatus(BookingStatus.CONFIRMED);
-        confirmedToday.setTransactionId("txn-current-it");
+        confirmedToday.setRoomChargeAmount(new BigDecimal("200.00"));
         confirmedToday = bookingRepository.save(confirmedToday);
         Booking checkedIn = bookingService.checkIn(confirmedToday.getId());
 
@@ -190,10 +196,11 @@ class RoomStatusFlowIT {
         Booking arrivingToday = new Booking();
         arrivingToday.setRoomId(arrivingRoom.getId());
         arrivingToday.setGuestName("Arriving Guest");
+        arrivingToday.setGuestPhone("+1-555-0100");
         arrivingToday.setCheckIn(LocalDate.now());
         arrivingToday.setCheckOut(LocalDate.now().plusDays(2));
         arrivingToday.setStatus(BookingStatus.CONFIRMED);
-        arrivingToday.setTransactionId("txn-arriving-it");
+        arrivingToday.setRoomChargeAmount(new BigDecimal("200.00"));
         arrivingToday = bookingRepository.save(arrivingToday);
 
         // A CONFIRMED booking for a *future* check-in date must NOT appear as
@@ -202,10 +209,11 @@ class RoomStatusFlowIT {
         Booking futureBooking = new Booking();
         futureBooking.setRoomId(futureRoom.getId());
         futureBooking.setGuestName("Future Guest");
+        futureBooking.setGuestPhone("+1-555-0100");
         futureBooking.setCheckIn(LocalDate.now().plusDays(5));
         futureBooking.setCheckOut(LocalDate.now().plusDays(7));
         futureBooking.setStatus(BookingStatus.CONFIRMED);
-        futureBooking.setTransactionId("txn-future-it");
+        futureBooking.setRoomChargeAmount(new BigDecimal("200.00"));
         bookingRepository.save(futureBooking);
 
         var board = roomService.getBoard().stream()

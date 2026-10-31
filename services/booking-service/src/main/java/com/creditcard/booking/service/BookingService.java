@@ -1,11 +1,11 @@
 package com.creditcard.booking.service;
 
 import com.creditcard.booking.controller.dto.BookingRequest;
+import com.creditcard.booking.controller.dto.CardDetails;
 import com.creditcard.booking.controller.dto.ChargeRequest;
 import com.creditcard.booking.domain.Booking;
 import com.creditcard.booking.domain.BookingRoomNight;
 import com.creditcard.booking.domain.BookingStatus;
-import com.creditcard.booking.domain.CancellationReason;
 import com.creditcard.booking.domain.Charge;
 import com.creditcard.booking.domain.CheckoutAttemptStatus;
 import com.creditcard.booking.domain.CheckoutPaymentAttempt;
@@ -17,7 +17,7 @@ import com.creditcard.booking.exception.InvalidBookingStateException;
 import com.creditcard.booking.exception.InvalidDateRangeException;
 import com.creditcard.booking.exception.RoomNotFoundException;
 import com.creditcard.booking.exception.RoomUnavailableException;
-import com.creditcard.booking.kafka.BookingNotFoundForTransactionException;
+import com.creditcard.booking.kafka.UnknownTransactionException;
 import com.creditcard.booking.kafka.event.TransactionStatusEvent;
 import com.creditcard.booking.repository.BookingRepository;
 import com.creditcard.booking.repository.BookingRoomNightRepository;
@@ -42,9 +42,13 @@ import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
-/** Saga orchestration: HELD -> charge -> CONFIRMED/CANCELLED. Hotel layers never touch
- *  card data themselves — this class only forwards it to transaction-service over the
- *  existing gRPC contract and reacts to the result (CLAUDE.md Working approach). */
+/** A booking is confirmed synchronously, with its full guest record, the instant it's
+ *  created — no card, no payment-core call, no intermediate state (2026-10-31 rework;
+ *  see specs/011-charges/research.md §2/§8). The checkout saga this layer built for
+ *  extras is unaffected and still collects the room's cost too, now that it's part of
+ *  the balance due from the moment of confirmation. Hotel layers never touch card data
+ *  themselves — this class only forwards it to transaction-service over the existing
+ *  gRPC contract and reacts to the result (CLAUDE.md Working approach). */
 @Service
 public class BookingService {
 
@@ -88,71 +92,52 @@ public class BookingService {
     }
 
     /**
-     * One transaction: insert the HELD booking row and its booking_room_nights rows
+     * One transaction: insert the CONFIRMED booking row (with its full guest record and
+     * its rate-locked room cost, research.md §2) and its booking_room_nights rows
      * (research.md §1). A unique-constraint violation on the latter means the room is
-     * already taken for an overlapping night — translated to a 409 (FR-007).
+     * already taken for an overlapping night — translated to a 409 (FR-007). The only
+     * other rejection is a missing required field or an invalid date range, both
+     * rejected before any row is written (FR-019/FR-020) — there is no intermediate
+     * state to roll back from any more.
      */
     @Transactional
-    public Booking createHeldBooking(BookingRequest request) {
+    public Booking createConfirmedBooking(BookingRequest request) {
         if (!request.checkOut().isAfter(request.checkIn())) {
             throw new InvalidDateRangeException(request.checkIn(), request.checkOut());
         }
         Room room = roomRepository.findById(request.roomId())
                 .orElseThrow(() -> new RoomNotFoundException(request.roomId()));
 
+        long nights = ChronoUnit.DAYS.between(request.checkIn(), request.checkOut());
+        BigDecimal roomChargeAmount = room.getNightlyRate().multiply(BigDecimal.valueOf(nights));
+
         Booking booking = new Booking();
         booking.setRoomId(room.getId());
         booking.setGuestName(request.guestName());
+        booking.setGuestPhone(request.guestPhone());
+        booking.setGuestEmail(request.guestEmail());
+        booking.setVisitingFrom(request.visitingFrom());
+        booking.setAdults(request.adults() != null ? request.adults() : 1);
+        booking.setChildren(request.children() != null ? request.children() : 0);
         booking.setCheckIn(request.checkIn());
         booking.setCheckOut(request.checkOut());
-        booking.setStatus(BookingStatus.HELD);
+        booking.setExpectedArrivalTime(request.expectedArrivalTime());
+        booking.setExpectedDepartureTime(request.expectedDepartureTime());
+        booking.setNotes(request.notes());
+        booking.setStatus(BookingStatus.CONFIRMED);
+        booking.setRoomChargeAmount(roomChargeAmount);
         Booking savedBooking = bookingRepository.save(booking);
 
-        List<BookingRoomNight> nights = request.checkIn().datesUntil(request.checkOut())
+        List<BookingRoomNight> bookingNights = request.checkIn().datesUntil(request.checkOut())
                 .map(date -> new BookingRoomNight(savedBooking.getId(), room.getId(), date))
                 .toList();
         try {
-            bookingRoomNightRepository.saveAll(nights);
+            bookingRoomNightRepository.saveAll(bookingNights);
             bookingRoomNightRepository.flush();
         } catch (DataIntegrityViolationException e) {
             throw new RoomUnavailableException(room.getId(), request.checkIn(), request.checkOut());
         }
         return savedBooking;
-    }
-
-    /**
-     * Calls transaction-service with a 5s deadline (research.md §2, Key Design
-     * Decision #3). On DEADLINE_EXCEEDED/UNAVAILABLE, the already-HELD booking is left
-     * HELD with no transactionId set — hold expiry (not a retry here) resolves it.
-     */
-    public void initiatePayment(Booking booking, BookingRequest.CardDetails card) {
-        Room room = roomRepository.findById(booking.getRoomId())
-                .orElseThrow(() -> new RoomNotFoundException(booking.getRoomId()));
-        long nights = ChronoUnit.DAYS.between(booking.getCheckIn(), booking.getCheckOut());
-        BigDecimal amount = room.getNightlyRate().multiply(BigDecimal.valueOf(nights));
-
-        InitiateTransactionRequest grpcRequest = InitiateTransactionRequest.newBuilder()
-                .setCardNumber(card.cardNumber())
-                .setCardExpiry(card.expiry())
-                .setCvv(card.cvv())
-                .setCardholderName(card.cardholderName())
-                .setAmount(amount.toPlainString())
-                .setCurrencyCode(CURRENCY_CODE)
-                .setMerchantId(merchantId)
-                .build();
-
-        try {
-            InitiateTransactionResponse response = transactionServiceBlockingStub
-                    .withDeadlineAfter(5, TimeUnit.SECONDS)
-                    .initiateTransaction(grpcRequest);
-            booking.setTransactionId(response.getTransactionId());
-            booking.setRoomChargeAmount(amount);
-            bookingRepository.save(booking);
-        } catch (StatusRuntimeException e) {
-            log.warn("InitiateTransaction call failed for booking {} (status={}) — booking stays HELD; "
-                            + "hold expiry resolves it if payment never completes",
-                    booking.getId(), e.getStatus().getCode());
-        }
     }
 
     public Booking getById(UUID id) {
@@ -181,41 +166,31 @@ public class BookingService {
     }
 
     /**
-     * FR-004, data-model.md's balance formula: room nights x nightly rate (the
-     * {@code roomChargeAmount} term) + charges - the amount already paid at booking
-     * (the same {@code roomChargeAmount} term again) - whatever's already been paid at
-     * checkout. The two {@code roomChargeAmount} terms always cancel by construction
-     * (a booking never reaches CHECKED_IN without its room charge already having been
-     * authorized) — written literally, matching the spec, rather than pre-simplified,
-     * so {@link #resolveRoomChargeAmount} stays a real, visible, independently-tested
-     * code path rather than dead code one refactor away from a silent regression.
+     * FR-004, data-model.md's balance formula: room cost (the rate-locked
+     * {@code roomChargeAmount}, set once at booking creation and never recomputed from
+     * the room's current rate — research.md §2) + charges - the amount already paid at
+     * booking under the pre-rework model, if any (FR-021; only non-zero for a legacy
+     * booking whose {@code legacyRoomPaymentTransactionId} is non-null, research.md §2/
+     * §8 — the same figure is added and subtracted, so it's never charged twice) -
+     * whatever's already been paid at checkout.
      */
     public BigDecimal getBalanceDue(Booking booking) {
-        BigDecimal roomCharge = resolveRoomChargeAmount(booking);
+        // The rate-locked quote set once at booking creation (#createConfirmedBooking)
+        // — read directly, never recomputed from the room's current rate (research.md
+        // §2), so a room-rate change after booking never moves an already-confirmed
+        // booking's balance.
+        BigDecimal roomCharge = booking.getRoomChargeAmount();
         BigDecimal chargesTotal = chargeRepository.findByBookingIdOrderByCreatedAtAsc(booking.getId()).stream()
                 .map(Charge::getAmount)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal legacyPaidAmount = booking.getLegacyRoomPaymentTransactionId() != null
+                ? roomCharge
+                : BigDecimal.ZERO;
         BigDecimal paidAtCheckout = checkoutPaymentAttemptRepository
                 .findByBookingIdInAndStatusIn(List.of(booking.getId()), PAID_CHECKOUT_STATUSES).stream()
                 .map(CheckoutPaymentAttempt::getAmount)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
-        return roomCharge.add(chargesTotal).subtract(roomCharge).subtract(paidAtCheckout);
-    }
-
-    /**
-     * {@code roomChargeAmount} is null only for a booking that reached CHECKED_IN
-     * before that column existed (pre-V6 data, plan.md Key Design Decision #1) — fall
-     * back to the same nights x nightly-rate formula {@link #initiatePayment} itself
-     * used at booking time, recomputed from the room's current rate.
-     */
-    private BigDecimal resolveRoomChargeAmount(Booking booking) {
-        if (booking.getRoomChargeAmount() != null) {
-            return booking.getRoomChargeAmount();
-        }
-        Room room = roomRepository.findById(booking.getRoomId())
-                .orElseThrow(() -> new RoomNotFoundException(booking.getRoomId()));
-        long nights = ChronoUnit.DAYS.between(booking.getCheckIn(), booking.getCheckOut());
-        return room.getNightlyRate().multiply(BigDecimal.valueOf(nights));
+        return roomCharge.add(chargesTotal).subtract(legacyPaidAmount).subtract(paidAtCheckout);
     }
 
     /**
@@ -259,10 +234,10 @@ public class BookingService {
      * finds the booking no longer CHECKED_IN and gets the same rejection as any other
      * wrong-state attempt), creates a PENDING CheckoutPaymentAttempt for that exact
      * amount, and calls the payment core. A call failure leaves the attempt with no
-     * transactionId — swept the same as a never-answered one (HoldExpiryService).
+     * transactionId — swept the same as a never-answered one (CheckoutAttemptSweepService).
      */
     @Transactional
-    public Booking checkOut(UUID bookingId, BookingRequest.CardDetails card) {
+    public Booking checkOut(UUID bookingId, CardDetails card) {
         Booking booking = getById(bookingId);
         if (booking.getStatus() != BookingStatus.CHECKED_IN) {
             throw new InvalidBookingStateException(bookingId,
@@ -307,7 +282,7 @@ public class BookingService {
             checkoutPaymentAttemptRepository.save(attempt);
         } catch (StatusRuntimeException e) {
             log.warn("InitiateTransaction call failed for checkout attempt {} (booking {}, status={}) — booking "
-                            + "stays CHECKOUT_PENDING; the hold-expiry sweep resolves it if no outcome ever arrives",
+                            + "stays CHECKOUT_PENDING; the checkout-attempt sweep resolves it if no outcome ever arrives",
                     attempt.getId(), bookingId, e.getStatus().getCode());
         }
 
@@ -329,11 +304,11 @@ public class BookingService {
     }
 
     /**
-     * FR-012a (Clarifications): HoldExpiryService's second sweep calls this once per
-     * stuck attempt, each in its own transaction, mirroring {@link #cancel}'s own
-     * per-booking isolation. The attempt's own conditional update is the race guard —
-     * if a late outcome for it already landed (or lands concurrently) via
-     * {@link #handlePaymentOutcome}, this becomes a no-op rather than double-applying.
+     * FR-012a (Clarifications): CheckoutAttemptSweepService's sweep calls this once
+     * per stuck attempt, each in its own transaction. The attempt's own conditional
+     * update is the race guard — if a late outcome for it already landed (or lands
+     * concurrently) via {@link #handlePaymentOutcome}, this becomes a no-op rather
+     * than double-applying.
      */
     @Transactional
     public void expireCheckoutAttempt(CheckoutPaymentAttempt attempt) {
@@ -346,57 +321,23 @@ public class BookingService {
     }
 
     /**
-     * Cancels a booking: status + cancellation reason update and the deletion of its
-     * booking_room_nights rows in the SAME transaction (Key Design Decision #1,
-     * plan.md) — the room is immediately re-searchable, never left blocked by a stale
-     * row. Used for a declined/failed payment (FR-011) and for hold expiry (FR-015).
-     */
-    @Transactional
-    public void cancel(Booking booking, CancellationReason reason) {
-        booking.setStatus(BookingStatus.CANCELLED);
-        booking.setCancellationReason(reason);
-        bookingRepository.save(booking);
-        bookingRoomNightRepository.deleteByBookingId(booking.getId());
-    }
-
-    /**
-     * Consumes transaction.status.updated (via TransactionStatusConsumer). Looks up the
-     * booking by transactionId first; on a miss, falls back to a CheckoutPaymentAttempt
-     * lookup by the same transactionId (data-model.md Key Design Decision #3 — a
-     * checkout charge reuses this exact saga's own transactionId space) before giving
-     * up. If neither matches, throws so the Kafka error handler retries with bounded
-     * backoff rather than marking this delivery processed (research.md §3a) — this is
-     * the one case that must NOT be a no-op.
-     *
-     * <p>Full handling matrix for the original room-charge saga (contracts/events.md):
-     * HELD+AUTHORIZED -> CONFIRMED (FR-010); HELD+DECLINED/FAILED -> CANCELLED, room
-     * released (FR-011); a CANCELLED booking whose reason is HOLD_EXPIRED receiving a
-     * late AUTHORIZED outcome stays CANCELLED — never reverses — only its reason
-     * changes to PAYMENT_AFTER_EXPIRY, with a WARN logged for manual refund (FR-019,
-     * FR-023, no reverse transitions); every other combination (CONFIRMED already
-     * reached; CANCELLED for any other reason; DECLINED/FAILED for an already non-HELD
-     * booking) is a no-op (FR-021). The checkout saga's own matrix is in
-     * {@link #handleCheckoutOutcome} (FR-010/FR-011/FR-012a/FR-012b/FR-012c).
+     * Consumes transaction.status.updated (via TransactionStatusConsumer). Every
+     * outcome this consumer sees is a checkout-attempt outcome now — booking creation
+     * no longer has a transactionId space of its own at all (2026-10-31 rework;
+     * research.md §5). Looks up the attempt by transactionId; if it's missing, throws
+     * so the Kafka error handler retries with bounded backoff rather than marking this
+     * delivery processed (research.md §3a) — this is the one case that must NOT be a
+     * no-op, since the attempt row and this event can race (the attempt is persisted
+     * PENDING, then the gRPC call is made, then the returned transactionId is saved, as
+     * separate steps). The outcome matrix itself is in {@link #handleCheckoutOutcome}
+     * (FR-010/FR-011/FR-012a/FR-012b/FR-012c).
      */
     @Transactional
     public void handlePaymentOutcome(TransactionStatusEvent event) {
         TransactionStatusEvent.Payload payload = event.getPayload();
-        var bookingOpt = bookingRepository.findByTransactionId(payload.getTransactionId());
-        if (bookingOpt.isPresent()) {
-            if (markProcessedOrSkip(event)) {
-                handleRoomChargeOutcome(bookingOpt.get(), payload);
-            }
-            return;
-        }
-
-        // The idempotency mark happens only once a match (booking or attempt) is
-        // confirmed to exist — never before, and never for the not-found case below.
-        // Marking it earlier would let a legitimate retry (the booking/attempt row
-        // simply hasn't landed yet when this event first arrives) see itself as
-        // "already processed" and silently never apply once the row does appear.
         CheckoutPaymentAttempt attempt = checkoutPaymentAttemptRepository
                 .findByTransactionId(payload.getTransactionId())
-                .orElseThrow(() -> new BookingNotFoundForTransactionException(payload.getTransactionId()));
+                .orElseThrow(() -> new UnknownTransactionException(payload.getTransactionId()));
         if (markProcessedOrSkip(event)) {
             handleCheckoutOutcome(attempt, payload);
         }
@@ -412,34 +353,11 @@ public class BookingService {
         return true;
     }
 
-    private void handleRoomChargeOutcome(Booking booking, TransactionStatusEvent.Payload payload) {
-        String outcome = payload.getOutcome();
-        if (booking.getStatus() == BookingStatus.HELD) {
-            if (OUTCOME_AUTHORIZED.equals(outcome)) {
-                booking.setStatus(BookingStatus.CONFIRMED);
-                bookingRepository.save(booking);
-            } else if (OUTCOME_DECLINED.equals(outcome) || OUTCOME_FAILED.equals(outcome)) {
-                cancel(booking, OUTCOME_DECLINED.equals(outcome)
-                        ? CancellationReason.PAYMENT_DECLINED
-                        : CancellationReason.PAYMENT_FAILED);
-            }
-        } else if (booking.getStatus() == BookingStatus.CANCELLED
-                && booking.getCancellationReason() == CancellationReason.HOLD_EXPIRED
-                && OUTCOME_AUTHORIZED.equals(outcome)) {
-            booking.setCancellationReason(CancellationReason.PAYMENT_AFTER_EXPIRY);
-            bookingRepository.save(booking);
-            log.warn("AUTHORIZED outcome arrived for booking {} (transactionId={}) after it was already "
-                            + "cancelled by hold expiry — staying CANCELLED (no reverse transition); "
-                            + "manual refund required",
-                    booking.getId(), payload.getTransactionId());
-        }
-    }
-
     /**
      * FR-010/FR-011 (checkout saga): PENDING+AUTHORIZED -> attempt AUTHORIZED, booking
      * CHECKOUT_PENDING -> CHECKED_OUT, room -> DIRTY; PENDING+DECLINED/FAILED ->
      * attempt DECLINED/FAILED, booking back to CHECKED_IN (balance unchanged — staff
-     * can retry). FR-012b: EXPIRED+AUTHORIZED (a late outcome after the hold-expiry
+     * can retry). FR-012b: EXPIRED+AUTHORIZED (a late outcome after the checkout-attempt
      * sweep already reverted the booking) -> attempt LATE_AUTHORIZED, recorded as a
      * payment (reduces the balance {@link #getBalanceDue} returns next), booking stays
      * CHECKED_IN, a WARN logged — never silently dropped (FR-012b's own instruction).

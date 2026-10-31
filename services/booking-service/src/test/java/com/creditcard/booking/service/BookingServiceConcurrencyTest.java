@@ -34,7 +34,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * FR-007 / research.md §1: at most one of two concurrent booking attempts for the same
- * room and overlapping dates reaches HELD — the other is rejected via the
+ * room and overlapping dates reaches CONFIRMED — the other is rejected via the
  * booking_room_nights unique-constraint violation, never a double-booked room.
  */
 @SpringBootTest
@@ -84,8 +84,8 @@ class BookingServiceConcurrencyTest {
         room = roomRepository.save(room);
 
         BookingRequest request = new BookingRequest(
-                room.getId(), LocalDate.of(2026, 12, 1), LocalDate.of(2026, 12, 3), "Guest",
-                new BookingRequest.CardDetails("4111111111111111", "12/28", "123", "Guest"));
+                room.getId(), LocalDate.of(2026, 12, 1), LocalDate.of(2026, 12, 3), "Guest", "+1-555-0100",
+                null, null, null, null, null, null, null);
 
         int attempts = 8;
         ExecutorService pool = Executors.newFixedThreadPool(attempts);
@@ -98,7 +98,7 @@ class BookingServiceConcurrencyTest {
             futures.add(pool.submit(() -> {
                 try {
                     start.await();
-                    bookingService.createHeldBooking(request);
+                    bookingService.createConfirmedBooking(request);
                     succeeded.incrementAndGet();
                 } catch (RoomUnavailableException e) {
                     rejected.incrementAndGet();

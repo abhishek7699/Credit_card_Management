@@ -1,8 +1,8 @@
 package com.creditcard.booking.controller;
 
-import com.creditcard.booking.controller.dto.BookingCreatedResponse;
 import com.creditcard.booking.controller.dto.BookingDetailResponse;
 import com.creditcard.booking.controller.dto.BookingRequest;
+import com.creditcard.booking.controller.dto.CardDetails;
 import com.creditcard.booking.controller.dto.ChargeRequest;
 import com.creditcard.booking.controller.dto.ChargeResponse;
 import com.creditcard.booking.controller.dto.CheckOutRequest;
@@ -32,14 +32,14 @@ public class BookingController {
         this.bookingService = bookingService;
     }
 
-    /** FR-006: the booking is HELD immediately, before any payment outcome is known —
-     *  the response never waits on the gRPC call's outcome, only on it being attempted. */
+    /** FR-020: the booking is confirmed synchronously — this response already reflects
+     *  the confirmed booking, with no payment-core call made and no intermediate state
+     *  to poll for. */
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    public BookingCreatedResponse create(@Valid @RequestBody BookingRequest request) {
-        Booking booking = bookingService.createHeldBooking(request);
-        bookingService.initiatePayment(booking, request.card());
-        return new BookingCreatedResponse(booking.getId(), booking.getStatus());
+    public BookingDetailResponse create(@Valid @RequestBody BookingRequest request) {
+        Booking booking = bookingService.createConfirmedBooking(request);
+        return toDetailResponse(booking);
     }
 
     @GetMapping("/{id}")
@@ -62,7 +62,7 @@ public class BookingController {
     @PostMapping("/{id}/check-out")
     public BookingDetailResponse checkOut(@PathVariable UUID id,
                                            @Valid @RequestBody(required = false) CheckOutRequest request) {
-        BookingRequest.CardDetails card = request != null ? request.card() : null;
+        CardDetails card = request != null ? request.card() : null;
         return toDetailResponse(bookingService.checkOut(id, card));
     }
 
@@ -86,12 +86,19 @@ public class BookingController {
         return new BookingDetailResponse(
                 booking.getId(),
                 booking.getRoomId(),
-                booking.getGuestName(),
-                booking.getCheckIn(),
-                booking.getCheckOut(),
                 booking.getStatus(),
                 booking.getCancellationReason(),
-                booking.getTransactionId(),
+                booking.getGuestName(),
+                booking.getGuestPhone(),
+                booking.getGuestEmail(),
+                booking.getVisitingFrom(),
+                booking.getAdults(),
+                booking.getChildren(),
+                booking.getCheckIn(),
+                booking.getCheckOut(),
+                booking.getExpectedArrivalTime(),
+                booking.getExpectedDepartureTime(),
+                booking.getNotes(),
                 charges,
                 bookingService.getBalanceDue(booking));
     }

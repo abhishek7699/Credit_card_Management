@@ -18,8 +18,8 @@ this layer (unaffected by this revision).
 | `guest_phone` | VARCHAR(30), NOT NULL *(new)* | required (Clarifications: required-field bundle) |
 | `guest_email` | VARCHAR(320), nullable *(new)* | optional |
 | `visiting_from` | VARCHAR(200), nullable *(new)* | optional, free text |
-| `adults` | INT, NOT NULL, DEFAULT 1, CHECK (adults >= 1) *(new)* | defaults to 1 when omitted (Clarifications) |
-| `children` | INT, NOT NULL, DEFAULT 0, CHECK (children >= 0) *(new)* | defaults to 0 when omitted (Clarifications) |
+| `adults` | INT4, NOT NULL, DEFAULT 1, CHECK (adults >= 1) *(new)* | defaults to 1 when omitted (Clarifications) |
+| `children` | INT4, NOT NULL, DEFAULT 0, CHECK (children >= 0) *(new)* | defaults to 0 when omitted (Clarifications) |
 | `check_in` | DATE, NOT NULL | unchanged |
 | `check_out` | DATE, NOT NULL | unchanged |
 | `expected_arrival_time` | TIME, nullable *(new)* | optional, informational only (Assumptions) |
@@ -44,8 +44,8 @@ ALTER TABLE bookings
     ADD COLUMN guest_phone VARCHAR(30) NOT NULL DEFAULT '',
     ADD COLUMN guest_email VARCHAR(320),
     ADD COLUMN visiting_from VARCHAR(200),
-    ADD COLUMN adults INT NOT NULL DEFAULT 1 CHECK (adults >= 1),
-    ADD COLUMN children INT NOT NULL DEFAULT 0 CHECK (children >= 0),
+    ADD COLUMN adults INT4 NOT NULL DEFAULT 1 CHECK (adults >= 1),
+    ADD COLUMN children INT4 NOT NULL DEFAULT 0 CHECK (children >= 0),
     ADD COLUMN expected_arrival_time TIME,
     ADD COLUMN expected_departure_time TIME,
     ADD COLUMN notes VARCHAR(2000);

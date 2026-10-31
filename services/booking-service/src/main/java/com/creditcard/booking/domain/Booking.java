@@ -41,8 +41,12 @@ public class Booking {
     @Column(name = "visiting_from", length = 200)
     private String visitingFrom;
 
+    /** Defaults to 1, mirroring the column's own DB default and the {@code adults >= 1}
+     *  CHECK constraint -- so a {@code Booking} built directly (not only through
+     *  {@code BookingService#createConfirmedBooking}'s own explicit 1/0 defaulting,
+     *  FR-018) never violates it by simply being left unset. */
     @Column(name = "adults", nullable = false)
-    private int adults;
+    private int adults = 1;
 
     @Column(name = "children", nullable = false)
     private int children;
