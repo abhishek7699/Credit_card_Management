@@ -1,439 +1,171 @@
----
+# Tasks: Charges (rework of Phases 1-5 for checkout-only payment)
 
-description: "Task list for Charges (layer 2c)"
----
+**Input**: Design documents from `/specs/011-charges/` (plan.md, spec.md, research.md, data-model.md, contracts/api.md, quickstart.md)
 
-# Tasks: Charges
+**Context**: Phases 1-5 of this layer already shipped the *old* design (room cost
+charged at booking time via `initiatePayment`/`HELD`). This is a **rework**, not
+greenfield — most tasks modify or delete existing code rather than create new
+files. Tasks are grouped to match CLAUDE.md's per-phase approval convention
+(Setup / Foundational / each user story / Polish) — implement a whole phase,
+commit it, then stop for the checkpoint before the next phase.
 
-**Input**: Design documents from `specs/011-charges/` (plan.md, spec.md, research.md,
-data-model.md, contracts/, quickstart.md)
+## Phase 1: Setup — schema and domain enums
 
-**Prerequisites**: plan.md, spec.md, research.md, data-model.md, contracts/,
-quickstart.md — all present.
+**Purpose**: Land the schema change and the domain-level enum/entity changes
+every later phase depends on.
 
-**Tests**: Included, and not optional for this project. Constitution Principle II
-(NON-NEGOTIABLE) mandates 100% test coverage for every class in every service, and
-layer 2d's own precedent extends that to the frontend (Vitest coverage thresholds).
+- [ ] T001 Create `services/booking-service/src/main/resources/db/migration/V7__revise_booking_for_checkout_only_payment.sql` per data-model.md: add 8 guest-detail columns (`guest_phone` NOT NULL DEFAULT '', `guest_email`, `visiting_from`, `adults` NOT NULL DEFAULT 1 CHECK >= 1, `children` NOT NULL DEFAULT 0 CHECK >= 0, `expected_arrival_time`, `expected_departure_time`, `notes`); rename `transaction_id` → `legacy_room_payment_transaction_id`; delete `booking_room_nights` rows for any `HELD` booking, then `UPDATE bookings SET status = 'CANCELLED', cancellation_reason = 'MIGRATED_UNPAID_HOLD' WHERE status = 'HELD'`. Do **not** drop `cancellation_reason`.
+- [ ] T002 [P] In `services/booking-service/src/main/java/com/creditcard/booking/domain/BookingStatus.java`, remove `HELD` only; update the Javadoc to describe `CANCELLED` as kept for layer 2f, no longer reachable from this layer's own code.
+- [ ] T003 [P] In `services/booking-service/src/main/java/com/creditcard/booking/domain/CancellationReason.java`, add `MIGRATED_UNPAID_HOLD`; update the Javadoc to note it's set only by the `V7` migration.
+- [ ] T004 In `services/booking-service/src/main/java/com/creditcard/booking/domain/Booking.java`: rename the `transactionId` field/column mapping to `legacyRoomPaymentTransactionId` (`@Column(name = "legacy_room_payment_transaction_id")`, getter/setter renamed); update `roomChargeAmount`'s Javadoc (now the rate-locked quote, set by `createConfirmedBooking` itself, never recomputed); add the 8 new fields with JPA column mappings matching T001 (`guestPhone` non-nullable, the other 7 nullable, `adults`/`children` as `int` primitives defaulting via the DB default — not nullable `Integer`, since the column itself is `NOT NULL DEFAULT`); add getters/setters for all 8. `cancellationReason` field is unchanged.
+- [ ] T005 [P] In `services/booking-service/src/main/java/com/creditcard/booking/domain/BookingTest.java`, update/extend the existing domain test to cover the new fields and the renamed `legacyRoomPaymentTransactionId` accessor.
 
-**Organization**: Tasks are grouped by user story (from spec.md: US1 = P1 add a
-charge, US2 = P2 balance-due board flag, US3 = P3 checkout with a balance, US4 = P4
-checkout with no balance).
-
-## Format: `[ID] [P?] [Story] Description`
-
-- **[P]**: Can run in parallel (different files, no dependencies on incomplete tasks)
-- **[Story]**: Which user story this task belongs to (US1-US4)
-- File paths are exact, relative to the repository root
-
-## Path Conventions
-
-Additive changes inside the existing `services/booking-service/` module, the
-existing `services/api-gateway/` route/security config, the existing `frontend/`
-app (extending layer 2d's own `booking`/`room-board` features), and one
-test-harness correctness fix in `scripts/e2e-test.sh` — per plan.md's Project
-Structure. No new service, no new module, no new frontend area.
+**Checkpoint**: Project compiles against the new schema/entity shape (service/controller layers not yet updated — expect compile errors downstream until Phase 2/3 land; this phase's own test, T005, passes in isolation).
 
 ---
 
-## Phase 1: Setup
+## Phase 2: Foundational — shared repository/exception/config renames
 
-**Purpose**: The test-harness root-cause fix and the schema migration — neither
-depends on, nor is depended on by, any user story, but both should land first so
-the rest of this layer is built and verified against a correct foundation.
+**Purpose**: Infrastructure every user story's rework depends on.
 
-- [X] T001 `scripts/e2e-test.sh`: `setup_auth_mock` records whether a container
-      named `auth-service` already existed *before* it replaces it
-      (`PREEXISTING_AUTH_MOCK=1`/`0`); `cleanup()` runs `docker compose up -d
-      auth-mock` to restore it when that flag is set, instead of unconditionally
-      leaving nothing behind (research.md's own gap from layer 2d, now fixed at
-      the root per this layer's own Clarifications-adjacent instruction)
-- [X] T002 `.github/workflows/ci.yml`: remove the "Restart auth-mock" step added in
-      layer 2d — no longer needed once T001 lands (depends on T001)
-- [X] T003 Flyway migration
-      `services/booking-service/src/main/resources/db/migration/V6__add_charges_and_checkout_payments.sql`:
-      `charges` table, `checkout_payment_attempts` table, `bookings.room_charge_amount`
-      column — additive only, no existing column changed or dropped (data-model.md)
+- [ ] T006 In `services/booking-service/src/main/java/com/creditcard/booking/repository/BookingRepository.java`: remove `findByTransactionId` (dead — nothing looks a booking up by it any more) and `findByStatusAndCreatedAtBefore` (only ever called for `HELD`, which no longer exists).
+- [ ] T007 Rename `services/booking-service/src/main/java/com/creditcard/booking/kafka/BookingNotFoundForTransactionException.java` → `UnknownTransactionException.java` (same package); update its Javadoc to describe it as thrown only for an unrecognized checkout-attempt transactionId, never a booking.
+- [ ] T008 Rename `services/booking-service/src/main/java/com/creditcard/booking/service/HoldExpiryService.java` → `CheckoutAttemptSweepService.java`: remove `expireAbandonedHolds()` entirely; keep `expireStuckCheckoutAttempts()` unchanged; rename the constructor's `@Value("${booking.hold-timeout-minutes:10}")` to `@Value("${booking.checkout-timeout-minutes:10}")` and the `holdTimeoutMinutes` field to `checkoutTimeoutMinutes`; drop the now-unused `BookingRepository`/`bookingService.cancel` dependency if `BookingRepository` is no longer referenced after removing `expireAbandonedHolds`.
+- [ ] T009 [P] In `services/booking-service/src/main/resources/application.yml`, rename `booking.hold-timeout-minutes` → `booking.checkout-timeout-minutes` (keep the `${BOOKING_HOLD_TIMEOUT_MINUTES:10}` env-var fallback name as `${BOOKING_CHECKOUT_TIMEOUT_MINUTES:10}` — confirmed via `docker-compose.yml` that this env var is never explicitly set there, so no docker-compose change is needed, only the default).
+- [ ] T010 Rename `services/booking-service/src/test/java/com/creditcard/booking/service/HoldExpiryServiceTest.java` → `CheckoutAttemptSweepServiceTest.java`: remove its `expireAbandonedHolds` test cases; keep `expireStuckCheckoutAttempts` test cases, updated for the renamed class/field.
+- [ ] T011 Delete `services/booking-service/src/test/java/com/creditcard/booking/integration/HoldExpiryFlowIT.java` if it only exercises `expireAbandonedHolds`; if it also covers `expireStuckCheckoutAttempts`, keep it but remove only the hold-expiry-specific scenarios and rename references to `CheckoutAttemptSweepService`.
 
-**Checkpoint**: `docker compose up -d --build` then a full `scripts/e2e-test.sh`
-run leaves `auth-service` running afterward (verify with `docker compose ps
-auth-mock`), matching what it looked like before the run. Migration applies
-cleanly against a fresh CockroachDB.
+**Checkpoint**: Repository/exception/config renames compile and their own unit tests pass; `BookingService`/`BookingController` still reference the old names (updated next phase).
 
 ---
 
-## Phase 2: Foundational (Blocking Prerequisites)
+## Phase 3: User Story 1 — Capture a full guest record and confirm immediately (Priority: P1) 🎯 MVP
 
-**Purpose**: Domain/repository/DTO shapes every user story depends on.
+**Goal**: `POST /api/v1/bookings` takes no card, confirms synchronously, records the full guest record, and locks in the room cost as the booking's starting balance.
 
-**⚠️ CRITICAL**: No user story work can begin until this phase is complete.
-
-- [X] T004 [P] `services/booking-service/src/main/java/com/creditcard/booking/domain/ChargeType.java`
-      — `ROOM_SERVICE`, `MINIBAR`, `LAUNDRY`, `OTHER`
-- [X] T005 [P] `services/booking-service/src/main/java/com/creditcard/booking/domain/CheckoutAttemptStatus.java`
-      — `PENDING`, `AUTHORIZED`, `DECLINED`, `FAILED`, `EXPIRED`, `LATE_AUTHORIZED`
-      (data-model.md's state machine)
-- [X] T006 [P] `services/booking-service/src/main/java/com/creditcard/booking/domain/Charge.java`
-      — id, bookingId, type, description, amount, createdAt; add-only, no setter
-      beyond construction needed
-- [X] T007 [P] `services/booking-service/src/main/java/com/creditcard/booking/domain/CheckoutPaymentAttempt.java`
-      — id, bookingId, transactionId (nullable), amount, status, createdAt, updatedAt
-- [X] T008 [P] `services/booking-service/src/main/java/com/creditcard/booking/domain/BookingStatus.java`
-      — add `CHECKOUT_PENDING`
-- [X] T009 `services/booking-service/src/main/java/com/creditcard/booking/domain/Booking.java`
-      — add `roomChargeAmount` field (nullable, set once in `initiatePayment`, plan.md
-      Key Design Decision #1) (depends on T008 for the status enum it coexists with)
-- [X] T010 [P] `services/booking-service/src/main/java/com/creditcard/booking/repository/ChargeRepository.java`
-      — `findByBookingIdOrderByCreatedAtAsc(UUID)`, `findByBookingIdIn(List<UUID>)`
-      (depends on T006)
-- [X] T011 [P] `services/booking-service/src/main/java/com/creditcard/booking/repository/CheckoutPaymentAttemptRepository.java`
-      — `findByTransactionId(String)`, `findByBookingIdInAndStatusIn(List<UUID>,
-      List<CheckoutAttemptStatus>)` (for board balance calc), `findByStatusAndCreatedAtBefore(CheckoutAttemptStatus,
-      Instant)` (for the sweep, research.md §4) (depends on T005, T007)
-- [X] T012 `services/booking-service/src/main/java/com/creditcard/booking/service/BookingService.java`:
-      `initiatePayment` sets `roomChargeAmount` on the booking alongside `transactionId`
-      (depends on T009)
-- [X] T013 [P] `services/booking-service/src/main/java/com/creditcard/booking/controller/dto/ChargeResponse.java`
-      — chargeId, type, description, amount, createdAt (depends on T004)
-- [X] T014 [P] `services/booking-service/src/main/java/com/creditcard/booking/controller/dto/ChargeRequest.java`
-      — type, description, amount, all `@NotNull`/`@NotBlank`/`@Positive` as
-      appropriate (depends on T004)
-- [X] T015 `services/booking-service/src/main/java/com/creditcard/booking/controller/dto/BookingDetailResponse.java`
-      — add `charges: List<ChargeResponse>`, `balanceDue: BigDecimal` (depends on T013)
-- [X] T016 [P] `frontend/src/types/staff.ts`: add `Charge`, `ChargeType`; extend
-      `Booking` with `charges`/`balanceDue`; extend `RoomBoardEntry` with
-      `hasBalanceDue: boolean | null`
-
-### Tests for Foundational
-
-- [X] T017 [P] `services/booking-service/src/test/java/com/creditcard/booking/service/BookingServiceTest.java`
-      (extended): `initiatePayment` persists `roomChargeAmount` equal to the exact
-      amount the gRPC request was built from
-
-**Checkpoint**: Foundation compiles; T017 passes at 100% coverage for the files it
-touches.
-
----
-
-## Phase 3: User Story 1 — Staff Add a Charge During a Stay (Priority: P1) 🎯 layer MVP
-
-**Goal**: Front-desk staff add a charge to a checked-in booking and see the
-resulting balance immediately.
-
-**Independent Test**: Check a booking in, add charges of different types, confirm
-each is its own line item and the balance due matches (spec.md Story 1).
-
-### Tests for User Story 1 ⚠️ (write first, confirm they fail)
-
-- [X] T018 [P] [US1] Unit test: `BookingService.addCharge()` — succeeds for a
-      `CHECKED_IN` booking; rejects every other status, recording nothing; balance
-      calc sums charges correctly (the `roomChargeAmount` terms cancel, per FR-004) —
-      in `BookingServiceTest.java`
-- [X] T019 [P] [US1] Contract test: `POST /api/v1/bookings/{id}/charges` (201 + body
-      shape, 409 for a non-`CHECKED_IN` booking), `GET .../charges` (200, ordered
-      list) — in `services/booking-service/src/test/java/com/creditcard/booking/controller/BookingControllerTest.java`
-- [X] T020 [P] [US1] Integration test (real CockroachDB): check in, add two charges
-      of different types, confirm `GET /api/v1/bookings/{id}` returns both as line
-      items with the correct `balanceDue` — new
-      `services/booking-service/src/test/java/com/creditcard/booking/integration/ChargeFlowIT.java`
-- [X] T021 [P] [US1] `frontend/src/features/booking/ChargesPanel.test.tsx` (MSW):
-      renders existing charges and balance; submitting the add-charge form calls
-      the mutation with the right payload and the panel updates without a manual
-      refresh (cache-tag invalidation, research-adjacent — see T028)
-- [X] T022 [P] [US1] `frontend/src/features/room-board/RoomActionPanel.test.tsx`
-      (extended): an `OCCUPIED` room's panel renders `ChargesPanel` with that
-      booking's current charges/balance
+**Independent Test**: Submit a booking with only name/phone/dates — confirm immediate `CONFIRMED` status, no card requested, no payment-core call, `balanceDue` equal to the room's cost for those nights. Submit one with every optional field and confirm all of it round-trips.
 
 ### Implementation for User Story 1
 
-- [X] T023 [US1] `BookingService.java`: `addCharge(bookingId, ChargeRequest)` —
-      validates `CHECKED_IN`, persists a `Charge`, returns it (depends on T006, T014)
-- [X] T024 [US1] `BookingService.java`: a `getBalanceDue(Booking)` helper — sums
-      `ChargeRepository.findByBookingIdOrderByCreatedAtAsc`'s amounts plus
-      `roomChargeAmount`, minus `roomChargeAmount` and the sum of `AUTHORIZED`/
-      `LATE_AUTHORIZED` `CheckoutPaymentAttempt` amounts (FR-004) (depends on T010, T011)
-- [X] T025 [US1] `BookingController.java`: `POST /{id}/charges`, `GET /{id}/charges`;
-      extend `GET /{id}` to include `charges`/`balanceDue` via T024 (depends on T023, T024)
-- [X] T026 [US1] `services/api-gateway/.../config/RouteConfig.java`: add
-      `booking-charges-get`/`booking-charges-post` routes (reuse `booking-service-cb`);
-      `SecurityConfig.java`: add `GET /api/v1/bookings/*` and `GET
-      /api/v1/bookings/*/charges` matchers (`FRONT_DESK`, `HOUSEKEEPING`, `ADMIN`),
-      placed before the existing broad rule — same pattern as the room board's own
-      matcher (research.md §ref: layer 2b/2d precedent)
-- [X] T027 [US1] `frontend/src/features/booking/bookingApi.ts`: `addCharge`
-      mutation; add RTK Query cache tags (`Booking`) to `getBooking` (`providesTags`)
-      and `addCharge`/`checkIn`/`checkOut` (`invalidatesTags`) so adding a charge is
-      reflected immediately, no polling wait (spec.md SC-001) (depends on T016)
-- [X] T028 [US1] `frontend/src/features/booking/ChargesPanel.tsx`: charge-type
-      select, description, amount fields; charges list; balance display (depends on T027)
-- [X] T029 [US1] `frontend/src/features/room-board/RoomActionPanel.tsx`: the
-      `OCCUPIED` branch fetches that booking's detail (`useGetBookingQuery`) and
-      renders `ChargesPanel` alongside the existing check-out action (depends on T028)
+- [ ] T012 [US1] In `services/booking-service/src/main/java/com/creditcard/booking/controller/dto/BookingRequest.java`: remove the `card` field and the nested `CardDetails` record; add `@NotBlank String guestPhone`, `String guestEmail`, `String visitingFrom`, `@Min(1) Integer adults`, `@Min(0) Integer children`, `LocalTime expectedArrivalTime`, `LocalTime expectedDepartureTime`, `String notes`.
+- [ ] T013 [P] [US1] Create `services/booking-service/src/main/java/com/creditcard/booking/controller/dto/CardDetails.java` as a top-level record with the same 4 fields `BookingRequest.CardDetails` had (`cardNumber`, `expiry`, `cvv`, `cardholderName`), same validation annotations.
+- [ ] T014 [US1] Update `services/booking-service/src/main/java/com/creditcard/booking/controller/dto/CheckOutRequest.java` to reference the new top-level `CardDetails` instead of `BookingRequest.CardDetails`.
+- [ ] T015 [US1] In `services/booking-service/src/main/java/com/creditcard/booking/service/BookingService.java`: rename `createHeldBooking` → `createConfirmedBooking`; set `status` directly to `CONFIRMED` (no `HELD`); populate the 8 new guest-detail fields from the request (defaulting `adults`/`children` to 1/0 when the request's values are null — FR-018); compute `nights × room.nightlyRate` and set it on `booking.roomChargeAmount` before saving (the rate lock, research.md §2) — this now happens here, not in the removed `initiatePayment`; remove `initiatePayment` entirely; remove `cancel()` (no caller remains in this layer); update class-level Javadoc (no longer "HELD -> charge -> CONFIRMED/CANCELLED saga").
+- [ ] T016 [US1] In the same file, update `getBalanceDue`/`resolveRoomChargeAmount`: `resolveRoomChargeAmount` now simply returns `booking.getRoomChargeAmount()` (no `Room` lookup, no current-rate fallback — research.md §2); the legacy-cancellation term in `getBalanceDue` becomes conditional on `booking.getLegacyRoomPaymentTransactionId() != null` (plan.md Key Design Decision #1) instead of always subtracting; update the method's Javadoc accordingly.
+- [ ] T017 [US1] In the same file, simplify `handlePaymentOutcome`: remove the `bookingRepository.findByTransactionId` branch and `handleRoomChargeOutcome` entirely — go straight to the `CheckoutPaymentAttemptRepository` lookup, throwing the renamed `UnknownTransactionException` on a miss; update the class/method Javadoc (drop the HELD+AUTHORIZED/DECLINED matrix description, since booking creation no longer goes through this consumer at all).
+- [ ] T018 [US1] In `services/booking-service/src/main/java/com/creditcard/booking/controller/BookingController.java`: `create()` calls `bookingService.createConfirmedBooking(request)` and returns `toDetailResponse(booking)` directly (no more `initiatePayment` call, no more `BookingCreatedResponse`); update its Javadoc (the response now reflects the already-confirmed booking, not a HELD one awaiting payment).
+- [ ] T019 [P] [US1] Delete `services/booking-service/src/main/java/com/creditcard/booking/controller/dto/BookingCreatedResponse.java` (no longer used).
+- [ ] T020 [US1] In `services/booking-service/src/main/java/com/creditcard/booking/controller/dto/BookingDetailResponse.java`: remove the `transactionId` field (internal legacy marker only); keep `cancellationReason` unchanged; add the 8 guest-detail fields; update `BookingController#toDetailResponse` to match the new constructor shape.
+- [ ] T021 [US1] In `services/booking-service/src/main/java/com/creditcard/booking/repository/BookingRepository.java`, if not already covered by T006, confirm no remaining reference to `findByTransactionId`/HELD-based queries; add nothing new (the room-night unique-constraint path is unchanged).
+- [ ] T022 [P] [US1] In `services/booking-service/src/test/java/com/creditcard/booking/service/BookingServiceTest.java`: remove tests for `initiatePayment`/`cancel`/`handleRoomChargeOutcome`/HELD transitions; add tests for acceptance scenarios 1-6 (spec.md US1): minimal-field booking confirms immediately with `roomChargeAmount` set and no payment-core interaction; full-field booking round-trips every guest field; missing required field rejected; omitted adults/children default to 1/0; `getBalanceDue` reduces to `charges - checkoutPayments` for a seeded legacy booking (non-null `legacyRoomPaymentTransactionId`) — the double-charge test the user explicitly asked for; a room-rate change after booking does not change an existing booking's balance — the rate-lock test the user explicitly asked for.
+- [ ] T023 [P] [US1] Delete `services/booking-service/src/test/java/com/creditcard/booking/service/BookingServiceInitiatePaymentTest.java` (tested only the removed `initiatePayment`).
+- [ ] T024 [P] [US1] Delete `services/booking-service/src/test/java/com/creditcard/booking/integration/BookingConfirmedFlowIT.java` and `BookingDeclinedFlowIT.java` (both tested the removed booking-time payment saga end to end).
+- [ ] T025 [US1] Create `services/booking-service/src/test/java/com/creditcard/booking/integration/BookingV7MigrationIT.java`: using the existing Testcontainers CockroachDB setup (`support/CockroachTestContainer.java`), run Flyway targeted at `V6`, insert a `HELD` booking row plus `booking_room_nights` rows directly via JDBC, migrate to `V7`, assert the row is `CANCELLED`/`MIGRATED_UNPAID_HOLD` and its `booking_room_nights` rows are gone (research.md §8).
+- [ ] T026 [US1] Update `services/booking-service/src/test/java/com/creditcard/booking/controller/BookingControllerTest.java`: rework `create()` tests for the new request (no card, guest fields) and response shape (full detail, `CONFIRMED` immediately, no polling assumption).
+- [ ] T027 [P] [US1] Update `services/booking-service/src/test/java/com/creditcard/booking/service/BookingServiceConcurrencyTest.java` and any other test seeding a `Booking` directly (`CheckInFlowIT`, `CheckOutFlowIT`, `RoomStatusFlowIT`, `ChargeFlowIT`, `CheckoutPaymentFlowIT`) to supply the now-required `guestPhone` and to call `createConfirmedBooking` instead of `createHeldBooking`/`initiatePayment`.
 
-**Checkpoint**: Staff can check in, add charges of every type, and see the balance
-update immediately. Tests passing, 100% coverage.
+**Checkpoint**: `POST /api/v1/bookings` confirms synchronously with the full guest record; `./gradlew :booking-service:test` green; this is the MVP — everything below depends on it.
 
 ---
 
-## Phase 4: User Story 2 — Staff See Which Occupied Rooms Have a Balance Due (Priority: P2)
+## Phase 4: User Story 2 — Add a charge during a stay (Priority: P2)
 
-**Goal**: The room board flags any occupied room whose stay has an outstanding
-balance.
+**Goal**: Unaffected by the payment-model inversion — verify it still works against the new `Booking` shape.
 
-**Independent Test**: Add a charge to one occupied room and confirm it's flagged;
-confirm a charge-free occupied room is not (spec.md Story 2).
+**Independent Test**: Check a booking in (via US1's new creation flow), add charges of different types, confirm each appears as a line item with balance updated.
 
-### Tests for User Story 2 ⚠️
+- [ ] T028 [US2] Review `addCharge`/`getCharges` in `BookingService.java` — confirm no change needed (FR-001/FR-002/FR-003 are independent of the payment-model rework).
+- [ ] T029 [P] [US2] Update any `ChargeFlowIT.java` seed data to use `createConfirmedBooking` with a `guestPhone` (same mechanical update as T027, scoped here if not already done there).
 
-- [X] T030 [P] [US2] Unit test: `RoomService.getBoard()` sets `hasBalanceDue: true`
-      for an occupied room with charges, `false` for one without, and leaves it
-      absent/null for a non-occupied room — in `RoomServiceTest.java`
-- [X] T031 [P] [US2] Contract test: board response includes `hasBalanceDue` — in
-      `RoomControllerTest.java`
-- [X] T032 [P] [US2] `frontend/src/features/room-board/RoomTile.test.tsx`: renders
-      a visual balance-due indicator when `hasBalanceDue` is true, not otherwise
-
-### Implementation for User Story 2
-
-- [X] T033 [US2] `RoomBoardResponse.java`: add `hasBalanceDue` to `RoomBoardEntry`
-      (depends on T006, T007)
-- [X] T034 [US2] `RoomService.java`: `getBoard()` bulk-loads charges/authorized
-      attempts for every occupied room's booking in one pass each
-      (`findByBookingIdIn`) and sets `hasBalanceDue` per room (plan.md Key Design
-      Decision #5 — no new dependency on `BookingService`) (depends on T010, T011, T033)
-- [X] T035 [US2] `frontend/src/features/room-board/RoomTile.tsx`: a small visual
-      flag (e.g., a badge/icon) when `hasBalanceDue` is true (depends on T016)
-
-**Checkpoint**: The board correctly flags/unflags balance-due rooms as charges are
-added. Tests passing, 100% coverage.
+**Checkpoint**: Charge-adding acceptance scenarios (spec.md US2, 1-3) still pass unchanged.
 
 ---
 
-## Phase 5: User Story 3 — Staff Check Out a Guest With a Balance Due (Priority: P3)
+## Phase 5: User Story 3 — Occupied rooms with a balance due flagged on the board (Priority: P3)
 
-**Goal**: Checkout charges the balance through the payment core; completes only on
-approval; a stuck attempt recovers automatically and a late outcome is never
-dropped.
+**Goal**: Unaffected by the payment-model inversion, but now routinely true for *every* occupied room, not just ones with extras — verify the board reflects this.
 
-**Independent Test**: Check in, add a charge, checkout with an approved card →
-checked out, room dirty, only once approval arrives. Checkout with a declined card
-→ stays checked in, same balance, retryable. A stuck attempt (no outcome at all)
-reverts automatically after the hold-expiry window; a late outcome for it is still
-recorded (spec.md Story 3, Clarifications).
+**Independent Test**: Check a booking in with no charges added — confirm the board flags it as having a balance due (room cost alone is now enough, the central behavior change of this revision).
 
-### Tests for User Story 3 ⚠️
+- [ ] T030 [US3] Review `RoomService`'s `hasBalanceDue` projection (layer 2b/2c, unaffected by this rework's file list) — confirm it still calls the same `BookingService.getBalanceDue` and needs no change.
+- [ ] T031 [P] [US3] Add/update a `RoomStatusFlowIT.java` or `BookingServiceTest.java` case asserting a freshly checked-in booking with zero charges is still flagged `hasBalanceDue = true` (new behavior per spec.md US3's reframing — previously this required an added charge).
 
-- [X] T036 [P] [US3] Unit test: `BookingService.checkOut()` with balance > 0 and a
-      card — creates a `PENDING` `CheckoutPaymentAttempt` for exactly the current
-      balance, transitions the booking to `CHECKOUT_PENDING` via the same
-      conditional-update pattern check-in already uses (never a plain read-then-
-      write); with balance > 0 and no card — rejected, nothing created; a second
-      checkout attempt while one is already pending — rejected (FR-009) — in
-      `BookingServiceTest.java`
-- [X] T037 [P] [US3] Unit test: `BookingService.handlePaymentOutcome()` routes a
-      checkout-attempt `transactionId` (not found on any `Booking`) to checkout
-      handling — `AUTHORIZED` → attempt `AUTHORIZED`, booking `CHECKED_OUT`, room
-      `DIRTY`; `DECLINED`/`FAILED` → attempt `DECLINED`/`FAILED`, booking back to
-      `CHECKED_IN`, balance unchanged — in `BookingServiceTest.java`
-- [X] T038 [P] [US3] Unit test: `HoldExpiryService`'s new sweep method reverts a
-      `PENDING` `CheckoutPaymentAttempt` older than the configured timeout to
-      `EXPIRED` and the booking to `CHECKED_IN` — in
-      `services/booking-service/src/test/java/com/creditcard/booking/service/HoldExpiryServiceTest.java`
-      (extended, or a focused new test class if that file doesn't already exist —
-      verify first)
-- [X] T039 [P] [US3] Unit test: a late `AUTHORIZED` outcome for an `EXPIRED`
-      attempt moves it to `LATE_AUTHORIZED` and reduces the booking's balance by
-      that attempt's amount (zeroing it out if it was the only charge), logging a
-      WARN; a late `DECLINED`/`FAILED` for an `EXPIRED` attempt is a no-op — in
-      `BookingServiceTest.java`
-- [X] T040 [P] [US3] Integration test (real CockroachDB + the existing Kafka
-      envelope convention): the full saga — check in, add a charge, checkout with
-      a card, simulate the `AUTHORIZED` event arriving, confirm `CHECKED_OUT` +
-      room `DIRTY`; a second scenario for `DECLINED`; a third for the stuck→swept→
-      late-`AUTHORIZED` path — new
-      `services/booking-service/src/test/java/com/creditcard/booking/integration/CheckoutPaymentFlowIT.java`
-- [X] T041 [P] [US3] `frontend/src/features/booking/CheckOutCardForm.test.tsx`
-- [X] T042 [P] [US3] `frontend/src/features/room-board/CheckOutAction.test.tsx`
-      (extended): balance > 0 renders `CheckOutCardForm` instead of a bare button;
-      submitting shows pending, then approved or declined, matching the backend
-      outcome
-- [X] T043 [P] [US3] `frontend/src/features/booking/bookingApi.test.ts` (extended):
-      the booking-detail polling hook keeps polling while `CHECKOUT_PENDING`, same
-      as it already does for `HELD`, and stops once resolved either way
-
-### Implementation for User Story 3
-
-- [X] T044 [US3] `services/booking-service/src/main/java/com/creditcard/booking/controller/dto/CheckOutRequest.java`
-      — optional `card` field (depends on existing `BookingRequest.CardDetails`
-      shape, reused)
-- [X] T045 [US3] `BookingService.java`: `checkOut(bookingId, card)` — branches on
-      `getBalanceDue` (T024); for balance > 0, atomically moves the booking to
-      `CHECKOUT_PENDING` (conditional update, same pattern as `checkIn`), creates
-      the `CheckoutPaymentAttempt`, and calls the existing gRPC stub for that exact
-      amount (reusing `initiatePayment`'s own `StatusRuntimeException` handling —
-      a call failure leaves the attempt with no `transactionId`, swept the same as
-      a never-answered one) (depends on T007, T011, T024, T044)
-- [X] T046 [US3] `BookingService.java`: `handlePaymentOutcome()` gains the fallback
-      lookup (research.md §5) — on a `Booking.transactionId` miss, try
-      `CheckoutPaymentAttemptRepository.findByTransactionId`; route a hit to a new
-      `handleCheckoutOutcome(attempt, event)` implementing the state machine in
-      data-model.md (depends on T011, T045)
-- [X] T047 [US3] `HoldExpiryService.java`: a second `@Scheduled` method sweeping
-      `PENDING` `CheckoutPaymentAttempt`s older than the existing
-      `booking.hold-timeout-minutes` value — reusing the same `@Value`, not a new
-      configuration key (plan.md Key Design Decision #4) (depends on T011)
-- [X] T048 [US3] `BookingController.java`: `checkOut` accepts an optional
-      `CheckOutRequest` body (depends on T044, T045)
-- [X] T049 [US3] `frontend/src/features/booking/bookingApi.ts`: `checkOut` mutation
-      accepts an optional card argument; the booking-detail polling hook's stop
-      condition generalizes from "not HELD" to "not HELD and not CHECKOUT_PENDING"
-      (depends on T027)
-- [X] T050 [US3] `frontend/src/features/booking/CheckOutCardForm.tsx`: card fields,
-      reusing `BookingForm`'s own validation conventions (depends on T049)
-- [X] T051 [US3] `frontend/src/features/room-board/CheckOutAction.tsx`: renders
-      `CheckOutCardForm` when the booking's balance is greater than zero, the
-      existing plain button otherwise (depends on T050)
-
-**Checkpoint — STOP HERE for this turn.** Setup + Foundational + User Story 1 (add
-a charge) + User Story 2 (board flag) + User Story 3 (checkout with a balance,
-including the recovery sweep) complete: a staff member can check in, add charges,
-see the balance flagged on the board, and check out — paying that balance through
-the real payment core, with a stuck attempt recovering on its own. Show tests
-passing, coverage, and the exact commands to click through add-charge and
-checkout-with-balance manually before continuing to Phase 6.
+**Checkpoint**: Board balance-due flag matches spec.md US3's 2 acceptance scenarios, including the new "room cost alone is enough" case.
 
 ---
 
-## Phase 6: User Story 4 — Staff Check Out a Guest With No Balance Due (Priority: P4)
+## Phase 6: User Story 4 — Check out with a balance due (Priority: P4)
 
-**Goal**: Confirm the zero-balance checkout path — already implied by Phase 5's own
-branching — behaves exactly as before this layer, explicitly and with its own
-tests.
+**Goal**: The checkout saga itself is explicitly kept unchanged — verify it still works now that it's reached far more often (room cost alone creates a balance).
 
-**Independent Test**: Check in, add no charges, check out — completes immediately,
-no card requested, no payment-core call made (spec.md Story 4).
+**Independent Test**: Check in, attempt checkout with an approved card, confirm `CHECKED_OUT`/`DIRTY` only after approval; separately, attempt checkout with a declining card and confirm the booking **stays `CHECKED_IN`** with the same balance (this is the scenario e2e step 13 is repurposed to, Phase 8).
 
-### Tests for User Story 4 ⚠️
+- [ ] T032 [US4] Review `checkOut`/`handleCheckoutOutcome`/`expireCheckoutAttempt` in `BookingService.java` — confirm no change needed beyond what Phase 2/3 already touched (the saga, sweep, and late-`AUTHORIZED` handling are explicitly kept as-is).
+- [ ] T033 [P] [US4] Confirm `BookingServiceCheckOutTest.java` and `CheckOutFlowIT.java`/`CheckoutPaymentFlowIT.java` still pass once their seed data uses `createConfirmedBooking` (T027) — no new test cases required, spec.md US4's 8 acceptance scenarios were already covered by the original Phase 3/4 tests.
 
-- [ ] T052 [P] [US4] Unit test: `BookingService.checkOut()` with balance == 0 and
-      no card — immediate `CHECKED_OUT`, room `DIRTY`, zero interactions with the
-      gRPC stub (`verify(transactionServiceBlockingStub, never())...`), no
-      `CheckoutPaymentAttempt` created — in `BookingServiceTest.java`
-- [ ] T053 [P] [US4] Integration or contract test: a zero-balance checkout with no
-      body (or an empty one) returns `200`/`CHECKED_OUT` directly
-- [ ] T054 [P] [US4] `frontend/src/features/room-board/CheckOutAction.test.tsx`
-      (extended): a zero-balance room renders the plain checkout button, never
-      `CheckOutCardForm`
-
-### Implementation for User Story 4
-
-- [ ] T055 [US4] Verify T045's zero-balance branch skips attempt-creation and the
-      gRPC call entirely (should already follow from Phase 5's design — this task
-      is explicit confirmation + a fix if the tests above find otherwise, not new
-      scope)
-
-**Checkpoint**: Both checkout paths — with and without a balance — are
-independently verified.
+**Checkpoint**: All 8 of spec.md US4's acceptance scenarios pass against the reworked booking-creation flow.
 
 ---
 
-## Phase 7: Polish & Cross-Cutting Concerns
+## Phase 7: User Story 5 — Check out with no balance due (Priority: P5, now a narrow edge case)
 
-**Purpose**: The new e2e step, the extended Playwright test, and documentation.
+**Goal**: Confirm the zero-balance path (now reachable only via a zero-rate room) still works.
 
-- [ ] T056 [P] `scripts/e2e-test.sh`: add step 15 — check in → add a room-service
-      charge → check out with that balance (an authorized card) → `CHECKED_OUT`,
-      room `DIRTY` (depends on Phases 3-5's backend work)
-- [ ] T057 `frontend/e2e/staff-room-board.spec.ts`: extend the existing smoke test
-      with an add-charge + checkout-with-balance stage after check-in, before the
-      final `OCCUPIED` assertion is replaced by a `CHECKED_OUT`/`DIRTY` one
-- [ ] T058 [P] `README.md`: update the e2e step count/list (14 → 15)
-- [ ] T059 [P] `docs/BACKLOG.md`: log refunds, split payments, taxes, and
-      invoices/PDFs as explicitly out of scope for this layer
-- [ ] T060 Run every scenario in `specs/011-charges/quickstart.md` end to end,
-      including the stuck-checkout recovery scenario
-- [ ] T061 Verify 100% coverage gates (JaCoCo for `booking-service`, Vitest for
-      `frontend/`) and fix any gap
-- [ ] T062 Confirm no other service or `k8s/` change was needed — verify only
+**Independent Test**: Check in a booking for a zero-nightly-rate room, add no charges, check out — confirm immediate `CHECKED_OUT`/`DIRTY`, no card, no payment-core call.
+
+- [ ] T034 [US5] Add/update a test (`BookingServiceCheckOutTest.java` or `CheckOutFlowIT.java`) seeding a room with `nightlyRate = 0.00`, confirming `getBalanceDue` is zero immediately after `createConfirmedBooking` and checkout completes with no card.
+
+**Checkpoint**: spec.md US5's single acceptance scenario passes; zero-balance checkout is confirmed reachable only through this narrow path.
+
+---
+
+## Phase 8: Polish — e2e, Playwright, frontend, docs
+
+**Purpose**: Cross-cutting changes spanning the whole feature, done last per CLAUDE.md's phase convention.
+
+### Backend polish
+
+- [ ] T035 [P] Search the whole `booking-service` module for any remaining reference to `HELD`, `initiatePayment`, `createHeldBooking`, `BookingCreatedResponse`, `handleRoomChargeOutcome`, or `BookingNotFoundForTransactionException` and fix/remove each (no dead code left, per the user's standing instruction).
+- [ ] T036 [P] Confirm JaCoCo 100% coverage still holds for `booking-service` after all deletions/additions (`./gradlew :booking-service:jacocoTestCoverageVerification`).
+
+### e2e and Playwright
+
+- [ ] T037 Rewrite `step12_booking_confirmed()` in `scripts/e2e-test.sh`: book with no card field in the request body; assert the `201` response already has `"status": "CONFIRMED"` — remove the polling loop entirely.
+- [ ] T038 Repurpose `step13_booking_declined()` in `scripts/e2e-test.sh` to "decline at checkout": book (no card) → confirmed → check in → add a charge (optional, for a non-trivial balance) → attempt checkout with a card the payment core declines → assert the booking stays `CHECKED_IN` with its balance unchanged and the room stays `OCCUPIED`; rename the function if the script's step-naming convention expects it (e.g. `step13_checkout_declined`).
+- [ ] T039 Update `step14_room_board_lifecycle()` in `scripts/e2e-test.sh`: book with no card (already `CONFIRMED`), check in, assert board shows `OCCUPIED` + `hasBalanceDue: true`; check out **with** an authorized card this time (room cost alone creates a balance now); poll `GET /api/v1/bookings/{id}` for `CHECKED_OUT` via the `CHECKOUT_PENDING` path instead of expecting a direct zero-balance checkout; assert board shows `DIRTY`, then `VACANT_CLEAN` after housekeeping cleans.
+- [ ] T040 Add a new `step15_checkout_with_charge()` to `scripts/e2e-test.sh`: book (no card) → confirmed → check in → add a room-service charge → check out with a card covering room cost + charge → assert `CHECKED_OUT`, room `DIRTY`. Wire it into the script's step-list/summary output alongside steps 1-14.
+- [ ] T041 Update `frontend/e2e/staff-room-board.spec.ts` (Playwright): the booking step fills no card fields, only the new required/optional guest fields; remove any "wait for CONFIRMED" poll before check-in (creation is synchronous now); the check-out step now always exercises the card/balance path.
+
+### Frontend
+
+- [ ] T042 [P] In `frontend/src/types/staff.ts`: `BookingStatus` drops only `'HELD'` (keeps `'CANCELLED'`); `Booking` drops `transactionId` (keeps `cancellationReason`), gains the 8 guest-detail fields; `BookingFormValues` drops `card`, gains the same 8 fields.
+- [ ] T043 In `frontend/src/features/booking/validation.ts`: `BookingFormState` no longer extends `CardFormState`; `validateBookingForm` no longer calls `validateCardFields`; add validation for the new required (`guestName`, `guestPhone`, `checkIn`, `checkOut`) and optional fields. `CardFormState`/`validateCardFields` themselves are unchanged (still used by `CheckOutCardForm.tsx`).
+- [ ] T044 In `frontend/src/features/booking/BookingForm.tsx`: remove card fields; add inputs for `guestPhone` (required), `guestEmail`, `visitingFrom`, `adults`, `children`, `expectedArrivalTime`, `expectedDepartureTime`, `notes` (optional).
+- [ ] T045 In `frontend/src/features/booking/bookingApi.ts`: `createBooking`'s request body drops `card`, gains the guest-detail fields; its success response is used directly as the confirmed `Booking` (no more "thin create response" type); `useGetBookingQuery`'s poll-stop condition drops the now-impossible `'HELD'` check.
+- [ ] T046 [P] In `frontend/src/features/booking/BookingStatusView.tsx`: remove the `STATUS_LABEL` entry for `'HELD'`; keep the `'CANCELLED'` entry (still a valid, if currently unreachable, status).
+- [ ] T047 In `frontend/src/features/room-board/RoomActionPanel.tsx` and `CheckInAction.tsx`: extend both the arriving-booking panel and the occupied-room panel to show the full guest-detail record (FR-023, Clarifications: "applies to both").
+- [ ] T048 [P] Update all affected `*.test.ts(x)` files under `frontend/src/features/booking/` and `frontend/src/features/room-board/` for the above; confirm Vitest/RTL/MSW 100% coverage still holds for this layer's files.
+
+### Docs
+
+- [ ] T049 [P] Update `docs/BACKLOG.md` per spec.md's Assumptions (no refunds/split payments/taxes/discounts/invoices; no email/SMS confirmation sent for a new booking) if not already logged there from the original Phase 1-5 pass.
+
+**Checkpoint**: Full stack (`docker compose up -d --build` + `./scripts/e2e-test.sh` + Playwright) green end to end; ready for PR (per CLAUDE.md: do not merge without explicit approval).
 
 ---
 
 ## Dependencies & Execution Order
 
-### Phase Dependencies
-
-- **Setup (Phase 1)**: No dependencies — can start immediately. T001/T002 and T003
-  are independent of each other.
-- **Foundational (Phase 2)**: Depends on Setup (the migration, T003) — BLOCKS all
-  user stories.
-- **User Story 1 (Phase 3)**: Depends on Foundational only. **Independently
-  demonstrable on its own.**
-- **User Story 2 (Phase 4)**: Depends on Foundational; extends `RoomService`/
-  `RoomBoardResponse` independently of US1's own files.
-- **User Story 3 (Phase 5)**: Depends on Foundational and US1's `getBalanceDue`
-  helper (T024, same file extended). **This turn stops after this phase.**
-- **User Story 4 (Phase 6)**: Depends on Foundational and US3's `checkOut`
-  branching (T045) — this phase is almost entirely verification, not new
-  implementation.
-- **Polish (Phase 7)**: Depends on all four user stories being complete.
-
-### Within Each User Story
-
-- Tests are written first and confirmed to fail before implementation (Principle II).
-- Domain/repository (Foundational) before service logic; service logic before
-  controllers/gateway wiring/frontend.
-
-### Parallel Opportunities
-
-- Setup T001-T002 and T003 run in parallel (different files, no shared dependency).
-- Foundational T004-T008, T010-T011, T013-T014, T016 (different files) run in
-  parallel; their own tests (T017) follow once the files they test exist.
-- All test tasks within a story marked [P] run in parallel (different test files).
-- User Story 2 can be implemented in parallel with User Story 1 once Foundational
-  is done — they touch different files (`RoomService`/`RoomBoardResponse` vs.
-  `BookingService`/`BookingController`/`ChargesPanel`) and don't depend on each
-  other, only on Phase 2.
-- User Story 4 depends on User Story 3's `checkOut` branching existing first, so it
-  cannot start in parallel with US3 — but it's almost entirely tests, not new
-  implementation, once US3 lands.
-
----
-
-## Parallel Example: User Story 1
-
-```bash
-# Tests for User Story 1, together:
-Task: "BookingService.addCharge tests in BookingServiceTest.java"
-Task: "POST/GET charges contract tests in BookingControllerTest.java"
-Task: "ChargeFlowIT integration test"
-Task: "ChargesPanel.test.tsx"
-```
-
----
+- **Setup (Phase 1)**: No dependencies — can start immediately. Blocks everything else (schema/entity shape).
+- **Foundational (Phase 2)**: Depends on Phase 1. Blocks Phase 3 (BookingService's rework touches the renamed exception/repository methods).
+- **User Story 1 (Phase 3)**: Depends on Phase 1-2. This is the actual rework's core — every other story phase below depends on it compiling and passing, since booking creation is how every later story gets a booking to work with. Not independently skippable the way the spec's own "priority" framing might otherwise suggest, because this is a rework of shared machinery, not additive feature work.
+- **User Stories 2-5 (Phases 4-7)**: Each depends on Phase 3; each is primarily a *verification* pass (the saga/charges/board code itself is explicitly unchanged) rather than new implementation — they can be done in any order relative to each other, though the spec's own priority order (P2→P5) is the natural one.
+- **Polish (Phase 8)**: Depends on all of Phases 1-7 (e2e steps exercise the full lifecycle; frontend changes depend on the final API shape).
 
 ## Implementation Strategy
 
-### This turn: through the explicit checkpoint
-
-1. Phase 1: Setup (e2e-test.sh root-cause fix, migration)
-2. Phase 2: Foundational (blocks everything)
-3. Phase 3: User Story 1 (add a charge)
-4. Phase 4: User Story 2 (balance-due board flag)
-5. Phase 5: User Story 3 (checkout with a balance, including the recovery sweep)
-6. **STOP**: tests passing, coverage, the exact commands to click through
-   add-charge and checkout-with-balance manually — then wait for the go-ahead
-   before Phase 6.
-
-### Afterward: Incremental Delivery
-
-1. Phase 6: User Story 4 (checkout with no balance — verification) → validate
-   independently
-2. Phase 7: Polish → e2e step 15, extended Playwright test, docs, coverage gate
-
----
-
-## Notes
-
-- Per CLAUDE.md's per-phase approval convention, each phase above is implemented
-  and committed as a whole before stopping — not task by task.
-- Avoid: implementing Phase 6/7 work before Phase 5's explicit checkpoint is shown
-  and approved.
+Phase-by-phase with a checkpoint after each, per CLAUDE.md's approval granularity
+(approve per phase, not per task). Suggested order: 1 → 2 → 3 (MVP — this is where
+nearly all the actual rework lives) → 4 → 5 → 6 → 7 (quick verification passes) →
+8 (e2e/Playwright/frontend/docs, done once the backend is stable). Commit at each
+phase checkpoint; stop and show the checkpoint before moving to the next phase.
