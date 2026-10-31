@@ -810,7 +810,7 @@ class BookingServiceTest {
         verify(bookingRepository, never()).save(booking);
     }
 
-    // ── expireCheckoutAttempt (layer 2c, FR-012a — HoldExpiryService's sweep) ───
+    // ── expireCheckoutAttempt (layer 2c, FR-012a — CheckoutAttemptSweepService's sweep) ───
 
     @Test
     void expireCheckoutAttempt_pendingAttempt_setsExpiredAndRevertsBookingToCheckedIn() {

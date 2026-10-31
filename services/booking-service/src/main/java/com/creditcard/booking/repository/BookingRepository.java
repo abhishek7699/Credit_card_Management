@@ -7,18 +7,12 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
-import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
 public interface BookingRepository extends JpaRepository<Booking, UUID> {
-
-    Optional<Booking> findByTransactionId(String transactionId);
-
-    /** Used by HoldExpiryService (Phase 5) to find abandoned HELD bookings. */
-    List<Booking> findByStatusAndCreatedAtBefore(BookingStatus status, Instant cutoff);
 
     /** At most one CHECKED_IN booking can exist per room at a time, by construction
      *  (a room must pass back through VACANT_CLEAN before it can be occupied again) —

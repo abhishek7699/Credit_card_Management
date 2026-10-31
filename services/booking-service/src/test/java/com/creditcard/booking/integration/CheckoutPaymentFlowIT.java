@@ -68,7 +68,7 @@ import static org.awaitility.Awaitility.await;
  * as the original room-charge saga in BookingConfirmedFlowIT) -> AUTHORIZED ->
  * CHECKED_OUT + room DIRTY; a second scenario for DECLINED; a third for the
  * stuck -> swept -> late-AUTHORIZED path (the sweep itself is called directly
- * rather than waiting on its real 30s/10min schedule — HoldExpiryServiceTest already
+ * rather than waiting on its real 30s/10min schedule — CheckoutAttemptSweepServiceTest already
  * covers the scheduling mechanics; this IT's job is the transactional behavior).
  */
 @SpringBootTest

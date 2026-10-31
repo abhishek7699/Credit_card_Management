@@ -25,9 +25,8 @@ public interface CheckoutPaymentAttemptRepository extends JpaRepository<Checkout
      *  booking's attempts in specific statuses. */
     List<CheckoutPaymentAttempt> findByBookingIdInAndStatusIn(List<UUID> bookingIds, List<CheckoutAttemptStatus> statuses);
 
-    /** Used by HoldExpiryService's second scheduled sweep (US3) to find PENDING
-     *  attempts older than the same hold-timeout window already used for HELD
-     *  bookings. */
+    /** Used by CheckoutAttemptSweepService's scheduled sweep (US3) to find PENDING
+     *  attempts older than the configured checkout-timeout window. */
     List<CheckoutPaymentAttempt> findByStatusAndCreatedAtBefore(CheckoutAttemptStatus status, Instant cutoff);
 
     /**

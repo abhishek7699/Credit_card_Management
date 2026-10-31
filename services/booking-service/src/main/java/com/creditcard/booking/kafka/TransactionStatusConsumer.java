@@ -22,7 +22,7 @@ public class TransactionStatusConsumer {
 
     /**
      * Deliberately no try/catch around {@code handlePaymentOutcome}: any failure
-     * (notably {@link BookingNotFoundForTransactionException}) must propagate to the
+     * (notably {@link UnknownTransactionException}) must propagate to the
      * container's error handler, configured in {@link KafkaConsumerConfig} with bounded
      * retry-with-backoff (research.md §3a) — swallowing it here would make the race it
      * exists to handle indistinguishable from "this event has no booking and never
