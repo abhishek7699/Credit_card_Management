@@ -31,6 +31,12 @@ I want to learn the codebase, not just get changes. For every task:
 - B2B: users are hotel staff (front desk, housekeeping, owner), not guests.
 - Fix root causes, not retries. Keep existing conventions (schema per service, Flyway,
   idempotent consumers, event envelope, 100% JaCoCo).
+- Backend-heavy: all business logic, validation, calculations (balances, occupancy,
+  counts), state transitions, auth checks, and permissions live in backend services.
+  The frontend only renders API responses and submits user input. Hiding UI by role is
+  cosmetic; every rule is enforced server-side. No business logic in React components
+  or Redux.
+- Each layer gets its own branch off main (NNN-layer-name).
 
 ## Roadmap (layers on top of the payment core)
 - 2a Booking (done): rooms, availability search, staff create booking for a guest,
