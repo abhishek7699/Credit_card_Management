@@ -23,8 +23,10 @@ export interface RoomBoardFloor {
   rooms: RoomBoardEntry[];
 }
 
+// CONFIRMED is reached synchronously on creation now (2026-10-31 rework) -- 'HELD'
+// no longer exists. 'CANCELLED' is kept: unreachable through this layer's own flow
+// today, but a valid status layer 2f's planned staff-cancellation feature will reach.
 export type BookingStatus =
-  | 'HELD'
   | 'CONFIRMED'
   | 'CANCELLED'
   | 'CHECKED_IN'
@@ -41,15 +43,27 @@ export interface Charge {
   createdAt: string;
 }
 
-export interface Booking {
+/** Guest-detail fields recorded at booking (FR-017/FR-018) -- visible on a
+ *  booking's own detail both before and after check-in (FR-023). */
+export interface GuestDetails {
+  guestName: string;
+  guestPhone: string;
+  guestEmail: string | null;
+  visitingFrom: string | null;
+  adults: number;
+  children: number;
+  expectedArrivalTime: string | null;
+  expectedDepartureTime: string | null;
+  notes: string | null;
+}
+
+export interface Booking extends GuestDetails {
   bookingId: string;
   roomId: string;
-  guestName: string;
   checkIn: string;
   checkOut: string;
   status: BookingStatus;
   cancellationReason: string | null;
-  transactionId: string | null;
   charges: Charge[];
   balanceDue: number;
 }
@@ -61,12 +75,20 @@ export interface CardDetails {
   cardholderName: string;
 }
 
-/** Submitted straight to the API — never constructed into, or read back from, any
- *  persisted Redux state or storage (FR-013). */
+/** Submitted straight to the API — no card, of any kind, at this step (FR-017).
+ *  guestName/guestPhone/checkIn/checkOut are required; every other field is
+ *  optional (FR-018) and simply omitted from the request body when blank. */
 export interface BookingFormValues {
   roomId: string;
   guestName: string;
+  guestPhone: string;
   checkIn: string;
   checkOut: string;
-  card: CardDetails;
+  guestEmail?: string;
+  visitingFrom?: string;
+  adults?: number;
+  children?: number;
+  expectedArrivalTime?: string;
+  expectedDepartureTime?: string;
+  notes?: string;
 }

@@ -31,11 +31,18 @@ function booking(overrides: Partial<Booking> = {}): Booking {
     bookingId: 'b-current',
     roomId: 'r1',
     guestName: 'Jane Doe',
+    guestPhone: '+1-555-0100',
+    guestEmail: null,
+    visitingFrom: null,
+    adults: 1,
+    children: 0,
     checkIn: '2026-12-01',
     checkOut: '2026-12-03',
+    expectedArrivalTime: null,
+    expectedDepartureTime: null,
+    notes: null,
     status: 'CHECKED_IN',
     cancellationReason: null,
-    transactionId: 'txn-1',
     charges: [],
     balanceDue: 0,
     ...overrides,
@@ -54,12 +61,18 @@ beforeEach(() => {
   store.dispatch(bookingApi.util.resetApiState());
 });
 
-test('a room with an arriving-today booking offers check-in for Front Desk, even while still VACANT_CLEAN', () => {
+test('a room with an arriving-today booking offers check-in for Front Desk, even while still VACANT_CLEAN, with the full guest record (FR-023)', async () => {
+  server.use(
+    http.get('*/api/v1/bookings/b-arriving', () =>
+      HttpResponse.json(booking({ bookingId: 'b-arriving', guestName: 'John Smith', status: 'CONFIRMED' })),
+    ),
+  );
   renderPanel(
     entry({ status: 'VACANT_CLEAN', arrivingBookingId: 'b-arriving', arrivingGuestName: 'John Smith' }),
     'FRONT_DESK',
   );
-  expect(screen.getByText(/john smith is arriving today/i)).toBeInTheDocument();
+  expect(await screen.findByText(/john smith is arriving today/i)).toBeInTheDocument();
+  expect(screen.getByText('+1-555-0100')).toBeInTheDocument();
   expect(screen.queryByLabelText(/guest name/i)).not.toBeInTheDocument();
 });
 
@@ -108,6 +121,21 @@ test('an OCCUPIED room also renders the charges panel for Front Desk', async () 
 
   expect(await screen.findByText('Soda')).toBeInTheDocument();
   expect(screen.getByText(/balance due: \$6\.00/i)).toBeInTheDocument();
+});
+
+test('an OCCUPIED room also shows the full guest record (FR-023)', async () => {
+  server.use(
+    http.get('*/api/v1/bookings/b-current', () =>
+      HttpResponse.json(booking({ guestEmail: 'jane@example.com', adults: 2, children: 1 })),
+    ),
+  );
+  renderPanel(
+    entry({ status: 'OCCUPIED', currentBookingId: 'b-current', guestName: 'Jane Doe' }),
+    'FRONT_DESK',
+  );
+
+  expect(await screen.findByText('jane@example.com')).toBeInTheDocument();
+  expect(screen.getByText(/2 adults, 1 child\b/i)).toBeInTheDocument();
 });
 
 test('an OCCUPIED room offers nothing for Housekeeping', () => {

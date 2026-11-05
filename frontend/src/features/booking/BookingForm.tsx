@@ -1,16 +1,20 @@
 import { useState } from 'react';
 import { useCreateBookingMutation } from './bookingApi';
-import { BookingStatusView } from './BookingStatusView';
 import { validateBookingForm, type BookingFormErrors, type BookingFormState } from './validation';
+import type { Booking } from '../../types/staff';
 
 const INITIAL: BookingFormState = {
   guestName: '',
+  guestPhone: '',
   checkIn: '',
   checkOut: '',
-  cardNumber: '',
-  expiry: '',
-  cvv: '',
-  cardholderName: '',
+  guestEmail: '',
+  visitingFrom: '',
+  adults: '',
+  children: '',
+  expectedArrivalTime: '',
+  expectedDepartureTime: '',
+  notes: '',
 };
 
 function FieldError({ message }: { message: string | undefined }) {
@@ -22,17 +26,23 @@ interface BookingFormProps {
   roomId: string;
 }
 
+/** FR-017/FR-020: no card, of any kind, at this step -- the booking is confirmed
+ *  synchronously, so a successful submit shows the confirmation directly from the
+ *  mutation's own response (the full Booking), not an intermediate "awaiting
+ *  payment" screen to poll. */
 export function BookingForm({ roomId }: BookingFormProps) {
   const [values, setValues] = useState<BookingFormState>(INITIAL);
   const [errors, setErrors] = useState<BookingFormErrors>({});
   const [createBooking, { isLoading, isError }] = useCreateBookingMutation();
-  const [bookingId, setBookingId] = useState<string | null>(null);
+  const [confirmed, setConfirmed] = useState<Booking | null>(null);
 
-  // Once a booking is submitted, this component shows its progress instead of
-  // the form — the card fields above are never rendered again (discarded, not
-  // merely hidden, per FR-013).
-  if (bookingId) {
-    return <BookingStatusView bookingId={bookingId} />;
+  if (confirmed) {
+    return (
+      <div className="rounded border border-green-200 bg-green-50 p-4">
+        <p className="text-sm text-green-800">Booking confirmed for {confirmed.guestName}.</p>
+        <p className="mt-1 text-sm text-green-800">Balance due at checkout: ${confirmed.balanceDue.toFixed(2)}</p>
+      </div>
+    );
   }
 
   function handleChange(field: keyof BookingFormState, value: string) {
@@ -55,20 +65,20 @@ export function BookingForm({ roomId }: BookingFormProps) {
       const result = await createBooking({
         roomId,
         guestName: values.guestName,
+        guestPhone: values.guestPhone,
         checkIn: values.checkIn,
         checkOut: values.checkOut,
-        card: {
-          cardNumber: values.cardNumber.replace(/\s+/g, ''),
-          expiry: values.expiry,
-          cvv: values.cvv,
-          cardholderName: values.cardholderName,
-        },
+        ...(values.guestEmail.trim() && { guestEmail: values.guestEmail.trim() }),
+        ...(values.visitingFrom.trim() && { visitingFrom: values.visitingFrom.trim() }),
+        ...(values.adults.trim() && { adults: Number(values.adults) }),
+        ...(values.children.trim() && { children: Number(values.children) }),
+        ...(values.expectedArrivalTime && { expectedArrivalTime: values.expectedArrivalTime }),
+        ...(values.expectedDepartureTime && { expectedDepartureTime: values.expectedDepartureTime }),
+        ...(values.notes.trim() && { notes: values.notes.trim() }),
       }).unwrap();
-      setBookingId(result.bookingId);
+      setConfirmed(result);
     } catch {
-      // isError is managed by RTK Query. Per FR-013/the spec's own edge case,
-      // a failed submission never retains the entered card details — staff
-      // must re-enter them to try again.
+      // isError is managed by RTK Query.
       setValues(INITIAL);
     }
   }
@@ -93,6 +103,79 @@ export function BookingForm({ roomId }: BookingFormProps) {
           className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"
         />
         <FieldError message={errors.guestName} />
+      </div>
+
+      <div>
+        <label htmlFor="guestPhone" className="block text-sm font-medium text-gray-700">
+          Phone
+        </label>
+        <input
+          id="guestPhone"
+          type="tel"
+          value={values.guestPhone}
+          onChange={(e) => handleChange('guestPhone', e.target.value)}
+          className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"
+        />
+        <FieldError message={errors.guestPhone} />
+      </div>
+
+      <div>
+        <label htmlFor="guestEmail" className="block text-sm font-medium text-gray-700">
+          Email <span className="text-gray-400">(optional)</span>
+        </label>
+        <input
+          id="guestEmail"
+          type="email"
+          value={values.guestEmail}
+          onChange={(e) => handleChange('guestEmail', e.target.value)}
+          className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"
+        />
+      </div>
+
+      <div>
+        <label htmlFor="visitingFrom" className="block text-sm font-medium text-gray-700">
+          Visiting From <span className="text-gray-400">(optional)</span>
+        </label>
+        <input
+          id="visitingFrom"
+          type="text"
+          value={values.visitingFrom}
+          onChange={(e) => handleChange('visitingFrom', e.target.value)}
+          className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"
+        />
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <label htmlFor="adults" className="block text-sm font-medium text-gray-700">
+            Adults <span className="text-gray-400">(default 1)</span>
+          </label>
+          <input
+            id="adults"
+            type="number"
+            min={1}
+            inputMode="numeric"
+            value={values.adults}
+            onChange={(e) => handleChange('adults', e.target.value)}
+            className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"
+          />
+          <FieldError message={errors.adults} />
+        </div>
+        <div>
+          <label htmlFor="children" className="block text-sm font-medium text-gray-700">
+            Children <span className="text-gray-400">(default 0)</span>
+          </label>
+          <input
+            id="children"
+            type="number"
+            min={0}
+            inputMode="numeric"
+            value={values.children}
+            onChange={(e) => handleChange('children', e.target.value)}
+            className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"
+          />
+          <FieldError message={errors.children} />
+        </div>
       </div>
 
       <div className="grid grid-cols-2 gap-4">
@@ -124,64 +207,43 @@ export function BookingForm({ roomId }: BookingFormProps) {
         </div>
       </div>
 
-      <div>
-        <label htmlFor="cardNumber" className="block text-sm font-medium text-gray-700">
-          Card Number
-        </label>
-        <input
-          id="cardNumber"
-          type="text"
-          inputMode="numeric"
-          value={values.cardNumber}
-          onChange={(e) => handleChange('cardNumber', e.target.value)}
-          className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"
-        />
-        <FieldError message={errors.cardNumber} />
-      </div>
-
       <div className="grid grid-cols-2 gap-4">
         <div>
-          <label htmlFor="expiry" className="block text-sm font-medium text-gray-700">
-            Expiry
+          <label htmlFor="expectedArrivalTime" className="block text-sm font-medium text-gray-700">
+            Expected Arrival <span className="text-gray-400">(optional)</span>
           </label>
           <input
-            id="expiry"
-            type="text"
-            placeholder="MM/YY"
-            value={values.expiry}
-            onChange={(e) => handleChange('expiry', e.target.value)}
+            id="expectedArrivalTime"
+            type="time"
+            value={values.expectedArrivalTime}
+            onChange={(e) => handleChange('expectedArrivalTime', e.target.value)}
             className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"
           />
-          <FieldError message={errors.expiry} />
         </div>
         <div>
-          <label htmlFor="cvv" className="block text-sm font-medium text-gray-700">
-            CVV
+          <label htmlFor="expectedDepartureTime" className="block text-sm font-medium text-gray-700">
+            Expected Departure <span className="text-gray-400">(optional)</span>
           </label>
           <input
-            id="cvv"
-            type="text"
-            inputMode="numeric"
-            value={values.cvv}
-            onChange={(e) => handleChange('cvv', e.target.value)}
+            id="expectedDepartureTime"
+            type="time"
+            value={values.expectedDepartureTime}
+            onChange={(e) => handleChange('expectedDepartureTime', e.target.value)}
             className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"
           />
-          <FieldError message={errors.cvv} />
         </div>
       </div>
 
       <div>
-        <label htmlFor="cardholderName" className="block text-sm font-medium text-gray-700">
-          Cardholder Name
+        <label htmlFor="notes" className="block text-sm font-medium text-gray-700">
+          Notes <span className="text-gray-400">(optional)</span>
         </label>
-        <input
-          id="cardholderName"
-          type="text"
-          value={values.cardholderName}
-          onChange={(e) => handleChange('cardholderName', e.target.value)}
+        <textarea
+          id="notes"
+          value={values.notes}
+          onChange={(e) => handleChange('notes', e.target.value)}
           className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"
         />
-        <FieldError message={errors.cardholderName} />
       </div>
 
       <button

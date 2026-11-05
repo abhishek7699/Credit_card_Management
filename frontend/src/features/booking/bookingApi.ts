@@ -4,11 +4,6 @@ import type { Booking, BookingFormValues, CardDetails, Charge, ChargeType } from
 
 const POLLING_INTERVAL_MS = 10_000;
 
-interface CreateBookingResponse {
-  bookingId: string;
-  status: Booking['status'];
-}
-
 interface AddChargeArgs {
   bookingId: string;
   type: ChargeType;
@@ -23,17 +18,14 @@ interface CheckOutArgs {
 
 export const bookingApi = api.injectEndpoints({
   endpoints: (build) => ({
-    createBooking: build.mutation<CreateBookingResponse, BookingFormValues>({
+    // FR-020: the booking is confirmed synchronously -- this response already IS
+    // the confirmed Booking, the same shape getBooking returns, not a thin
+    // "created" response to poll from.
+    createBooking: build.mutation<Booking, BookingFormValues>({
       query: (values) => ({
         url: '/api/v1/bookings',
         method: 'POST',
-        body: {
-          roomId: values.roomId,
-          checkIn: values.checkIn,
-          checkOut: values.checkOut,
-          guestName: values.guestName,
-          card: values.card,
-        },
+        body: values,
       }),
     }),
     getBooking: build.query<Booking, string>({
@@ -72,16 +64,19 @@ export const {
 
 const { useGetBookingQuery: useGetBookingQueryBase } = bookingApi;
 
-/** Polls every 10s while HELD or CHECKOUT_PENDING (research.md §5, extended for
- *  layer 2c's own checkout saga); stops once the booking reaches a final state
- *  (FR-012) — pollingInterval itself is a plain number in this RTK Query version,
- *  so the stop condition lives in component state, not the option. */
+/** Polls every 10s only while CHECKOUT_PENDING (FR-007) -- booking creation no
+ *  longer has an intermediate state to poll for at all (it's CONFIRMED the
+ *  instant it's created, 2026-10-31 rework), so this hook is reached only from
+ *  the checkout-with-balance flow now. Stops once the attempt resolves one way
+ *  or the other (FR-010/FR-011) — pollingInterval itself is a plain number in
+ *  this RTK Query version, so the stop condition lives in component state, not
+ *  the option. */
 export function useGetBookingQuery(bookingId: string) {
   const [pollingInterval, setPollingInterval] = useState(POLLING_INTERVAL_MS);
   const result = useGetBookingQueryBase(bookingId, { pollingInterval });
 
   useEffect(() => {
-    if (result.data && result.data.status !== 'HELD' && result.data.status !== 'CHECKOUT_PENDING') {
+    if (result.data && result.data.status !== 'CHECKOUT_PENDING') {
       setPollingInterval(0);
     }
   }, [result.data]);
