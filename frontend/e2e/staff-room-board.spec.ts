@@ -3,8 +3,8 @@ import { expect, test } from '@playwright/test';
 /**
  * One smoke test against a live docker-compose stack + `npm run dev`
  * (see README.md's "Frontend" section for the exact commands):
- * login -> book a vacant room -> booking reaches CONFIRMED -> check it in ->
- * board shows that room OCCUPIED.
+ * login -> book a vacant room (no card -- 2026-10-31 rework, confirmed
+ * immediately) -> check it in -> board shows that room OCCUPIED.
  *
  * Picks its room by the board's actual VACANT_CLEAN status, not by room
  * number — scripts/e2e-test.sh's own step 14 hit a real bug doing the
@@ -48,15 +48,14 @@ test('login, book a room, confirm, check in, board shows OCCUPIED', async ({ pag
   const isoDate = (d: Date) => d.toISOString().slice(0, 10);
 
   await page.getByLabel('Guest Name').fill('Playwright Smoke Guest');
+  await page.getByLabel('Phone').fill('+15555550199');
   await page.getByLabel('Check-in').fill(isoDate(today));
   await page.getByLabel('Check-out').fill(isoDate(tomorrow));
-  await page.getByLabel('Card Number').fill('4111111111111111');
-  await page.getByLabel('Expiry').fill('12/30');
-  await page.getByLabel('CVV').fill('123');
-  await page.getByLabel('Cardholder Name').fill('Playwright Smoke Guest');
   await page.getByRole('button', { name: 'Submit Booking' }).click();
 
-  await expect(page.getByText('Confirmed')).toBeVisible({ timeout: 30_000 });
+  // No card, no payment-core call, no polling for confirmation (FR-017/FR-020)
+  // -- the booking is confirmed the instant the request returns.
+  await expect(page.getByText(/booking confirmed for playwright smoke guest/i)).toBeVisible({ timeout: 10_000 });
 
   await page.getByRole('button', { name: 'Close panel' }).click();
 
