@@ -636,6 +636,42 @@ class BookingServiceTest {
     }
 
     @Test
+    void checkOut_newBooking_zeroRateRoom_completesImmediately_noCardNoPaymentCoreCall() {
+        // spec.md US5: now the only way to reach a zero balance is a zero-rate
+        // room -- a new booking's room cost alone otherwise always creates one.
+        UUID roomId = UUID.randomUUID();
+        Room zeroRateRoom = room(roomId);
+        zeroRateRoom.setNightlyRate(BigDecimal.ZERO);
+        when(roomRepository.findById(roomId)).thenReturn(Optional.of(zeroRateRoom));
+        when(bookingRepository.save(any())).thenAnswer(inv -> {
+            Booking b = inv.getArgument(0);
+            ReflectionTestUtils.setField(b, "id", UUID.randomUUID());
+            return b;
+        });
+        BookingRequest request = minimalRequest(roomId, LocalDate.of(2026, 11, 1), LocalDate.of(2026, 11, 3));
+        Booking confirmed = service.createConfirmedBooking(request);
+        assertThat(confirmed.getRoomChargeAmount()).isEqualByComparingTo(BigDecimal.ZERO);
+        UUID bookingId = confirmed.getId();
+        confirmed.setStatus(BookingStatus.CHECKED_IN); // check-in itself is unaffected by this test
+        Booking checkedOut = booking(bookingId, BookingStatus.CHECKED_OUT, null);
+        checkedOut.setRoomId(roomId);
+        checkedOut.setRoomChargeAmount(BigDecimal.ZERO);
+        when(bookingRepository.findById(bookingId))
+                .thenReturn(Optional.of(confirmed))
+                .thenReturn(Optional.of(checkedOut));
+        when(chargeRepository.findByBookingIdOrderByCreatedAtAsc(bookingId)).thenReturn(List.of());
+        when(checkoutPaymentAttemptRepository.findByBookingIdInAndStatusIn(any(), any())).thenReturn(List.of());
+        when(bookingRepository.updateStatusIfCurrent(bookingId, BookingStatus.CHECKED_OUT, BookingStatus.CHECKED_IN))
+                .thenReturn(1);
+
+        Booking result = service.checkOut(bookingId, null);
+
+        assertThat(result.getStatus()).isEqualTo(BookingStatus.CHECKED_OUT);
+        verify(roomRepository).setStatus(roomId, RoomStatus.DIRTY);
+        verify(checkoutPaymentAttemptRepository, never()).save(any());
+    }
+
+    @Test
     void checkOut_bookingNotCheckedIn_throwsInvalidBookingState_andNeverTouchesRoom() {
         UUID bookingId = UUID.randomUUID();
         Booking confirmed = booking(bookingId, BookingStatus.CONFIRMED, "txn-co-2");
