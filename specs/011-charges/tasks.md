@@ -74,8 +74,8 @@ every later phase depends on.
 
 **Independent Test**: Check a booking in (via US1's new creation flow), add charges of different types, confirm each appears as a line item with balance updated.
 
-- [ ] T028 [US2] Review `addCharge`/`getCharges` in `BookingService.java` — confirm no change needed (FR-001/FR-002/FR-003 are independent of the payment-model rework).
-- [ ] T029 [P] [US2] Update any `ChargeFlowIT.java` seed data to use `createConfirmedBooking` with a `guestPhone` (same mechanical update as T027, scoped here if not already done there).
+- [X] T028 [US2] Review `addCharge`/`getCharges` in `BookingService.java` — confirm no change needed (FR-001/FR-002/FR-003 are independent of the payment-model rework).
+- [X] T029 [P] [US2] Update any `ChargeFlowIT.java` seed data to use `createConfirmedBooking` with a `guestPhone` (same mechanical update as T027, scoped here if not already done there).
 
 **Checkpoint**: Charge-adding acceptance scenarios (spec.md US2, 1-3) still pass unchanged.
 
@@ -100,8 +100,8 @@ every later phase depends on.
 
 **Independent Test**: Check in, attempt checkout with an approved card, confirm `CHECKED_OUT`/`DIRTY` only after approval; separately, attempt checkout with a declining card and confirm the booking **stays `CHECKED_IN`** with the same balance (this is the scenario e2e step 13 is repurposed to, Phase 8).
 
-- [ ] T032 [US4] Review `checkOut`/`handleCheckoutOutcome`/`expireCheckoutAttempt` in `BookingService.java` — confirm no change needed beyond what Phase 2/3 already touched (the saga, sweep, and late-`AUTHORIZED` handling are explicitly kept as-is).
-- [ ] T033 [P] [US4] Confirm `BookingServiceCheckOutTest.java` and `CheckOutFlowIT.java`/`CheckoutPaymentFlowIT.java` still pass once their seed data uses `createConfirmedBooking` (T027) — no new test cases required, spec.md US4's 8 acceptance scenarios were already covered by the original Phase 3/4 tests.
+- [X] T032 [US4] Review `checkOut`/`handleCheckoutOutcome`/`expireCheckoutAttempt` in `BookingService.java` — confirm no change needed beyond what Phase 2/3 already touched (the saga, sweep, and late-`AUTHORIZED` handling are explicitly kept as-is).
+- [X] T033 [P] [US4] Confirm `BookingServiceCheckOutTest.java` and `CheckOutFlowIT.java`/`CheckoutPaymentFlowIT.java` still pass once their seed data uses `createConfirmedBooking` (T027) — no new test cases required, spec.md US4's 8 acceptance scenarios were already covered by the original Phase 3/4 tests.
 
 **Checkpoint**: All 8 of spec.md US4's acceptance scenarios pass against the reworked booking-creation flow.
 
@@ -113,7 +113,7 @@ every later phase depends on.
 
 **Independent Test**: Check in a booking for a zero-nightly-rate room, add no charges, check out — confirm immediate `CHECKED_OUT`/`DIRTY`, no card, no payment-core call.
 
-- [ ] T034 [US5] Add/update a test (`BookingServiceCheckOutTest.java` or `CheckOutFlowIT.java`) seeding a room with `nightlyRate = 0.00`, confirming `getBalanceDue` is zero immediately after `createConfirmedBooking` and checkout completes with no card.
+- [X] T034 [US5] Add/update a test (`BookingServiceCheckOutTest.java` or `CheckOutFlowIT.java`) seeding a room with `nightlyRate = 0.00`, confirming `getBalanceDue` is zero immediately after `createConfirmedBooking` and checkout completes with no card.
 
 **Checkpoint**: spec.md US5's single acceptance scenario passes; zero-balance checkout is confirmed reachable only through this narrow path.
 
@@ -125,30 +125,30 @@ every later phase depends on.
 
 ### Backend polish
 
-- [ ] T035 [P] Search the whole `booking-service` module for any remaining reference to `HELD`, `initiatePayment`, `createHeldBooking`, `BookingCreatedResponse`, `handleRoomChargeOutcome`, or `BookingNotFoundForTransactionException` and fix/remove each (no dead code left, per the user's standing instruction).
-- [ ] T036 [P] Confirm JaCoCo 100% coverage still holds for `booking-service` after all deletions/additions (`./gradlew :booking-service:jacocoTestCoverageVerification`).
+- [X] T035 [P] Search the whole `booking-service` module for any remaining reference to `HELD`, `initiatePayment`, `createHeldBooking`, `BookingCreatedResponse`, `handleRoomChargeOutcome`, or `BookingNotFoundForTransactionException` and fix/remove each (no dead code left, per the user's standing instruction).
+- [X] T036 [P] Confirm JaCoCo 100% coverage still holds for `booking-service` after all deletions/additions (`./gradlew :booking-service:jacocoTestCoverageVerification`).
 
 ### e2e and Playwright
 
-- [ ] T037 Rewrite `step12_booking_confirmed()` in `scripts/e2e-test.sh`: book with no card field in the request body; assert the `201` response already has `"status": "CONFIRMED"` — remove the polling loop entirely.
-- [ ] T038 Repurpose `step13_booking_declined()` in `scripts/e2e-test.sh` to "decline at checkout": book (no card) → confirmed → check in → add a charge (optional, for a non-trivial balance) → attempt checkout with a card the payment core declines → assert the booking stays `CHECKED_IN` with its balance unchanged and the room stays `OCCUPIED`; rename the function if the script's step-naming convention expects it (e.g. `step13_checkout_declined`).
-- [ ] T039 Update `step14_room_board_lifecycle()` in `scripts/e2e-test.sh`: book with no card (already `CONFIRMED`), check in, assert board shows `OCCUPIED` + `hasBalanceDue: true`; check out **with** an authorized card this time (room cost alone creates a balance now); poll `GET /api/v1/bookings/{id}` for `CHECKED_OUT` via the `CHECKOUT_PENDING` path instead of expecting a direct zero-balance checkout; assert board shows `DIRTY`, then `VACANT_CLEAN` after housekeeping cleans.
-- [ ] T040 Add a new `step15_checkout_with_charge()` to `scripts/e2e-test.sh`: book (no card) → confirmed → check in → add a room-service charge → check out with a card covering room cost + charge → assert `CHECKED_OUT`, room `DIRTY`. Wire it into the script's step-list/summary output alongside steps 1-14.
-- [ ] T041 Update `frontend/e2e/staff-room-board.spec.ts` (Playwright): the booking step fills no card fields, only the new required/optional guest fields; remove any "wait for CONFIRMED" poll before check-in (creation is synchronous now); the check-out step now always exercises the card/balance path.
+- [X] T037 Rewrite `step12_booking_confirmed()` in `scripts/e2e-test.sh`: book with no card field in the request body; assert the `201` response already has `"status": "CONFIRMED"` — remove the polling loop entirely.
+- [X] T038 Repurpose `step13_booking_declined()` in `scripts/e2e-test.sh` to "decline at checkout": book (no card) → confirmed → check in → add a charge (optional, for a non-trivial balance) → attempt checkout with a card the payment core declines → assert the booking stays `CHECKED_IN` with its balance unchanged and the room stays `OCCUPIED`; rename the function if the script's step-naming convention expects it (e.g. `step13_checkout_declined`).
+- [X] T039 Update `step14_room_board_lifecycle()` in `scripts/e2e-test.sh`: book with no card (already `CONFIRMED`), check in, assert board shows `OCCUPIED` + `hasBalanceDue: true`; check out **with** an authorized card this time (room cost alone creates a balance now); poll `GET /api/v1/bookings/{id}` for `CHECKED_OUT` via the `CHECKOUT_PENDING` path instead of expecting a direct zero-balance checkout; assert board shows `DIRTY`, then `VACANT_CLEAN` after housekeeping cleans.
+- [X] T040 Add a new `step15_checkout_with_charge()` to `scripts/e2e-test.sh`: book (no card) → confirmed → check in → add a room-service charge → check out with a card covering room cost + charge → assert `CHECKED_OUT`, room `DIRTY`. Wire it into the script's step-list/summary output alongside steps 1-14.
+- [X] T041 Update `frontend/e2e/staff-room-board.spec.ts` (Playwright): the booking step fills no card fields, only the new required/optional guest fields; remove any "wait for CONFIRMED" poll before check-in (creation is synchronous now); the check-out step now always exercises the card/balance path.
 
 ### Frontend
 
-- [ ] T042 [P] In `frontend/src/types/staff.ts`: `BookingStatus` drops only `'HELD'` (keeps `'CANCELLED'`); `Booking` drops `transactionId` (keeps `cancellationReason`), gains the 8 guest-detail fields; `BookingFormValues` drops `card`, gains the same 8 fields.
-- [ ] T043 In `frontend/src/features/booking/validation.ts`: `BookingFormState` no longer extends `CardFormState`; `validateBookingForm` no longer calls `validateCardFields`; add validation for the new required (`guestName`, `guestPhone`, `checkIn`, `checkOut`) and optional fields. `CardFormState`/`validateCardFields` themselves are unchanged (still used by `CheckOutCardForm.tsx`).
-- [ ] T044 In `frontend/src/features/booking/BookingForm.tsx`: remove card fields; add inputs for `guestPhone` (required), `guestEmail`, `visitingFrom`, `adults`, `children`, `expectedArrivalTime`, `expectedDepartureTime`, `notes` (optional).
-- [ ] T045 In `frontend/src/features/booking/bookingApi.ts`: `createBooking`'s request body drops `card`, gains the guest-detail fields; its success response is used directly as the confirmed `Booking` (no more "thin create response" type); `useGetBookingQuery`'s poll-stop condition drops the now-impossible `'HELD'` check.
-- [ ] T046 [P] In `frontend/src/features/booking/BookingStatusView.tsx`: remove the `STATUS_LABEL` entry for `'HELD'`; keep the `'CANCELLED'` entry (still a valid, if currently unreachable, status).
-- [ ] T047 In `frontend/src/features/room-board/RoomActionPanel.tsx` and `CheckInAction.tsx`: extend both the arriving-booking panel and the occupied-room panel to show the full guest-detail record (FR-023, Clarifications: "applies to both").
-- [ ] T048 [P] Update all affected `*.test.ts(x)` files under `frontend/src/features/booking/` and `frontend/src/features/room-board/` for the above; confirm Vitest/RTL/MSW 100% coverage still holds for this layer's files.
+- [X] T042 [P] In `frontend/src/types/staff.ts`: `BookingStatus` drops only `'HELD'` (keeps `'CANCELLED'`); `Booking` drops `transactionId` (keeps `cancellationReason`), gains the 8 guest-detail fields; `BookingFormValues` drops `card`, gains the same 8 fields.
+- [X] T043 In `frontend/src/features/booking/validation.ts`: `BookingFormState` no longer extends `CardFormState`; `validateBookingForm` no longer calls `validateCardFields`; add validation for the new required (`guestName`, `guestPhone`, `checkIn`, `checkOut`) and optional fields. `CardFormState`/`validateCardFields` themselves are unchanged (still used by `CheckOutCardForm.tsx`).
+- [X] T044 In `frontend/src/features/booking/BookingForm.tsx`: remove card fields; add inputs for `guestPhone` (required), `guestEmail`, `visitingFrom`, `adults`, `children`, `expectedArrivalTime`, `expectedDepartureTime`, `notes` (optional).
+- [X] T045 In `frontend/src/features/booking/bookingApi.ts`: `createBooking`'s request body drops `card`, gains the guest-detail fields; its success response is used directly as the confirmed `Booking` (no more "thin create response" type); `useGetBookingQuery`'s poll-stop condition drops the now-impossible `'HELD'` check.
+- [X] T046 [P] In `frontend/src/features/booking/BookingStatusView.tsx`: remove the `STATUS_LABEL` entry for `'HELD'`; keep the `'CANCELLED'` entry (still a valid, if currently unreachable, status).
+- [X] T047 In `frontend/src/features/room-board/RoomActionPanel.tsx` and `CheckInAction.tsx`: extend both the arriving-booking panel and the occupied-room panel to show the full guest-detail record (FR-023, Clarifications: "applies to both").
+- [X] T048 [P] Update all affected `*.test.ts(x)` files under `frontend/src/features/booking/` and `frontend/src/features/room-board/` for the above; confirm Vitest/RTL/MSW 100% coverage still holds for this layer's files.
 
 ### Docs
 
-- [ ] T049 [P] Update `docs/BACKLOG.md` per spec.md's Assumptions (no refunds/split payments/taxes/discounts/invoices; no email/SMS confirmation sent for a new booking) if not already logged there from the original Phase 1-5 pass.
+- [X] T049 [P] Update `docs/BACKLOG.md` per spec.md's Assumptions (no refunds/split payments/taxes/discounts/invoices; no email/SMS confirmation sent for a new booking) if not already logged there from the original Phase 1-5 pass.
 
 **Checkpoint**: Full stack (`docker compose up -d --build` + `./scripts/e2e-test.sh` + Playwright) green end to end; ready for PR (per CLAUDE.md: do not merge without explicit approval).
 
