@@ -82,3 +82,22 @@ These were named up front as out of scope for every layer until explicitly start
   deployed environment (see SECURITY.md). Replacing this with the project's real
   auth server (already named as a "later pass" in CLAUDE.md's Roadmap) is required
   before this frontend could ever be exposed to anyone but a developer or CI.
+
+## Carried from the charges / checkout-only-payment rework (layer 2c)
+
+- **No refunds, split payments, taxes, discounts, or invoices/PDFs**: a charge
+  is a flat amount of a fixed type; nothing in this layer computes tax, applies
+  a discount, splits a balance across multiple cards, reverses a charge, or
+  produces any printable/exportable document (spec.md Assumptions).
+- **No email or SMS confirmation sent for a new booking**: staff see it
+  confirmed on screen immediately; notifying the guest some other way is out
+  of scope here (spec.md Assumptions).
+- **Charges are add-only**: there is no way to edit or remove a charge once
+  added, by design — a correction mechanism is out of scope for this layer.
+- **`CancellationReason`'s four pre-rework values are dormant**:
+  `PAYMENT_DECLINED`/`PAYMENT_FAILED`/`HOLD_EXPIRED`/`PAYMENT_AFTER_EXPIRY`
+  can no longer be produced by anything in this layer (their only source, the
+  booking-time payment saga, was removed) — kept, not deleted, because layer
+  2f's planned staff-cancellation feature is expected to reuse the
+  `CANCELLED` status and this enum rather than reintroducing them. If 2f ships
+  without ever touching this enum, these four values should be revisited.

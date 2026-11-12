@@ -43,7 +43,7 @@ public class KafkaConsumerConfig {
 
     /**
      * Unlike other services' consumer containers (which catch every exception inside
-     * the listener and always ack), this one lets {@code BookingNotFoundForTransactionException}
+     * the listener and always ack), this one lets {@code UnknownTransactionException}
      * — and any other processing failure — propagate so the container's error handler
      * retries with bounded backoff before giving up (research.md §3a). The booking row
      * and this event can race: booking-service persists the booking HELD, calls

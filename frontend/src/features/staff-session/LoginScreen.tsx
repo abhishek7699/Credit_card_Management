@@ -26,6 +26,7 @@ export function LoginScreen() {
 
   return (
     <main className="mx-auto flex min-h-screen max-w-sm flex-col justify-center px-4">
+      <p className="mb-1 text-sm font-medium text-gray-500">Hotel Payment App</p>
       <h1 className="mb-6 text-2xl font-bold text-gray-900">Staff Sign In</h1>
 
       {isError && (

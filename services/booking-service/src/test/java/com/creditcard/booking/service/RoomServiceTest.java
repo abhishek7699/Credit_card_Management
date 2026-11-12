@@ -3,11 +3,17 @@ package com.creditcard.booking.service;
 import com.creditcard.booking.controller.dto.RoomBoardResponse;
 import com.creditcard.booking.domain.Booking;
 import com.creditcard.booking.domain.BookingStatus;
+import com.creditcard.booking.domain.Charge;
+import com.creditcard.booking.domain.ChargeType;
+import com.creditcard.booking.domain.CheckoutAttemptStatus;
+import com.creditcard.booking.domain.CheckoutPaymentAttempt;
 import com.creditcard.booking.domain.Room;
 import com.creditcard.booking.domain.RoomStatus;
 import com.creditcard.booking.exception.InvalidRoomStatusTransitionException;
 import com.creditcard.booking.exception.RoomNotFoundException;
 import com.creditcard.booking.repository.BookingRepository;
+import com.creditcard.booking.repository.ChargeRepository;
+import com.creditcard.booking.repository.CheckoutPaymentAttemptRepository;
 import com.creditcard.booking.repository.RoomRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -18,6 +24,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
@@ -37,12 +44,16 @@ class RoomServiceTest {
     private RoomRepository roomRepository;
     @Mock
     private BookingRepository bookingRepository;
+    @Mock
+    private ChargeRepository chargeRepository;
+    @Mock
+    private CheckoutPaymentAttemptRepository checkoutPaymentAttemptRepository;
 
     private RoomService service;
 
     @BeforeEach
     void setUp() {
-        service = new RoomService(roomRepository, bookingRepository);
+        service = new RoomService(roomRepository, bookingRepository, chargeRepository, checkoutPaymentAttemptRepository);
     }
 
     private static Room room(UUID id, String number, int floor, int position, RoomStatus status) {
@@ -56,6 +67,9 @@ class RoomServiceTest {
         return room;
     }
 
+    /** No legacy marker, a non-zero rate-locked room cost -- the realistic default for
+     *  a booking created under the 2026-10-31 rework, where room cost alone already
+     *  creates a balance due the instant the guest is checked in. */
     private static Booking checkedInBooking(UUID roomId) {
         Booking booking = new Booking();
         ReflectionTestUtils.setField(booking, "id", UUID.randomUUID());
@@ -64,6 +78,7 @@ class RoomServiceTest {
         booking.setCheckIn(LocalDate.of(2026, 12, 1));
         booking.setCheckOut(LocalDate.of(2026, 12, 3));
         booking.setStatus(BookingStatus.CHECKED_IN);
+        booking.setRoomChargeAmount(new BigDecimal("200.00"));
         return booking;
     }
 
@@ -111,6 +126,108 @@ class RoomServiceTest {
         assertThat(board.get(1).rooms()).hasSize(1);
         assertThat(board.get(1).rooms().get(0).guestName()).isNull();
         assertThat(board.get(1).rooms().get(0).checkIn()).isNull();
+
+        // US3: hasBalanceDue is present only for the occupied room, null for every
+        // other room regardless of its status. True here even with no charges added --
+        // the occupant's room cost alone already creates a balance (2026-10-31 rework).
+        assertThat(board.get(0).rooms().get(0).hasBalanceDue()).isNull();
+        assertThat(board.get(0).rooms().get(1).hasBalanceDue()).isTrue();
+        assertThat(board.get(1).rooms().get(0).hasBalanceDue()).isNull();
+    }
+
+    @Test
+    void getBoard_occupiedRoomWithCharges_hasBalanceDueTrue() {
+        UUID roomId = UUID.randomUUID();
+        Room occupiedRoom = room(roomId, "101", 1, 1, RoomStatus.OCCUPIED);
+        Booking occupant = checkedInBooking(roomId);
+        Charge charge = new Charge();
+        charge.setBookingId(occupant.getId());
+        charge.setType(ChargeType.MINIBAR);
+        charge.setDescription("Soda");
+        charge.setAmount(new BigDecimal("6.00"));
+        when(roomRepository.findAllByOrderByFloorAscPositionAsc()).thenReturn(List.of(occupiedRoom));
+        when(bookingRepository.findByStatus(BookingStatus.CHECKED_IN)).thenReturn(List.of(occupant));
+        when(bookingRepository.findByStatusAndCheckIn(BookingStatus.CONFIRMED, LocalDate.now()))
+                .thenReturn(List.of());
+        when(chargeRepository.findByBookingIdIn(List.of(occupant.getId()))).thenReturn(List.of(charge));
+
+        List<RoomBoardResponse> board = service.getBoard();
+
+        assertThat(board.get(0).rooms().get(0).hasBalanceDue()).isTrue();
+    }
+
+    @Test
+    void getBoard_occupiedRoomNoCharges_roomCostAloneCreatesBalanceDue_hasBalanceDueTrue() {
+        UUID roomId = UUID.randomUUID();
+        Room occupiedRoom = room(roomId, "101", 1, 1, RoomStatus.OCCUPIED);
+        Booking occupant = checkedInBooking(roomId); // no legacy marker, roomChargeAmount 200.00
+        when(roomRepository.findAllByOrderByFloorAscPositionAsc()).thenReturn(List.of(occupiedRoom));
+        when(bookingRepository.findByStatus(BookingStatus.CHECKED_IN)).thenReturn(List.of(occupant));
+        when(bookingRepository.findByStatusAndCheckIn(BookingStatus.CONFIRMED, LocalDate.now()))
+                .thenReturn(List.of());
+
+        List<RoomBoardResponse> board = service.getBoard();
+
+        assertThat(board.get(0).rooms().get(0).hasBalanceDue()).isTrue();
+    }
+
+    @Test
+    void getBoard_occupiedLegacyBookingNoCharges_roomCostAlreadyPaidAtBooking_hasBalanceDueFalse() {
+        UUID roomId = UUID.randomUUID();
+        Room occupiedRoom = room(roomId, "101", 1, 1, RoomStatus.OCCUPIED);
+        Booking occupant = checkedInBooking(roomId);
+        occupant.setLegacyRoomPaymentTransactionId("txn-legacy-board"); // already paid at booking, pre-rework
+        when(roomRepository.findAllByOrderByFloorAscPositionAsc()).thenReturn(List.of(occupiedRoom));
+        when(bookingRepository.findByStatus(BookingStatus.CHECKED_IN)).thenReturn(List.of(occupant));
+        when(bookingRepository.findByStatusAndCheckIn(BookingStatus.CONFIRMED, LocalDate.now()))
+                .thenReturn(List.of());
+
+        List<RoomBoardResponse> board = service.getBoard();
+
+        assertThat(board.get(0).rooms().get(0).hasBalanceDue()).isFalse();
+    }
+
+    @Test
+    void getBoard_occupiedRoomWithChargesFullyPaidAtCheckout_hasBalanceDueFalse() {
+        UUID roomId = UUID.randomUUID();
+        Room occupiedRoom = room(roomId, "101", 1, 1, RoomStatus.OCCUPIED);
+        Booking occupant = checkedInBooking(roomId);
+        occupant.setRoomChargeAmount(BigDecimal.ZERO); // isolate this test to the charge/payment math alone
+        Charge charge = new Charge();
+        charge.setBookingId(occupant.getId());
+        charge.setType(ChargeType.MINIBAR);
+        charge.setDescription("Soda");
+        charge.setAmount(new BigDecimal("6.00"));
+        CheckoutPaymentAttempt paidAttempt = new CheckoutPaymentAttempt();
+        paidAttempt.setBookingId(occupant.getId());
+        paidAttempt.setAmount(new BigDecimal("6.00"));
+        paidAttempt.setStatus(CheckoutAttemptStatus.AUTHORIZED);
+        when(roomRepository.findAllByOrderByFloorAscPositionAsc()).thenReturn(List.of(occupiedRoom));
+        when(bookingRepository.findByStatus(BookingStatus.CHECKED_IN)).thenReturn(List.of(occupant));
+        when(bookingRepository.findByStatusAndCheckIn(BookingStatus.CONFIRMED, LocalDate.now()))
+                .thenReturn(List.of());
+        when(chargeRepository.findByBookingIdIn(List.of(occupant.getId()))).thenReturn(List.of(charge));
+        when(checkoutPaymentAttemptRepository.findByBookingIdInAndStatusIn(List.of(occupant.getId()),
+                List.of(CheckoutAttemptStatus.AUTHORIZED, CheckoutAttemptStatus.LATE_AUTHORIZED)))
+                .thenReturn(List.of(paidAttempt));
+
+        List<RoomBoardResponse> board = service.getBoard();
+
+        assertThat(board.get(0).rooms().get(0).hasBalanceDue()).isFalse();
+    }
+
+    @Test
+    void getBoard_nonOccupiedRoom_hasBalanceDueAbsent() {
+        UUID roomId = UUID.randomUUID();
+        Room vacantRoom = room(roomId, "101", 1, 1, RoomStatus.VACANT_CLEAN);
+        when(roomRepository.findAllByOrderByFloorAscPositionAsc()).thenReturn(List.of(vacantRoom));
+        when(bookingRepository.findByStatus(BookingStatus.CHECKED_IN)).thenReturn(List.of());
+        when(bookingRepository.findByStatusAndCheckIn(BookingStatus.CONFIRMED, LocalDate.now()))
+                .thenReturn(List.of());
+
+        List<RoomBoardResponse> board = service.getBoard();
+
+        assertThat(board.get(0).rooms().get(0).hasBalanceDue()).isNull();
     }
 
     @Test

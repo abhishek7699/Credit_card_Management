@@ -4,15 +4,21 @@ import com.creditcard.booking.controller.dto.RoomBoardResponse;
 import com.creditcard.booking.controller.dto.RoomBoardResponse.RoomBoardEntry;
 import com.creditcard.booking.domain.Booking;
 import com.creditcard.booking.domain.BookingStatus;
+import com.creditcard.booking.domain.Charge;
+import com.creditcard.booking.domain.CheckoutAttemptStatus;
+import com.creditcard.booking.domain.CheckoutPaymentAttempt;
 import com.creditcard.booking.domain.Room;
 import com.creditcard.booking.domain.RoomStatus;
 import com.creditcard.booking.exception.InvalidRoomStatusTransitionException;
 import com.creditcard.booking.exception.RoomNotFoundException;
 import com.creditcard.booking.repository.BookingRepository;
+import com.creditcard.booking.repository.ChargeRepository;
+import com.creditcard.booking.repository.CheckoutPaymentAttemptRepository;
 import com.creditcard.booking.repository.RoomRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
@@ -40,12 +46,26 @@ public class RoomService {
             RoomStatus.MAINTENANCE, Set.of(RoomStatus.VACANT_CLEAN)
     );
 
+    /** Statuses that count as "paid" toward a booking's balance due — same list as
+     *  BookingService's own (data-model.md's balance formula); duplicated rather than
+     *  shared on purpose, since RoomService must not gain a BookingService dependency
+     *  (plan.md Key Design Decision #5). */
+    private static final List<CheckoutAttemptStatus> PAID_CHECKOUT_STATUSES =
+            List.of(CheckoutAttemptStatus.AUTHORIZED, CheckoutAttemptStatus.LATE_AUTHORIZED);
+
     private final RoomRepository roomRepository;
     private final BookingRepository bookingRepository;
+    private final ChargeRepository chargeRepository;
+    private final CheckoutPaymentAttemptRepository checkoutPaymentAttemptRepository;
 
-    public RoomService(RoomRepository roomRepository, BookingRepository bookingRepository) {
+    public RoomService(RoomRepository roomRepository,
+                        BookingRepository bookingRepository,
+                        ChargeRepository chargeRepository,
+                        CheckoutPaymentAttemptRepository checkoutPaymentAttemptRepository) {
         this.roomRepository = roomRepository;
         this.bookingRepository = bookingRepository;
+        this.chargeRepository = chargeRepository;
+        this.checkoutPaymentAttemptRepository = checkoutPaymentAttemptRepository;
     }
 
     /**
@@ -94,6 +114,8 @@ public class RoomService {
         Map<UUID, Booking> arrivingByRoomId = bookingRepository
                 .findByStatusAndCheckIn(BookingStatus.CONFIRMED, LocalDate.now()).stream()
                 .collect(Collectors.toMap(Booking::getRoomId, Function.identity()));
+        Map<UUID, Boolean> hasBalanceDueByBookingId = hasBalanceDueByBookingId(
+                List.copyOf(occupantByRoomId.values()));
 
         List<RoomBoardResponse> board = new ArrayList<>();
         Integer currentFloor = null;
@@ -104,12 +126,48 @@ public class RoomService {
                 currentFloorRooms = new ArrayList<>();
                 board.add(new RoomBoardResponse(currentFloor, currentFloorRooms));
             }
-            currentFloorRooms.add(toEntry(room, occupantByRoomId.get(room.getId()), arrivingByRoomId.get(room.getId())));
+            Booking occupant = occupantByRoomId.get(room.getId());
+            Boolean hasBalanceDue = occupant != null ? hasBalanceDueByBookingId.getOrDefault(occupant.getId(), false) : null;
+            currentFloorRooms.add(toEntry(room, occupant, arrivingByRoomId.get(room.getId()), hasBalanceDue));
         }
         return board;
     }
 
-    private static RoomBoardEntry toEntry(Room room, Booking occupant, Booking arriving) {
+    /**
+     * FR-006, one bulk pass per board refresh, not N+1 (plan.md Key Design Decision
+     * #5): sums each occupied booking's room cost plus charges minus its legacy
+     * payment (if any) and its already-paid checkout attempts — the same formula as
+     * {@link BookingService#getBalanceDue}, just batched. No per-booking Room lookup
+     * is needed: {@code roomChargeAmount} and {@code legacyRoomPaymentTransactionId}
+     * are already loaded on each {@code Booking} passed in (research.md §2). Since
+     * room cost now counts toward the balance for every non-legacy booking (the
+     * central behavior change of the 2026-10-31 rework), a freshly checked-in booking
+     * with no charges is flagged {@code true} here, not {@code false} as it was before.
+     */
+    private Map<UUID, Boolean> hasBalanceDueByBookingId(List<Booking> occupiedBookings) {
+        if (occupiedBookings.isEmpty()) {
+            return Map.of();
+        }
+        List<UUID> occupiedBookingIds = occupiedBookings.stream().map(Booking::getId).toList();
+        Map<UUID, BigDecimal> chargesByBookingId = chargeRepository.findByBookingIdIn(occupiedBookingIds).stream()
+                .collect(Collectors.groupingBy(Charge::getBookingId,
+                        Collectors.reducing(BigDecimal.ZERO, Charge::getAmount, BigDecimal::add)));
+        Map<UUID, BigDecimal> paidByBookingId = checkoutPaymentAttemptRepository
+                .findByBookingIdInAndStatusIn(occupiedBookingIds, PAID_CHECKOUT_STATUSES).stream()
+                .collect(Collectors.groupingBy(CheckoutPaymentAttempt::getBookingId,
+                        Collectors.reducing(BigDecimal.ZERO, CheckoutPaymentAttempt::getAmount, BigDecimal::add)));
+        return occupiedBookings.stream().collect(Collectors.toMap(Booking::getId, booking -> {
+            BigDecimal roomCharge = booking.getRoomChargeAmount();
+            BigDecimal charges = chargesByBookingId.getOrDefault(booking.getId(), BigDecimal.ZERO);
+            BigDecimal legacyPaidAmount = booking.getLegacyRoomPaymentTransactionId() != null
+                    ? roomCharge
+                    : BigDecimal.ZERO;
+            BigDecimal paid = paidByBookingId.getOrDefault(booking.getId(), BigDecimal.ZERO);
+            return roomCharge.add(charges).subtract(legacyPaidAmount).subtract(paid).compareTo(BigDecimal.ZERO) > 0;
+        }));
+    }
+
+    private static RoomBoardEntry toEntry(Room room, Booking occupant, Booking arriving, Boolean hasBalanceDue) {
         return new RoomBoardEntry(
                 room.getId(),
                 room.getRoomNumber(),
@@ -120,6 +178,7 @@ public class RoomService {
                 occupant != null ? occupant.getCheckOut() : null,
                 occupant != null ? occupant.getId() : null,
                 arriving != null ? arriving.getId() : null,
-                arriving != null ? arriving.getGuestName() : null);
+                arriving != null ? arriving.getGuestName() : null,
+                hasBalanceDue);
     }
 }

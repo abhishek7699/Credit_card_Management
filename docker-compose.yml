@@ -277,3 +277,47 @@ services:
       REPORTING_SERVICE_URL: http://reporting-service:8086
       BOOKING_SERVICE_URL: http://booking-service:8080
 
+  # Dev-only convenience seed (layer 2c): an ACTIVE authorization_service.card_accounts
+  # row for 4111111111111111, so checkout can be exercised by hand (frontend, curl,
+  # Postman) on a fresh stack without running scripts/e2e-test.sh first. Gated behind
+  # the "dev" profile -- plain `docker compose up` never starts this; it needs
+  # `docker compose --profile dev up -d dev-seed` (or `COMPOSE_PROFILES=dev`).
+  # Mirrors scripts/e2e-test.sh's seed_card_account exactly (same Vault transit
+  # encryption context, same table/columns), so the two can never seed two different
+  # tokens for the same PAN. Uses the cockroachdb image itself (confirmed it already
+  # bundles bash/curl/sed/grep/cockroach -- no separate image to build), overriding
+  # its entrypoint to run this one-shot script instead of starting a node, then exits.
+  dev-seed:
+    image: cockroachdb/cockroach:v23.2.0
+    profiles: ["dev"]
+    depends_on:
+      cockroachdb:
+        condition: service_healthy
+      vault:
+        condition: service_healthy
+    environment:
+      VAULT_DEV_ROOT_TOKEN: ${VAULT_DEV_ROOT_TOKEN}
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        set -euo pipefail
+        echo "dev-seed: waiting for authorization-service..."
+        until curl -sf http://authorization-service:8082/actuator/health >/dev/null 2>&1; do sleep 2; done
+
+        PAN_B64=$$(printf '%s' "4111111111111111" | base64 | tr -d '\n')
+        CTX_B64=$$(printf '%s' "credit-card-pan" | base64 | tr -d '\n')
+        RESPONSE=$$(curl -sf -X POST \
+          -H "X-Vault-Token: $${VAULT_DEV_ROOT_TOKEN}" \
+          -d "{\"plaintext\":\"$${PAN_B64}\",\"context\":\"$${CTX_B64}\"}" \
+          http://vault:8200/v1/transit/encrypt/card-pan-key)
+        TOKEN=$$(printf '%s' "$${RESPONSE}" | sed -n 's/.*"ciphertext":"\([^"]*\)".*/\1/p')
+        if [ -z "$${TOKEN}" ]; then
+          echo "dev-seed: could not obtain a card token from Vault" >&2
+          exit 1
+        fi
+
+        cockroach sql --insecure --host=cockroachdb --port=26257 --database=defaultdb -e \
+          "INSERT INTO authorization_service.card_accounts (card_token, status, credit_limit, available_credit, currency_code) VALUES ('$${TOKEN}', 'ACTIVE', 100000.0000, 100000.0000, 'USD') ON CONFLICT (card_token) DO NOTHING;"
+
+        echo "dev-seed: test card account 4111111111111111 seeded (token $${TOKEN:0:20}...)"
+

@@ -26,6 +26,7 @@ const BOARD: RoomBoardFloor[] = [
         currentBookingId: 'b1',
         arrivingBookingId: null,
         arrivingGuestName: null,
+        hasBalanceDue: false,
       },
       {
         roomId: 'r2',
@@ -38,6 +39,7 @@ const BOARD: RoomBoardFloor[] = [
         currentBookingId: null,
         arrivingBookingId: null,
         arrivingGuestName: null,
+        hasBalanceDue: null,
       },
     ],
   },
@@ -55,6 +57,7 @@ const BOARD: RoomBoardFloor[] = [
         currentBookingId: null,
         arrivingBookingId: null,
         arrivingGuestName: null,
+        hasBalanceDue: null,
       },
     ],
   },

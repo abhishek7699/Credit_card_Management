@@ -211,6 +211,36 @@ public class RouteConfig {
                                         .setFallbackUri("forward:/fallback/booking")))
                         .uri(bookingServiceUrl))
 
+                // ── Booking: charges (POST) — layer 2c ────────────────────────────────
+                // Falls under SecurityConfig's existing broad FRONT_DESK/ADMIN rule for
+                // /api/v1/bookings/** — no new matcher needed (contracts/api.md).
+                .route("booking-charges-post", r -> r
+                        .path("/api/v1/bookings/{id}/charges")
+                        .and().method(HttpMethod.POST)
+                        .filters(f -> f
+                                .requestRateLimiter(c -> c
+                                        .setRateLimiter(rateLimiter)
+                                        .setKeyResolver(keyResolver))
+                                .circuitBreaker(c -> c
+                                        .setName("booking-service-cb")
+                                        .setFallbackUri("forward:/fallback/booking")))
+                        .uri(bookingServiceUrl))
+
+                // ── Booking: charges (GET) — layer 2c ─────────────────────────────────
+                // Front-desk OR housekeeping (FR-003) — matched before the broad rule by
+                // SecurityConfig's own dedicated matcher, same pattern as room-board.
+                .route("booking-charges-get", r -> r
+                        .path("/api/v1/bookings/{id}/charges")
+                        .and().method(HttpMethod.GET)
+                        .filters(f -> f
+                                .requestRateLimiter(c -> c
+                                        .setRateLimiter(rateLimiter)
+                                        .setKeyResolver(keyResolver))
+                                .circuitBreaker(c -> c
+                                        .setName("booking-service-cb")
+                                        .setFallbackUri("forward:/fallback/booking")))
+                        .uri(bookingServiceUrl))
+
                 // ── Room board (GET) — layer 2b ───────────────────────────────────────
                 // /api/v1/rooms/board is a distinct literal path from room-search's
                 // /api/v1/rooms, so there's no route-matching ambiguity regardless of

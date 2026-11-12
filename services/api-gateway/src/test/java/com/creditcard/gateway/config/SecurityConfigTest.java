@@ -141,4 +141,38 @@ class SecurityConfigTest {
                 .exchange()
                 .expectStatus().isUnauthorized();
     }
+
+    @Test
+    void housekeepingToken_getBooking_notForbidden() {
+        webClient.mutateWith(mockJwt().authorities(() -> "ROLE_HOUSEKEEPING"))
+                .get().uri("/api/v1/bookings/00000000-0000-0000-0000-000000000000")
+                .exchange()
+                .expectStatus().isNotFound(); // not 401/403 — no booking-service in this slice
+    }
+
+    @Test
+    void housekeepingToken_getCharges_notForbidden() {
+        webClient.mutateWith(mockJwt().authorities(() -> "ROLE_HOUSEKEEPING"))
+                .get().uri("/api/v1/bookings/00000000-0000-0000-0000-000000000000/charges")
+                .exchange()
+                .expectStatus().isNotFound(); // not 401/403
+    }
+
+    @Test
+    void merchantToken_getCharges_returns403() {
+        webClient.mutateWith(mockJwt()
+                        .authorities(() -> "ROLE_MERCHANT")
+                        .jwt(j -> j.claim("merchantId", "m-001")))
+                .get().uri("/api/v1/bookings/00000000-0000-0000-0000-000000000000/charges")
+                .exchange()
+                .expectStatus().isForbidden();
+    }
+
+    @Test
+    void frontDeskToken_postCharges_notForbidden() {
+        webClient.mutateWith(mockJwt().authorities(() -> "ROLE_FRONT_DESK"))
+                .post().uri("/api/v1/bookings/00000000-0000-0000-0000-000000000000/charges")
+                .exchange()
+                .expectStatus().isNotFound(); // not 401/403
+    }
 }

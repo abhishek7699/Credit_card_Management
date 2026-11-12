@@ -41,24 +41,6 @@ real identity provider, and neither must ever be exposed outside local dev/CI:
 Both accept any role claim asked of them and must never be reachable from anywhere
 but a developer's own machine or CI.
 
-## 3. Frontend PIN login
-
-`frontend/src/features/auth/{AuthGate,PinRegistration,PinUnlock,hashPin,deviceStorage}.tsx`
-implement a "remember this device" convenience gate, not authentication:
-
-- A 4-digit PIN (10,000 possible values) is hashed with **unsalted SHA-256** and stored in
-  plaintext in `localStorage`.
-- Unlocking re-hashes the entered PIN and compares it **entirely in the browser** — no
-  network call is made, and nothing server-side is ever consulted.
-- It produces no token, cookie, or credential that api-gateway's actual RS256/JWKS-based
-  authentication would accept; the frontend never sends an `Authorization` header derived
-  from this flow.
-
-Anyone with access to the browser's `localStorage` can read or delete the stored PIN hash
-(bypassing it entirely) or brute-force the unsalted hash offline in well under a second. This
-is UX polish for a single device, not an access-control boundary — don't mistake it for one,
-and don't build real authorization decisions on top of it.
-
 ## Local environment variables
 
 `docker-compose.yml` reads `DB_USERNAME`, `DB_PASSWORD`, and `VAULT_DEV_ROOT_TOKEN` from a

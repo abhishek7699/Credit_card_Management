@@ -13,12 +13,12 @@ end-to-end test against a live card submission.
 added one layer at a time (see `CLAUDE.md`'s Roadmap): `booking-service`
 (layers 2a + 2b) is rooms, availability search, the front-desk-staff
 booking saga, room status (check-in/check-out/housekeeping), and the
-room board. Hotel layers never touch card data themselves; they only
-ask the payment core to charge and react to the result over the same
-gRPC/Kafka contracts the original 7 services already use. Layer 2d
-(`frontend/`) connects a real staff UI to that board — see
-[Running locally](#running-locally)'s "Frontend" section. Charges
-(layer 2c) is the one layer not yet built.
+room board; layer 2c adds per-stay charges and balance-due checkout.
+Hotel layers never touch card data themselves; they only ask the
+payment core to charge and react to the result over the same gRPC/Kafka
+contracts the original 7 services already use. Layer 2d (`frontend/`,
+**Hotel Payment App**) connects a real staff UI to all of it — see
+[Running locally](#running-locally)'s "Frontend" section.
 
 ## Services
 
@@ -129,9 +129,10 @@ scale the node pool between demos without tearing anything else down.
 
 ### Frontend
 
-The staff room board (layer 2d, `frontend/`) talks to the real backend —
-not mock data — behind a dev-only role-picker login. Needs the Docker
-Compose stack from above (which now also brings up a standing,
+**Hotel Payment App** (`frontend/`) is the staff room board (layer 2d) —
+talking to the real backend, not mock data, behind a dev-only role-picker
+login. `/staff` is the only app; every other path redirects there. Needs
+the Docker Compose stack from above (which now also brings up a standing,
 **dev-only** `auth-mock` service for that login — see SECURITY.md; it
 exists only in `docker-compose.yml`/CI, never in `k8s/` or any deployed
 environment):
@@ -143,12 +144,10 @@ npm install
 npm run dev
 ```
 
-Open `http://localhost:5173/staff`, pick a role (Front Desk or
-Housekeeping), and sign in. The existing PIN-login prototype at `/`,
-`/dashboard`, etc. is untouched and still runs on mock data — `/staff` is
-a separate area with its own session, talking to the real
+Open `http://localhost:5173` (redirects to `/staff`), pick a role (Front
+Desk or Housekeeping), and sign in — talking to the real
 `booking-service`/`api-gateway` through `/api/v1/rooms/board` and the
-booking/check-in/check-out endpoints layers 2a/2b already built.
+booking/check-in/check-out/charges endpoints layers 2a-2c already built.
 
 Tests:
 

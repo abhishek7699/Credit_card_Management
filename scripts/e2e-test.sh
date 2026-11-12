@@ -351,6 +351,20 @@ PYEOF
   E2E_KEY_DIR="${key_dir}"
   export E2E_KEY_DIR
 
+  # Root-cause fix (layer 2c): a container named auth-service may already be
+  # running here -- docker-compose.yml's own standing "auth-mock" service (for
+  # the staff frontend's dev login, layer 2d) uses this exact name on purpose,
+  # to match the hostname api-gateway already expects. Record whether that's
+  # the case *before* replacing it, so cleanup() can restore it afterward
+  # instead of just leaving nothing behind (the bug that forced a manual
+  # "Restart auth-mock" step in CI after layer 2d -- fixed here instead).
+  if docker inspect "${AUTH_CONTAINER}" >/dev/null 2>&1; then
+    PREEXISTING_AUTH_MOCK=1
+  else
+    PREEXISTING_AUTH_MOCK=0
+  fi
+  export PREEXISTING_AUTH_MOCK
+
   # Stop any existing mock
   docker rm -f "${AUTH_CONTAINER}" 2>/dev/null || true
 
@@ -803,19 +817,18 @@ step11_fraud_and_notification_records() {
   fi
 }
 
-# ── Step 12: Booking — staff books a room, reaches CONFIRMED ─────────────────
-# Layer 2a (booking-service) on top of the payment core: front-desk staff
-# (FRONT_DESK role) search availability and submit a booking through the same
-# api-gateway; the saga authorizes via the existing payment core and confirms
-# asynchronously off the same transaction.status.updated event steps 4-5
-# already exercise.
+# ── Step 12: Booking — staff books a room, confirmed immediately, no card ───
+# Layer 2c rework: booking creation no longer takes a card or waits on the
+# payment core at all — the 201 response already IS the confirmed booking
+# (FR-017/FR-020), carrying the full guest record and a balance due that
+# already equals the room's cost for the stay (FR-021). No polling.
 step12_booking_confirmed() {
   if [[ "${TARGET}" == "kind" ]]; then
     skip "Step 12 — booking-service has no k8s manifests yet (deferred to the backlog); compose-only for this layer"
     return 0
   fi
 
-  info "Step 12 — Staff books a room and it reaches CONFIRMED"
+  info "Step 12 — Staff books a room with no card; it's confirmed immediately"
 
   local check_in="2030-01-10" check_out="2030-01-12"
   local resp http_code body room_id
@@ -841,7 +854,7 @@ step12_booking_confirmed() {
     -X POST "http://localhost:${GW_PORT}/api/v1/bookings" \
     -H "Authorization: Bearer ${FRONT_DESK_JWT}" \
     -H "Content-Type: application/json" \
-    -d "{\"roomId\":\"${room_id}\",\"checkIn\":\"${check_in}\",\"checkOut\":\"${check_out}\",\"guestName\":\"E2E Guest\",\"card\":{\"cardNumber\":\"${CARD_PAN}\",\"expiry\":\"12/27\",\"cvv\":\"123\",\"cardholderName\":\"E2E Guest\"}}" \
+    -d "{\"roomId\":\"${room_id}\",\"checkIn\":\"${check_in}\",\"checkOut\":\"${check_out}\",\"guestName\":\"E2E Guest\",\"guestPhone\":\"+15555550100\",\"guestEmail\":\"e2e-guest@example.com\",\"adults\":2,\"children\":1}" \
     2>/dev/null)
   http_code=$(echo "$resp" | tail -1)
   body=$(echo "$resp" | sed '$d')
@@ -851,42 +864,39 @@ step12_booking_confirmed() {
     return 1
   fi
 
-  local booking_id status=""
+  local booking_id status balance_due
   booking_id=$(echo "$body" | python3 -c "import sys,json; print(json.load(sys.stdin).get('bookingId',''))" 2>/dev/null || echo "")
+  status=$(echo "$body" | python3 -c "import sys,json; print(json.load(sys.stdin).get('status',''))" 2>/dev/null || echo "")
+  balance_due=$(echo "$body" | python3 -c "import sys,json; print(json.load(sys.stdin).get('balanceDue',''))" 2>/dev/null || echo "")
+
   if [[ -z "$booking_id" ]]; then
     fail "Step 12 — No bookingId in response: ${body}"
     return 1
   fi
-
-  local max=60 elapsed=0 interval=3
-  while [[ $elapsed -lt $max ]]; do
-    resp=$(curl -s -w '\n%{http_code}' "http://localhost:${GW_PORT}/api/v1/bookings/${booking_id}" \
-      -H "Authorization: Bearer ${FRONT_DESK_JWT}" 2>/dev/null)
-    http_code=$(echo "$resp" | tail -1)
-    body=$(echo "$resp" | sed '$d')
-    if [[ "$http_code" == "200" ]]; then
-      status=$(echo "$body" | python3 -c "import sys,json; print(json.load(sys.stdin).get('status',''))" 2>/dev/null || echo "")
-      [[ "$status" == "CONFIRMED" ]] && break
-    fi
-    elapsed=$((elapsed + interval))
-    sleep "$interval"
-  done
-
-  if [[ "$status" == "CONFIRMED" ]]; then
-    pass "Step 12 — Booking ${booking_id} reached CONFIRMED (room ${room_id})"
-  else
-    fail "Step 12 — Booking ${booking_id} did not reach CONFIRMED within ${max}s (last status=${status})"
+  if [[ "$status" != "CONFIRMED" ]]; then
+    fail "Step 12 — Expected status CONFIRMED directly in the 201 response, got ${status}. Body: ${body}"
+    return 1
   fi
+  if [[ -z "$balance_due" || "$balance_due" == "0" || "$balance_due" == "0.0" ]]; then
+    fail "Step 12 — Expected a non-zero balanceDue (room cost) already present at confirmation, got ${balance_due}"
+    return 1
+  fi
+  pass "Step 12 — Booking ${booking_id} confirmed immediately (room ${room_id}, balanceDue=${balance_due}), no card, no polling"
 }
 
-# ── Step 13: Booking — declined card cancels and frees the room ─────────────
-step13_booking_declined() {
+# ── Step 13: Checkout — declined card leaves the guest checked in, same balance ──
+# Layer 2c rework: there's no more booking-time payment to decline, so this step
+# is repurposed from "declined booking" to "declined checkout" (quickstart.md
+# Story 4, acceptance scenario 3) — a decline at checkout must never cancel the
+# booking or free the room; it only leaves the guest checked in, balance
+# unchanged, able to retry (FR-011).
+step13_checkout_declined() {
   if [[ "${TARGET}" == "kind" ]]; then
     skip "Step 13 — booking-service has no k8s manifests yet (deferred to the backlog); compose-only for this layer"
     return 0
   fi
 
-  info "Step 13 — Declined card cancels the booking and frees the room"
+  info "Step 13 — A declined checkout leaves the guest CHECKED_IN with the same balance"
 
   local check_in="2030-02-10" check_out="2030-02-12"
   local resp http_code body room_id
@@ -908,14 +918,11 @@ step13_booking_declined() {
     return 1
   fi
 
-  # A card with no seeded authorization_service.card_accounts row is declined
-  # deterministically as INVALID_CARD (AuthorizationService#authorize) — no
-  # extra seeding needed, unlike the always-authorized CARD_PAN above.
   resp=$(curl -s -w '\n%{http_code}' \
     -X POST "http://localhost:${GW_PORT}/api/v1/bookings" \
     -H "Authorization: Bearer ${FRONT_DESK_JWT}" \
     -H "Content-Type: application/json" \
-    -d "{\"roomId\":\"${room_id}\",\"checkIn\":\"${check_in}\",\"checkOut\":\"${check_out}\",\"guestName\":\"E2E Declined Guest\",\"card\":{\"cardNumber\":\"4000000000000002\",\"expiry\":\"12/27\",\"cvv\":\"123\",\"cardholderName\":\"E2E Declined Guest\"}}" \
+    -d "{\"roomId\":\"${room_id}\",\"checkIn\":\"${check_in}\",\"checkOut\":\"${check_out}\",\"guestName\":\"E2E Declined Guest\",\"guestPhone\":\"+15555550101\"}" \
     2>/dev/null)
   http_code=$(echo "$resp" | tail -1)
   body=$(echo "$resp" | sed '$d')
@@ -925,10 +932,43 @@ step13_booking_declined() {
     return 1
   fi
 
-  local booking_id status="" reason=""
+  local booking_id balance_due
   booking_id=$(echo "$body" | python3 -c "import sys,json; print(json.load(sys.stdin).get('bookingId',''))" 2>/dev/null || echo "")
+  balance_due=$(echo "$body" | python3 -c "import sys,json; print(json.load(sys.stdin).get('balanceDue',''))" 2>/dev/null || echo "")
   if [[ -z "$booking_id" ]]; then
     fail "Step 13 — No bookingId in response: ${body}"
+    return 1
+  fi
+
+  resp=$(curl -s -w '\n%{http_code}' \
+    -X POST "http://localhost:${GW_PORT}/api/v1/bookings/${booking_id}/check-in" \
+    -H "Authorization: Bearer ${FRONT_DESK_JWT}" 2>/dev/null)
+  http_code=$(echo "$resp" | tail -1)
+  if [[ "$http_code" != "200" ]]; then
+    fail "Step 13 — check-in failed: expected 200, got ${http_code}"
+    return 1
+  fi
+
+  # A card with no seeded authorization_service.card_accounts row is declined
+  # deterministically as INVALID_CARD (AuthorizationService#authorize) — no
+  # extra seeding needed, unlike the always-authorized CARD_PAN.
+  resp=$(curl -s -w '\n%{http_code}' \
+    -X POST "http://localhost:${GW_PORT}/api/v1/bookings/${booking_id}/check-out" \
+    -H "Authorization: Bearer ${FRONT_DESK_JWT}" \
+    -H "Content-Type: application/json" \
+    -d "{\"card\":{\"cardNumber\":\"4000000000000002\",\"expiry\":\"12/27\",\"cvv\":\"123\",\"cardholderName\":\"E2E Declined Guest\"}}" \
+    2>/dev/null)
+  http_code=$(echo "$resp" | tail -1)
+  body=$(echo "$resp" | sed '$d')
+  if [[ "$http_code" != "200" ]]; then
+    fail "Step 13 — Checkout submission failed: expected 200, got ${http_code}. Body: ${body}"
+    return 1
+  fi
+
+  local status=""
+  status=$(echo "$body" | python3 -c "import sys,json; print(json.load(sys.stdin).get('status',''))" 2>/dev/null || echo "")
+  if [[ "$status" != "CHECKOUT_PENDING" ]]; then
+    fail "Step 13 — Expected CHECKOUT_PENDING immediately after submitting the checkout charge, got ${status}"
     return 1
   fi
 
@@ -940,37 +980,41 @@ step13_booking_declined() {
     body=$(echo "$resp" | sed '$d')
     if [[ "$http_code" == "200" ]]; then
       status=$(echo "$body" | python3 -c "import sys,json; print(json.load(sys.stdin).get('status',''))" 2>/dev/null || echo "")
-      [[ "$status" == "CANCELLED" ]] && break
+      [[ "$status" == "CHECKED_IN" ]] && break
     fi
     elapsed=$((elapsed + interval))
     sleep "$interval"
   done
 
-  if [[ "$status" != "CANCELLED" ]]; then
-    fail "Step 13 — Booking ${booking_id} did not reach CANCELLED within ${max}s (last status=${status})"
+  if [[ "$status" != "CHECKED_IN" ]]; then
+    fail "Step 13 — Booking ${booking_id} did not revert to CHECKED_IN within ${max}s after the decline (last status=${status})"
     return 1
   fi
 
-  reason=$(echo "$body" | python3 -c "import sys,json; print(json.load(sys.stdin).get('cancellationReason',''))" 2>/dev/null || echo "")
-  if [[ "$reason" != "PAYMENT_DECLINED" ]]; then
-    fail "Step 13 — Expected cancellationReason PAYMENT_DECLINED, got ${reason}"
+  local balance_after
+  balance_after=$(echo "$body" | python3 -c "import sys,json; print(json.load(sys.stdin).get('balanceDue',''))" 2>/dev/null || echo "")
+  if [[ "$balance_after" != "$balance_due" ]]; then
+    fail "Step 13 — Expected balance unchanged by the decline (was ${balance_due}, now ${balance_after})"
     return 1
   fi
-  pass "Step 13 — Booking ${booking_id} cancelled (reason=${reason})"
+  pass "Step 13 — Booking ${booking_id} stayed CHECKED_IN after the decline, balance unchanged (${balance_after}) — retryable"
 
-  resp=$(curl -s -w '\n%{http_code}' \
-    "http://localhost:${GW_PORT}/api/v1/rooms?checkIn=${check_in}&checkOut=${check_out}" \
-    -H "Authorization: Bearer ${FRONT_DESK_JWT}" 2>/dev/null)
+  resp=$(curl -s -w '\n%{http_code}' "http://localhost:${GW_PORT}/api/v1/rooms/board" \
+    -H "Authorization: Bearer ${HOUSEKEEPING_JWT}" 2>/dev/null)
   http_code=$(echo "$resp" | tail -1)
   body=$(echo "$resp" | sed '$d')
   if [[ "$http_code" == "200" ]] && echo "$body" | python3 -c "
 import sys, json
-rooms = json.load(sys.stdin)
-sys.exit(0 if any(r.get('roomId') == '${room_id}' for r in rooms) else 1)
+board = json.load(sys.stdin)
+for floor in board:
+    for room in floor.get('rooms', []):
+        if room.get('roomId') == '${room_id}':
+            sys.exit(0 if room.get('status') == 'OCCUPIED' else 1)
+sys.exit(1)
 " 2>/dev/null; then
-    pass "Step 13 — Room ${room_id} is available again after the decline"
+    pass "Step 13 — Room ${room_id} remains OCCUPIED after the decline"
   else
-    fail "Step 13 — Room ${room_id} did not reappear in availability search after the decline"
+    fail "Step 13 — Room ${room_id} was not OCCUPIED on the board after the decline"
   fi
 }
 
@@ -1038,7 +1082,7 @@ print('')
     -X POST "http://localhost:${GW_PORT}/api/v1/bookings" \
     -H "Authorization: Bearer ${FRONT_DESK_JWT}" \
     -H "Content-Type: application/json" \
-    -d "{\"roomId\":\"${room_id}\",\"checkIn\":\"${check_in}\",\"checkOut\":\"${check_out}\",\"guestName\":\"E2E Lifecycle Guest\",\"card\":{\"cardNumber\":\"${CARD_PAN}\",\"expiry\":\"12/27\",\"cvv\":\"123\",\"cardholderName\":\"E2E Lifecycle Guest\"}}" \
+    -d "{\"roomId\":\"${room_id}\",\"checkIn\":\"${check_in}\",\"checkOut\":\"${check_out}\",\"guestName\":\"E2E Lifecycle Guest\",\"guestPhone\":\"+15555550102\"}" \
     2>/dev/null)
   http_code=$(echo "$resp" | tail -1)
   body=$(echo "$resp" | sed '$d')
@@ -1047,28 +1091,16 @@ print('')
     return 1
   fi
 
-  local booking_id status=""
+  # No card, no polling -- the 201 response already IS CONFIRMED (FR-020).
+  local booking_id status
   booking_id=$(echo "$body" | python3 -c "import sys,json; print(json.load(sys.stdin).get('bookingId',''))" 2>/dev/null || echo "")
+  status=$(echo "$body" | python3 -c "import sys,json; print(json.load(sys.stdin).get('status',''))" 2>/dev/null || echo "")
   if [[ -z "$booking_id" ]]; then
     fail "Step 14 — No bookingId in response: ${body}"
     return 1
   fi
-
-  local max=60 elapsed=0 interval=3
-  while [[ $elapsed -lt $max ]]; do
-    resp=$(curl -s -w '\n%{http_code}' "http://localhost:${GW_PORT}/api/v1/bookings/${booking_id}" \
-      -H "Authorization: Bearer ${FRONT_DESK_JWT}" 2>/dev/null)
-    http_code=$(echo "$resp" | tail -1)
-    body=$(echo "$resp" | sed '$d')
-    if [[ "$http_code" == "200" ]]; then
-      status=$(echo "$body" | python3 -c "import sys,json; print(json.load(sys.stdin).get('status',''))" 2>/dev/null || echo "")
-      [[ "$status" == "CONFIRMED" ]] && break
-    fi
-    elapsed=$((elapsed + interval))
-    sleep "$interval"
-  done
   if [[ "$status" != "CONFIRMED" ]]; then
-    fail "Step 14 — Booking ${booking_id} did not reach CONFIRMED within ${max}s (last status=${status})"
+    fail "Step 14 — Expected status CONFIRMED directly in the 201 response, got ${status}"
     return 1
   fi
 
@@ -1098,24 +1130,52 @@ print('')
   if ! echo "$entry" | python3 -c "
 import sys, json
 e = json.load(sys.stdin)
-sys.exit(0 if e.get('status') == 'OCCUPIED' and e.get('guestName') == 'E2E Lifecycle Guest' else 1)
+sys.exit(0 if e.get('status') == 'OCCUPIED' and e.get('guestName') == 'E2E Lifecycle Guest' and e.get('hasBalanceDue') is True else 1)
 " 2>/dev/null; then
-    fail "Step 14 — Board did not show room ${room_id} as OCCUPIED with the guest's name: ${entry}"
+    fail "Step 14 — Board did not show room ${room_id} as OCCUPIED with hasBalanceDue=true (room cost alone, no charges yet): ${entry}"
     return 1
   fi
-  pass "Step 14 — Board shows room ${room_id} OCCUPIED with guest E2E Lifecycle Guest"
+  pass "Step 14 — Board shows room ${room_id} OCCUPIED with guest E2E Lifecycle Guest, hasBalanceDue=true"
 
-  # check-out (FRONT_DESK)
+  # check-out (FRONT_DESK) -- room cost alone now creates a balance, so this
+  # needs a card and goes through CHECKOUT_PENDING, unlike the direct
+  # zero-balance checkout this step used before the 2026-10-31 rework.
   resp=$(curl -s -w '\n%{http_code}' \
     -X POST "http://localhost:${GW_PORT}/api/v1/bookings/${booking_id}/check-out" \
-    -H "Authorization: Bearer ${FRONT_DESK_JWT}" 2>/dev/null)
+    -H "Authorization: Bearer ${FRONT_DESK_JWT}" \
+    -H "Content-Type: application/json" \
+    -d "{\"card\":{\"cardNumber\":\"${CARD_PAN}\",\"expiry\":\"12/27\",\"cvv\":\"123\",\"cardholderName\":\"E2E Lifecycle Guest\"}}" \
+    2>/dev/null)
   http_code=$(echo "$resp" | tail -1)
   body=$(echo "$resp" | sed '$d')
   if [[ "$http_code" != "200" ]]; then
-    fail "Step 14 — check-out failed: expected 200, got ${http_code}. Body: ${body}"
+    fail "Step 14 — Checkout submission failed: expected 200, got ${http_code}. Body: ${body}"
     return 1
   fi
-  pass "Step 14 — Booking ${booking_id} checked out"
+  status=$(echo "$body" | python3 -c "import sys,json; print(json.load(sys.stdin).get('status',''))" 2>/dev/null || echo "")
+  if [[ "$status" != "CHECKOUT_PENDING" ]]; then
+    fail "Step 14 — Expected CHECKOUT_PENDING immediately after submitting the checkout charge, got ${status}"
+    return 1
+  fi
+
+  local max=60 elapsed=0 interval=3
+  while [[ $elapsed -lt $max ]]; do
+    resp=$(curl -s -w '\n%{http_code}' "http://localhost:${GW_PORT}/api/v1/bookings/${booking_id}" \
+      -H "Authorization: Bearer ${FRONT_DESK_JWT}" 2>/dev/null)
+    http_code=$(echo "$resp" | tail -1)
+    body=$(echo "$resp" | sed '$d')
+    if [[ "$http_code" == "200" ]]; then
+      status=$(echo "$body" | python3 -c "import sys,json; print(json.load(sys.stdin).get('status',''))" 2>/dev/null || echo "")
+      [[ "$status" == "CHECKED_OUT" ]] && break
+    fi
+    elapsed=$((elapsed + interval))
+    sleep "$interval"
+  done
+  if [[ "$status" != "CHECKED_OUT" ]]; then
+    fail "Step 14 — Booking ${booking_id} did not reach CHECKED_OUT within ${max}s (last status=${status})"
+    return 1
+  fi
+  pass "Step 14 — Booking ${booking_id} checked out (room cost authorized)"
 
   # board shows DIRTY
   resp=$(curl -s -w '\n%{http_code}' "http://localhost:${GW_PORT}/api/v1/rooms/board" \
@@ -1164,11 +1224,170 @@ sys.exit(0 if e.get('status') == 'VACANT_CLEAN' and e.get('guestName') is None e
   fi
 }
 
+# ── Step 15: Full stay — book, charge, checkout for the combined balance ────
+# quickstart.md's own end-to-end scenario: book (no card) -> confirmed -> check
+# in -> add a room-service charge -> check out with a card covering room cost
+# + charge -> CHECKED_OUT, room DIRTY.
+step15_checkout_with_charge() {
+  if [[ "${TARGET}" == "kind" ]]; then
+    skip "Step 15 — booking-service has no k8s manifests yet (deferred to the backlog); compose-only for this layer"
+    return 0
+  fi
+
+  info "Step 15 — Full stay: book -> check in -> add charge -> checkout for room cost + charge"
+
+  local check_in="2030-04-10" check_out="2030-04-12"
+  local resp http_code body room_id
+
+  # This step checks in the room it books, so it needs one that's actually
+  # VACANT_CLEAN *right now* — not just free of a date conflict for these
+  # dates. A plain availability search (as steps 12/13 use) can return a room
+  # that's currently stuck CHECKED_IN from an unrelated date range (step 13's
+  # own room, left checked in on purpose by that step's decline scenario) —
+  # same reasoning as step 14's own room selection.
+  resp=$(curl -s -w '\n%{http_code}' "http://localhost:${GW_PORT}/api/v1/rooms/board" \
+    -H "Authorization: Bearer ${FRONT_DESK_JWT}" 2>/dev/null)
+  http_code=$(echo "$resp" | tail -1)
+  body=$(echo "$resp" | sed '$d')
+  if [[ "$http_code" != "200" ]]; then
+    fail "Step 15 — Board fetch failed: expected 200, got ${http_code}. Body: ${body}"
+    return 1
+  fi
+
+  room_id=$(echo "$body" | python3 -c "
+import sys, json
+board = json.load(sys.stdin)
+for floor in board:
+    for room in floor.get('rooms', []):
+        if room.get('status') == 'VACANT_CLEAN':
+            print(room['roomId'])
+            sys.exit(0)
+print('')
+" 2>/dev/null || echo "")
+  if [[ -z "$room_id" ]]; then
+    fail "Step 15 — No VACANT_CLEAN room found on the board"
+    return 1
+  fi
+
+  resp=$(curl -s -w '\n%{http_code}' \
+    -X POST "http://localhost:${GW_PORT}/api/v1/bookings" \
+    -H "Authorization: Bearer ${FRONT_DESK_JWT}" \
+    -H "Content-Type: application/json" \
+    -d "{\"roomId\":\"${room_id}\",\"checkIn\":\"${check_in}\",\"checkOut\":\"${check_out}\",\"guestName\":\"E2E Full Stay Guest\",\"guestPhone\":\"+15555550103\"}" \
+    2>/dev/null)
+  http_code=$(echo "$resp" | tail -1)
+  body=$(echo "$resp" | sed '$d')
+  if [[ "$http_code" != "201" ]]; then
+    fail "Step 15 — Booking submission failed: expected 201, got ${http_code}. Body: ${body}"
+    return 1
+  fi
+
+  local booking_id room_balance
+  booking_id=$(echo "$body" | python3 -c "import sys,json; print(json.load(sys.stdin).get('bookingId',''))" 2>/dev/null || echo "")
+  room_balance=$(echo "$body" | python3 -c "import sys,json; print(json.load(sys.stdin).get('balanceDue',''))" 2>/dev/null || echo "")
+  if [[ -z "$booking_id" ]]; then
+    fail "Step 15 — No bookingId in response: ${body}"
+    return 1
+  fi
+
+  resp=$(curl -s -w '\n%{http_code}' \
+    -X POST "http://localhost:${GW_PORT}/api/v1/bookings/${booking_id}/check-in" \
+    -H "Authorization: Bearer ${FRONT_DESK_JWT}" 2>/dev/null)
+  http_code=$(echo "$resp" | tail -1)
+  if [[ "$http_code" != "200" ]]; then
+    fail "Step 15 — check-in failed: expected 200, got ${http_code}"
+    return 1
+  fi
+
+  resp=$(curl -s -w '\n%{http_code}' \
+    -X POST "http://localhost:${GW_PORT}/api/v1/bookings/${booking_id}/charges" \
+    -H "Authorization: Bearer ${FRONT_DESK_JWT}" \
+    -H "Content-Type: application/json" \
+    -d '{"type":"ROOM_SERVICE","description":"E2E club sandwich","amount":18.50}' \
+    2>/dev/null)
+  http_code=$(echo "$resp" | tail -1)
+  body=$(echo "$resp" | sed '$d')
+  if [[ "$http_code" != "201" ]]; then
+    fail "Step 15 — Add charge failed: expected 201, got ${http_code}. Body: ${body}"
+    return 1
+  fi
+
+  resp=$(curl -s -w '\n%{http_code}' "http://localhost:${GW_PORT}/api/v1/bookings/${booking_id}" \
+    -H "Authorization: Bearer ${FRONT_DESK_JWT}" 2>/dev/null)
+  body=$(echo "$resp" | sed '$d')
+  local expected_balance
+  expected_balance=$(python3 -c "print(round(float('${room_balance}') + 18.50, 2))" 2>/dev/null || echo "")
+  local actual_balance
+  actual_balance=$(echo "$body" | python3 -c "import sys,json; print(json.load(sys.stdin).get('balanceDue',''))" 2>/dev/null || echo "")
+  if [[ "$actual_balance" != "$expected_balance" ]]; then
+    fail "Step 15 — Expected combined balance ${expected_balance} (room cost + charge), got ${actual_balance}"
+    return 1
+  fi
+  pass "Step 15 — Booking ${booking_id} balance after charge: ${actual_balance} (room cost + charge)"
+
+  resp=$(curl -s -w '\n%{http_code}' \
+    -X POST "http://localhost:${GW_PORT}/api/v1/bookings/${booking_id}/check-out" \
+    -H "Authorization: Bearer ${FRONT_DESK_JWT}" \
+    -H "Content-Type: application/json" \
+    -d "{\"card\":{\"cardNumber\":\"${CARD_PAN}\",\"expiry\":\"12/27\",\"cvv\":\"123\",\"cardholderName\":\"E2E Full Stay Guest\"}}" \
+    2>/dev/null)
+  http_code=$(echo "$resp" | tail -1)
+  body=$(echo "$resp" | sed '$d')
+  if [[ "$http_code" != "200" ]]; then
+    fail "Step 15 — Checkout submission failed: expected 200, got ${http_code}. Body: ${body}"
+    return 1
+  fi
+
+  local status=""
+  local max=60 elapsed=0 interval=3
+  while [[ $elapsed -lt $max ]]; do
+    resp=$(curl -s -w '\n%{http_code}' "http://localhost:${GW_PORT}/api/v1/bookings/${booking_id}" \
+      -H "Authorization: Bearer ${FRONT_DESK_JWT}" 2>/dev/null)
+    http_code=$(echo "$resp" | tail -1)
+    body=$(echo "$resp" | sed '$d')
+    if [[ "$http_code" == "200" ]]; then
+      status=$(echo "$body" | python3 -c "import sys,json; print(json.load(sys.stdin).get('status',''))" 2>/dev/null || echo "")
+      [[ "$status" == "CHECKED_OUT" ]] && break
+    fi
+    elapsed=$((elapsed + interval))
+    sleep "$interval"
+  done
+  if [[ "$status" != "CHECKED_OUT" ]]; then
+    fail "Step 15 — Booking ${booking_id} did not reach CHECKED_OUT within ${max}s (last status=${status})"
+    return 1
+  fi
+  pass "Step 15 — Booking ${booking_id} checked out for the combined balance (room cost + charge)"
+
+  resp=$(curl -s -w '\n%{http_code}' "http://localhost:${GW_PORT}/api/v1/rooms/board" \
+    -H "Authorization: Bearer ${HOUSEKEEPING_JWT}" 2>/dev/null)
+  body=$(echo "$resp" | sed '$d')
+  local entry
+  entry=$(board_room_entry "$body" "$room_id")
+  if echo "$entry" | python3 -c "
+import sys, json
+e = json.load(sys.stdin)
+sys.exit(0 if e.get('status') == 'DIRTY' else 1)
+" 2>/dev/null; then
+    pass "Step 15 — Room ${room_id} is DIRTY after the full-stay checkout"
+  else
+    fail "Step 15 — Room ${room_id} was not DIRTY after the full-stay checkout: ${entry}"
+  fi
+}
+
 # ── Cleanup ───────────────────────────────────────────────────────────────────
 cleanup() {
   info "Cleaning up auth-service mock container"
   docker rm -f "${AUTH_CONTAINER}" 2>/dev/null || true
   [[ -n "${E2E_KEY_DIR:-}" ]] && rm -rf "${E2E_KEY_DIR}"
+  # Root-cause fix (layer 2c): only restore what this script itself preempted --
+  # if docker-compose.yml's standing auth-mock service was already running
+  # before setup_auth_mock replaced it, bring it back; if nothing was there
+  # (e.g. a bare docker-compose stack with no frontend layer, or already torn
+  # down), there's nothing to restore and this is a no-op either way.
+  if [[ "${PREEXISTING_AUTH_MOCK:-0}" == "1" ]]; then
+    info "Restoring the pre-existing auth-mock container this run replaced"
+    docker compose -f "${COMPOSE_FILE}" up -d auth-mock 2>/dev/null || true
+  fi
   if [[ "${TARGET}" == "kind" ]]; then
     info "Stopping kubectl port-forwards"
     for pid in "${PF_PIDS[@]:-}"; do
@@ -1235,8 +1454,9 @@ main() {
   step10_settlement
   step11_fraud_and_notification_records
   step12_booking_confirmed
-  step13_booking_declined
+  step13_checkout_declined
   step14_room_board_lifecycle
+  step15_checkout_with_charge
 
   print_summary
 }

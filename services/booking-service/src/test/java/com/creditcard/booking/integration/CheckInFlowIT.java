@@ -86,10 +86,11 @@ class CheckInFlowIT {
         Booking booking = new Booking();
         booking.setRoomId(roomId);
         booking.setGuestName("Jane Doe");
+        booking.setGuestPhone("+1-555-0100");
         booking.setCheckIn(LocalDate.of(2026, 12, 1));
         booking.setCheckOut(LocalDate.of(2026, 12, 3));
         booking.setStatus(BookingStatus.CONFIRMED);
-        booking.setTransactionId("txn-checkin-it");
+        booking.setRoomChargeAmount(new BigDecimal("200.00"));
         return bookingRepository.save(booking);
     }
 
@@ -118,16 +119,18 @@ class CheckInFlowIT {
         Booking booking = new Booking();
         booking.setRoomId(room.getId());
         booking.setGuestName("Jane Doe");
+        booking.setGuestPhone("+1-555-0100");
         booking.setCheckIn(LocalDate.of(2026, 12, 5));
         booking.setCheckOut(LocalDate.of(2026, 12, 6));
-        booking.setStatus(BookingStatus.HELD);
+        booking.setStatus(BookingStatus.CHECKED_OUT);
+        booking.setRoomChargeAmount(new BigDecimal("100.00"));
         Booking savedBooking = bookingRepository.save(booking);
 
         assertThatThrownBy(() -> bookingService.checkIn(savedBooking.getId()))
                 .isInstanceOf(com.creditcard.booking.exception.InvalidBookingStateException.class);
 
         assertThat(bookingRepository.findById(savedBooking.getId()).orElseThrow().getStatus())
-                .isEqualTo(BookingStatus.HELD);
+                .isEqualTo(BookingStatus.CHECKED_OUT);
         assertThat(roomRepository.findById(room.getId()).orElseThrow().getStatus())
                 .isEqualTo(RoomStatus.VACANT_CLEAN);
     }

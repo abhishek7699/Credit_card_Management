@@ -95,4 +95,16 @@ class RouteConfigTest {
         List<String> ids = allRoutes().stream().map(Route::getId).toList();
         assertThat(ids).contains("reporting-merchant-settlement");
     }
+
+    @Test
+    void bookingChargesPostRouteExists() {
+        List<String> ids = allRoutes().stream().map(Route::getId).toList();
+        assertThat(ids).contains("booking-charges-post");
+    }
+
+    @Test
+    void bookingChargesGetRouteExists() {
+        List<String> ids = allRoutes().stream().map(Route::getId).toList();
+        assertThat(ids).contains("booking-charges-get");
+    }
 }

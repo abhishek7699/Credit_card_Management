@@ -73,14 +73,19 @@ class CheckOutFlowIT {
         return roomRepository.save(room);
     }
 
+    /** {@code legacyRoomPaymentTransactionId} is set so the room cost cancels back out
+     *  of {@code getBalanceDue}, leaving a zero balance -- these tests are about the
+     *  no-balance checkout path, not the balance formula itself. */
     private Booking seedCheckedInBooking(UUID roomId) {
         Booking booking = new Booking();
         booking.setRoomId(roomId);
         booking.setGuestName("Jane Doe");
+        booking.setGuestPhone("+1-555-0100");
         booking.setCheckIn(LocalDate.of(2026, 12, 1));
         booking.setCheckOut(LocalDate.of(2026, 12, 3));
         booking.setStatus(BookingStatus.CHECKED_IN);
-        booking.setTransactionId("txn-checkout-it");
+        booking.setLegacyRoomPaymentTransactionId("txn-checkout-it");
+        booking.setRoomChargeAmount(new BigDecimal("200.00"));
         return bookingRepository.save(booking);
     }
 
@@ -91,10 +96,10 @@ class CheckOutFlowIT {
         roomRepository.save(room);
         Booking booking = seedCheckedInBooking(room.getId());
 
-        Booking result = bookingService.checkOut(booking.getId());
+        Booking result = bookingService.checkOut(booking.getId(), null);
 
         assertThat(result.getStatus()).isEqualTo(BookingStatus.CHECKED_OUT);
-        assertThat(result.getTransactionId()).isEqualTo("txn-checkout-it"); // unchanged by checkout
+        assertThat(result.getLegacyRoomPaymentTransactionId()).isEqualTo("txn-checkout-it"); // unchanged by checkout
         assertThat(roomRepository.findById(room.getId()).orElseThrow().getStatus())
                 .isEqualTo(RoomStatus.DIRTY);
     }
@@ -104,7 +109,7 @@ class CheckOutFlowIT {
         Room room = seedRoom(); // left at the seeded VACANT_CLEAN, never checked in
         Booking booking = seedCheckedInBooking(room.getId());
 
-        bookingService.checkOut(booking.getId());
+        bookingService.checkOut(booking.getId(), null);
 
         assertThat(roomRepository.findById(room.getId()).orElseThrow().getStatus())
                 .isEqualTo(RoomStatus.DIRTY);
@@ -118,12 +123,14 @@ class CheckOutFlowIT {
         Booking booking = new Booking();
         booking.setRoomId(room.getId());
         booking.setGuestName("Jane Doe");
+        booking.setGuestPhone("+1-555-0100");
         booking.setCheckIn(LocalDate.of(2026, 12, 5));
         booking.setCheckOut(LocalDate.of(2026, 12, 6));
         booking.setStatus(BookingStatus.CONFIRMED);
+        booking.setRoomChargeAmount(new BigDecimal("100.00"));
         Booking savedBooking = bookingRepository.save(booking);
 
-        org.assertj.core.api.Assertions.assertThatThrownBy(() -> bookingService.checkOut(savedBooking.getId()))
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> bookingService.checkOut(savedBooking.getId(), null))
                 .isInstanceOf(com.creditcard.booking.exception.InvalidBookingStateException.class);
 
         assertThat(roomRepository.findById(room.getId()).orElseThrow().getStatus())
