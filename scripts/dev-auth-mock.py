@@ -23,7 +23,9 @@ from cryptography.hazmat.primitives import hashes, serialization
 ISSUER = "http://auth-service:9000"
 KEY_ID = "dev-auth-mock-key-1"
 TOKEN_TTL_SECONDS = 4 * 60 * 60  # 4h — long enough for a dev session, never persisted
-ALLOWED_ROLES = ("FRONT_DESK", "HOUSEKEEPING")
+ALLOWED_ROLES = ("FRONT_DESK", "HOUSEKEEPING", "MERCHANT", "ADMIN")
+# Merchant tokens carry a merchantId claim, as scripts/e2e-test.sh make_jwt does.
+DEFAULT_MERCHANT_ID = "dev-merchant-001"
 
 _private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 _public_numbers = _private_key.public_key().public_numbers()
@@ -49,7 +51,7 @@ _JWKS = json.dumps({
 }).encode()
 
 
-def _sign_jwt(role: str) -> str:
+def _sign_jwt(role: str, merchant_id: str | None = None) -> str:
     header = {"alg": "RS256", "typ": "JWT", "kid": KEY_ID}
     now = int(time.time())
     payload = {
@@ -59,6 +61,8 @@ def _sign_jwt(role: str) -> str:
         "exp": now + TOKEN_TTL_SECONDS,
         "authorities": [f"ROLE_{role}"],
     }
+    if merchant_id is not None:
+        payload["merchantId"] = merchant_id
     signing_input = f"{_b64url(json.dumps(header, separators=(',', ':')).encode())}." \
                     f"{_b64url(json.dumps(payload, separators=(',', ':')).encode())}"
     signature = _private_key.sign(
@@ -102,7 +106,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 "error": f"role must be one of {list(ALLOWED_ROLES)}"
             })
             return
-        self._write(HTTPStatus.OK, {"token": _sign_jwt(role)})
+        merchant_id = None
+        if role == "MERCHANT":
+            merchant_id = body.get("merchantId") or DEFAULT_MERCHANT_ID
+            if not isinstance(merchant_id, str):
+                self._write(HTTPStatus.BAD_REQUEST, {"error": "merchantId must be a string"})
+                return
+        self._write(HTTPStatus.OK, {"token": _sign_jwt(role, merchant_id)})
 
     def log_message(self, fmt, *args):  # quiet down default per-request access logs
         pass
