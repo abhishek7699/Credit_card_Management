@@ -901,20 +901,32 @@ step13_checkout_declined() {
   local check_in="2030-02-10" check_out="2030-02-12"
   local resp http_code body room_id
 
-  resp=$(curl -s -w '\n%{http_code}' \
-    "http://localhost:${GW_PORT}/api/v1/rooms?checkIn=${check_in}&checkOut=${check_out}" \
+  # Same rule as Step 14: check-in needs a VACANT_CLEAN room right now, and the
+  # availability search does not look at housekeeping status. A room left DIRTY
+  # by an earlier run would be picked by the search and rejected at check-in
+  # (409), so this step reads the live board and takes a VACANT_CLEAN room.
+  resp=$(curl -s -w '\n%{http_code}' "http://localhost:${GW_PORT}/api/v1/rooms/board" \
     -H "Authorization: Bearer ${FRONT_DESK_JWT}" 2>/dev/null)
   http_code=$(echo "$resp" | tail -1)
   body=$(echo "$resp" | sed '$d')
 
   if [[ "$http_code" != "200" ]]; then
-    fail "Step 13 — Room search failed: expected 200, got ${http_code}. Body: ${body}"
+    fail "Step 13 — Board fetch failed: expected 200, got ${http_code}. Body: ${body}"
     return 1
   fi
 
-  room_id=$(echo "$body" | python3 -c "import sys,json; rooms=json.load(sys.stdin); print(rooms[0]['roomId'] if rooms else '')" 2>/dev/null || echo "")
+  room_id=$(echo "$body" | python3 -c "
+import sys, json
+board = json.load(sys.stdin)
+for floor in board:
+    for room in floor.get('rooms', []):
+        if room.get('status') == 'VACANT_CLEAN':
+            print(room['roomId'])
+            sys.exit(0)
+print('')
+" 2>/dev/null || echo "")
   if [[ -z "$room_id" ]]; then
-    fail "Step 13 — No available room returned for ${check_in} to ${check_out}"
+    fail "Step 13 — No VACANT_CLEAN room on the board for ${check_in} to ${check_out}"
     return 1
   fi
 
