@@ -88,6 +88,24 @@ class PendingTimeoutIntegrationTest {
         assertThat(outboxCount(txId)).isEqualTo(2);
     }
 
+    /**
+     * "Never settled" (013 option Y): settlement only receives transaction.authorized, which is written
+     * only when the AUTHORIZED update wins. A timed-out transaction therefore leaves no such row, so
+     * settlement never sees it. Settlement itself needs no timeout consumer.
+     */
+    @Test
+    void aTimedOutTransactionNeverPublishesTransactionAuthorized() {
+        UUID txId = saveTransaction();
+        ageBeyondTimeout(txId);
+
+        sweep.sweepOnce();
+
+        assertThat(outboxRepository.findById(stable(txId, "transaction.authorized", "TransactionAuthorized"))).isEmpty();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM transaction_outbox WHERE message_key = ? AND topic = 'transaction.authorized'",
+                Long.class, txId.toString())).isZero();
+    }
+
     @Test
     void aLateAuthorizedResultAfterTheTimeoutChangesNothing() {
         UUID txId = saveTransaction();
