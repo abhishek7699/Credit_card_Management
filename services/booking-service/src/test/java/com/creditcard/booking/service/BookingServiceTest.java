@@ -309,6 +309,28 @@ class BookingServiceTest {
         verify(bookingRepository).updateStatusIfCurrent(bookingId, BookingStatus.CHECKED_IN, BookingStatus.CHECKOUT_PENDING);
     }
 
+    /**
+     * 013: a checkout whose transaction timed out arrives as FAILED (transaction-service sets reason TIMEOUT).
+     * Booking must never record it as paid: no CHECKED_OUT, no AUTHORIZED attempt, room not set DIRTY.
+     */
+    @Test
+    void handlePaymentOutcome_timedOutCheckout_isNeverRecordedAsPaid() {
+        UUID bookingId = UUID.randomUUID();
+        CheckoutPaymentAttempt attempt = checkoutAttempt(bookingId, "txn-co-timeout", CheckoutAttemptStatus.PENDING, "24.50");
+        when(checkoutPaymentAttemptRepository.findByTransactionId("txn-co-timeout")).thenReturn(Optional.of(attempt));
+        when(processedEventRepository.insertIfAbsent(any())).thenReturn(1);
+        when(checkoutPaymentAttemptRepository.updateStatusIfCurrent(
+                attempt.getId(), CheckoutAttemptStatus.FAILED, CheckoutAttemptStatus.PENDING)).thenReturn(1);
+
+        service.handlePaymentOutcome(event("txn-co-timeout", "FAILED"));
+
+        verify(checkoutPaymentAttemptRepository, never()).updateStatusIfCurrent(
+                any(), eq(CheckoutAttemptStatus.AUTHORIZED), any());
+        verify(bookingRepository, never()).updateStatusIfCurrent(any(), eq(BookingStatus.CHECKED_OUT), any());
+        verify(roomRepository, never()).setStatus(any(), any());
+        verify(bookingRepository).updateStatusIfCurrent(bookingId, BookingStatus.CHECKED_IN, BookingStatus.CHECKOUT_PENDING);
+    }
+
     @Test
     void handlePaymentOutcome_pendingAttempt_authorizedRaceLost_isNoOp() {
         UUID bookingId = UUID.randomUUID();
