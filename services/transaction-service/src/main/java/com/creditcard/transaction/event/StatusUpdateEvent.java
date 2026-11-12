@@ -38,6 +38,9 @@ public class StatusUpdateEvent {
     public static class Payload {
         private String transactionId;
         private String reason;
+        private String cardToken;
+        private String outcome;
+        private String reasonCode;
 
         public Payload() {}
 
@@ -46,5 +49,14 @@ public class StatusUpdateEvent {
 
         public String getReason() { return reason; }
         public void setReason(String reason) { this.reason = reason; }
+
+        public String getCardToken() { return cardToken; }
+        public void setCardToken(String cardToken) { this.cardToken = cardToken; }
+
+        public String getOutcome() { return outcome; }
+        public void setOutcome(String outcome) { this.outcome = outcome; }
+
+        public String getReasonCode() { return reasonCode; }
+        public void setReasonCode(String reasonCode) { this.reasonCode = reasonCode; }
     }
 }

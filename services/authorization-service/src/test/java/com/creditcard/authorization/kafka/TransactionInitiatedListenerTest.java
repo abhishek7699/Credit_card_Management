@@ -31,7 +31,7 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class TransactionInitiatedListenerTest {
 
-    private static final String RESULT_TOPIC = "transaction.status.updated";
+    private static final String RESULT_TOPIC = "transaction.authorization.result";
     private static final String AUTHORIZED_TOPIC = "transaction.authorized";
 
     @Mock

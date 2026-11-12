@@ -64,3 +64,7 @@ logging:
     com.creditcard: INFO
   pattern:
     console: "%d{ISO8601} [%thread] %-5level %logger{36} [traceId=%X{traceId}] - %msg%n"
+
+transaction:
+  outbox:
+    poll-interval-ms: ${TRANSACTION_OUTBOX_POLL_MS:500}

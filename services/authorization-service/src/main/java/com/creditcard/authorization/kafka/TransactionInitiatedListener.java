@@ -21,7 +21,7 @@ import java.util.UUID;
 public class TransactionInitiatedListener {
 
     private static final Logger log = LoggerFactory.getLogger(TransactionInitiatedListener.class);
-    private static final String RESULT_TOPIC = "transaction.status.updated";
+    private static final String RESULT_TOPIC = "transaction.authorization.result";
     private static final String AUTHORIZED_TOPIC = "transaction.authorized";
     private static final String EVENT_TYPE_AUTHORIZED = "TransactionAuthorized";
 

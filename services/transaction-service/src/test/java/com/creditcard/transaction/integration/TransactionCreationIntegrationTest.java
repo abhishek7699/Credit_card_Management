@@ -43,7 +43,7 @@ import static org.mockito.Mockito.*;
 @Testcontainers
 @EmbeddedKafka(
         partitions = 1,
-        topics = {"transaction.initiated", "transaction.status.updated"},
+        topics = {"transaction.initiated", "transaction.status.updated", "transaction.authorization.result"},
         bootstrapServersProperty = "spring.kafka.bootstrap-servers"
 )
 @ActiveProfiles("test")

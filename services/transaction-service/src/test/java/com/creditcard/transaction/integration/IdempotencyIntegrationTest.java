@@ -41,7 +41,7 @@ import static org.mockito.Mockito.when;
 @Testcontainers
 @EmbeddedKafka(
         partitions = 1,
-        topics = {"transaction.initiated", "transaction.status.updated"},
+        topics = {"transaction.initiated", "transaction.status.updated", "transaction.authorization.result"},
         bootstrapServersProperty = "spring.kafka.bootstrap-servers"
 )
 @ActiveProfiles("test")
@@ -102,6 +102,7 @@ class IdempotencyIntegrationTest {
     private StatusUpdateEvent buildStatusEvent(String eventType, UUID transactionId) {
         StatusUpdateEvent.Payload payload = new StatusUpdateEvent.Payload();
         payload.setTransactionId(transactionId.toString());
+        payload.setOutcome(eventType.replace("Transaction", "").toUpperCase());
 
         StatusUpdateEvent event = new StatusUpdateEvent();
         event.setEventId(UUID.randomUUID().toString());
@@ -121,13 +122,13 @@ class IdempotencyIntegrationTest {
         String expectedKey = "tx:TransactionAuthorized:" + event.getEventId();
 
         // First delivery → status becomes AUTHORIZED
-        statusKafkaTemplate.send("transaction.status.updated", txId.toString(), event);
+        statusKafkaTemplate.send("transaction.authorization.result", txId.toString(), event);
         await().atMost(Duration.ofSeconds(10)).untilAsserted(() ->
                 assertThat(transactionRepository.findById(txId).orElseThrow().getStatus())
                         .isEqualTo(TransactionStatus.AUTHORIZED));
 
         // Second delivery of the identical event (same eventId)
-        statusKafkaTemplate.send("transaction.status.updated", txId.toString(), event);
+        statusKafkaTemplate.send("transaction.authorization.result", txId.toString(), event);
 
         // Wait for the second message to be consumed (key already in processed_events)
         await().atMost(Duration.ofSeconds(5)).untilAsserted(() ->
@@ -147,7 +148,7 @@ class IdempotencyIntegrationTest {
 
         // Send the same event 10 times
         for (int i = 0; i < 10; i++) {
-            statusKafkaTemplate.send("transaction.status.updated", txId.toString(), event);
+            statusKafkaTemplate.send("transaction.authorization.result", txId.toString(), event);
         }
 
         // Wait for first delivery to be processed → status FAILED
@@ -169,7 +170,7 @@ class IdempotencyIntegrationTest {
         UUID txId = createPendingTransaction();
 
         // First event: PENDING → AUTHORIZED
-        statusKafkaTemplate.send("transaction.status.updated", txId.toString(),
+        statusKafkaTemplate.send("transaction.authorization.result", txId.toString(),
                 buildStatusEvent("TransactionAuthorized", txId));
         await().atMost(Duration.ofSeconds(10)).untilAsserted(() ->
                 assertThat(transactionRepository.findById(txId).orElseThrow().getStatus())
@@ -177,7 +178,7 @@ class IdempotencyIntegrationTest {
 
         // Second event: different eventId (new UUID) so idempotency key differs —
         // only the terminal-state guard should prevent the overwrite
-        statusKafkaTemplate.send("transaction.status.updated", txId.toString(),
+        statusKafkaTemplate.send("transaction.authorization.result", txId.toString(),
                 buildStatusEvent("TransactionAuthorized", txId));
 
         await().atMost(Duration.ofSeconds(5)).untilAsserted(() ->

@@ -50,7 +50,7 @@ import static org.awaitility.Awaitility.await;
 @SpringBootTest
 @EmbeddedKafka(
     partitions = 1,
-    topics = {"transaction.initiated", "transaction.status.updated", "transaction.authorized"},
+    topics = {"transaction.initiated", "transaction.authorization.result", "transaction.authorized"},
     bootstrapServersProperty = "spring.kafka.bootstrap-servers"
 )
 @Testcontainers
@@ -101,7 +101,7 @@ class AuthorizationListenerIntegrationTest {
     @BeforeEach
     void setUp() {
         resultConsumer = buildConsumer(AuthorizationResultEvent.class);
-        resultConsumer.subscribe(List.of("transaction.status.updated"));
+        resultConsumer.subscribe(List.of("transaction.authorization.result"));
         authorizedConsumer = buildConsumer(TransactionAuthorizedEvent.class);
         authorizedConsumer.subscribe(List.of("transaction.authorized"));
     }

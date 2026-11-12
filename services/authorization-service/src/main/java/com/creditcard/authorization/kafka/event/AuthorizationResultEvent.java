@@ -7,8 +7,9 @@ import java.time.Instant;
 import java.util.UUID;
 
 /**
- * Outbound event on {@code transaction.status.updated}, consumed by transaction-service
- * (and notification-service). Envelope + {@code payload} contract.
+ * Outbound event on {@code transaction.authorization.result}. Consumed only by
+ * transaction-service, which publishes the final outcome on {@code transaction.status.updated}.
+ * Envelope + {@code payload} contract.
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class AuthorizationResultEvent {
