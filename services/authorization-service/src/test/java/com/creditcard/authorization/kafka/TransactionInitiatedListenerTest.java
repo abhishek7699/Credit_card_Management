@@ -56,7 +56,7 @@ class TransactionInitiatedListenerTest {
 
         when(idempotencyService.buildKey("TransactionInitiated", "evt-001")).thenReturn("auth:TransactionInitiated:evt-001");
         when(idempotencyService.isDuplicate("auth:TransactionInitiated:evt-001")).thenReturn(false);
-        when(authorizationService.authorize(event)).thenReturn(result);
+        when(authorizationService.authorize(event)).thenReturn(java.util.Optional.of(result));
 
         listener.onMessage(record(event, txId.toString(), 0L), acknowledgment);
 
@@ -76,11 +76,26 @@ class TransactionInitiatedListenerTest {
 
         when(idempotencyService.buildKey("TransactionInitiated", "evt-dec")).thenReturn("k");
         when(idempotencyService.isDuplicate("k")).thenReturn(false);
-        when(authorizationService.authorize(event)).thenReturn(result);
+        when(authorizationService.authorize(event)).thenReturn(java.util.Optional.of(result));
 
         listener.onMessage(record(event, txId.toString(), 1L), acknowledgment);
 
         verify(kafkaTemplate).send(eq(RESULT_TOPIC), eq(txId.toString()), any());
+        verify(acknowledgment).acknowledge();
+    }
+
+    @Test
+    void shouldSendNoResultAndAckWhenTheTransactionAlreadyTimedOut() {
+        UUID txId = UUID.randomUUID();
+        TransactionInitiatedEvent event = buildEvent("evt-late", txId, "vault:v1:tok", "100.00", "merchant-2");
+
+        when(idempotencyService.buildKey("TransactionInitiated", "evt-late")).thenReturn("k-late");
+        when(idempotencyService.isDuplicate("k-late")).thenReturn(false);
+        when(authorizationService.authorize(event)).thenReturn(java.util.Optional.empty());
+
+        listener.onMessage(record(event, txId.toString(), 2L), acknowledgment);
+
+        verify(kafkaTemplate, never()).send(anyString(), anyString(), any());
         verify(acknowledgment).acknowledge();
     }
 

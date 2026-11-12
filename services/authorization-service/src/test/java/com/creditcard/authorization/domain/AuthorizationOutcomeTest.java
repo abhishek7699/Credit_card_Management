@@ -7,8 +7,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 class AuthorizationOutcomeTest {
 
     @Test
-    void shouldHaveThreeValues() {
-        assertThat(AuthorizationOutcome.values()).hasSize(3);
+    void shouldHaveFourValuesIncludingReleased() {
+        assertThat(AuthorizationOutcome.values()).hasSize(4);
+    }
+
+    @Test
+    void releasedShouldNotBeApproved() {
+        assertThat(AuthorizationOutcome.RELEASED.isApproved()).isFalse();
     }
 
     @Test

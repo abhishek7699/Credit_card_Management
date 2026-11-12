@@ -8,6 +8,7 @@ import com.creditcard.authorization.kafka.event.AuthorizationResultEvent;
 import com.creditcard.authorization.kafka.event.TransactionInitiatedEvent;
 import com.creditcard.authorization.repository.AuthorizationRecordRepository;
 import com.creditcard.authorization.repository.CardAccountRepository;
+import com.creditcard.authorization.repository.TimeoutMarkerRepository;
 import org.springframework.retry.annotation.Backoff;
 import org.springframework.retry.annotation.Retryable;
 import org.springframework.stereotype.Service;
@@ -21,14 +22,25 @@ public class AuthorizationService {
 
     private final CardAccountRepository cardAccountRepository;
     private final AuthorizationRecordRepository authorizationRecordRepository;
+    private final TimeoutMarkerRepository timeoutMarkerRepository;
 
     public AuthorizationService(
             CardAccountRepository cardAccountRepository,
-            AuthorizationRecordRepository authorizationRecordRepository) {
+            AuthorizationRecordRepository authorizationRecordRepository,
+            TimeoutMarkerRepository timeoutMarkerRepository) {
         this.cardAccountRepository = cardAccountRepository;
         this.authorizationRecordRepository = authorizationRecordRepository;
+        this.timeoutMarkerRepository = timeoutMarkerRepository;
     }
 
+    /**
+     * Decides one transaction. Returns empty when the transaction already timed out (013): no credit is
+     * held and no result is published, because transaction-service has already recorded FAILED.
+     *
+     * <p>The card row is locked before the timeout marker is checked. The timeout release takes the same
+     * lock, so the two cannot interleave: either the release runs first and this call sees its marker, or
+     * this call runs first and the release sees its deduction.
+     */
     @Transactional
     @Retryable(
         retryFor = {
@@ -38,10 +50,18 @@ public class AuthorizationService {
         maxAttempts = 3,
         backoff = @Backoff(delay = 50, multiplier = 2, maxDelay = 500)
     )
-    public AuthorizationResultEvent authorize(TransactionInitiatedEvent event) {
+    public Optional<AuthorizationResultEvent> authorize(TransactionInitiatedEvent event) {
         TransactionInitiatedEvent.Payload payload = event.getPayload();
-        Optional<CardAccount> accountOpt = cardAccountRepository.findByCardToken(payload.getCardToken());
+        Optional<CardAccount> accountOpt = cardAccountRepository.findByCardTokenForUpdate(payload.getCardToken());
 
+        if (timeoutMarkerRepository.existsById(payload.getTransactionId())) {
+            return Optional.empty();
+        }
+        return Optional.of(decide(payload, accountOpt));
+    }
+
+    private AuthorizationResultEvent decide(TransactionInitiatedEvent.Payload payload,
+                                            Optional<CardAccount> accountOpt) {
         if (accountOpt.isEmpty()) {
             return persistAndReturn(payload, AuthorizationOutcome.DECLINED, ReasonCode.INVALID_CARD);
         }
@@ -67,6 +87,11 @@ public class AuthorizationService {
             AuthorizationOutcome outcome,
             ReasonCode reasonCode) {
 
+        if (outcome == AuthorizationOutcome.RELEASED) {
+            throw new IllegalStateException(
+                    "RELEASED is set only by the timeout release, never by an authorization decision");
+        }
+
         AuthorizationRecord record = new AuthorizationRecord();
         record.setTransactionId(payload.getTransactionId());
         record.setCardToken(payload.getCardToken());
@@ -80,7 +105,7 @@ public class AuthorizationService {
         return switch (outcome) {
             case AUTHORIZED -> AuthorizationResultEvent.authorized(payload.getTransactionId(), payload.getCardToken());
             case DECLINED -> AuthorizationResultEvent.declined(payload.getTransactionId(), payload.getCardToken(), reasonCode);
-            case FAILED -> AuthorizationResultEvent.failed(payload.getTransactionId(), payload.getCardToken(), reasonCode);
+            case FAILED, RELEASED -> AuthorizationResultEvent.failed(payload.getTransactionId(), payload.getCardToken(), reasonCode);
         };
     }
 }

@@ -13,6 +13,7 @@ import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.stereotype.Component;
 
+import java.util.Optional;
 import java.util.UUID;
 
 @Component
@@ -63,7 +64,13 @@ public class TransactionInitiatedListener {
                 return;
             }
 
-            AuthorizationResultEvent result = authorizationService.authorize(event);
+            Optional<AuthorizationResultEvent> decision = authorizationService.authorize(event);
+            if (decision.isEmpty()) {
+                // 013: the transaction already timed out. Its FAILED outcome is recorded, so no result is sent.
+                log.info("Skipping authorization txId={}: the transaction already timed out", payload.getTransactionId());
+                return;
+            }
+            AuthorizationResultEvent result = decision.get();
             kafkaTemplate.send(RESULT_TOPIC, txKey, result);
 
             log.info("Authorization decision={} txId={}", result.getEventType(), payload.getTransactionId());
