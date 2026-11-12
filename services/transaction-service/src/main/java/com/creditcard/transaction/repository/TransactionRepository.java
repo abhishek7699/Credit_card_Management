@@ -2,12 +2,14 @@ package com.creditcard.transaction.repository;
 
 import com.creditcard.transaction.domain.Transaction;
 import com.creditcard.transaction.domain.TransactionStatus;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 public interface TransactionRepository extends JpaRepository<Transaction, UUID> {
@@ -22,4 +24,20 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
                          @Param("from") TransactionStatus from,
                          @Param("to") TransactionStatus to,
                          @Param("now") Instant now);
+
+    /**
+     * The PENDING sweep's conditional update (013): PENDING → FAILED with failure_reason TIMEOUT.
+     * Returns 1 only for the caller that made the change, so two replicas never time out the same row.
+     */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("UPDATE Transaction t SET t.status = com.creditcard.transaction.domain.TransactionStatus.FAILED, "
+            + "t.failureReason = 'TIMEOUT', t.updatedAt = :now "
+            + "WHERE t.id = :id AND t.status = com.creditcard.transaction.domain.TransactionStatus.PENDING")
+    int failPendingAsTimedOut(@Param("id") UUID id, @Param("now") Instant now);
+
+    /** PENDING transactions created before {@code cutoff}, oldest first, one page at a time. */
+    @Query("SELECT t.id FROM Transaction t WHERE t.status = :status AND t.createdAt < :cutoff ORDER BY t.createdAt ASC")
+    List<UUID> findIdsByStatusCreatedBefore(@Param("status") TransactionStatus status,
+                                            @Param("cutoff") Instant cutoff,
+                                            Pageable page);
 }

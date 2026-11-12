@@ -5,6 +5,7 @@ import com.creditcard.transaction.domain.TransactionStatus;
 import com.creditcard.transaction.event.StatusUpdateEvent;
 import com.creditcard.transaction.event.TransactionAuthorizedEvent;
 import com.creditcard.transaction.event.TransactionInitiatedEvent;
+import com.creditcard.transaction.event.TransactionTimedOutEvent;
 import com.creditcard.transaction.repository.TransactionRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -26,7 +27,9 @@ public class TransactionService {
     private static final String TOPIC_TRANSACTION_INITIATED = "transaction.initiated";
     public static final String TOPIC_STATUS_UPDATED = "transaction.status.updated";
     public static final String TOPIC_TRANSACTION_AUTHORIZED = "transaction.authorized";
+    public static final String TOPIC_TRANSACTION_TIMED_OUT = "transaction.timed_out";
     private static final String EVENT_TYPE_AUTHORIZED = "TransactionAuthorized";
+    private static final String REASON_TIMEOUT = "TIMEOUT";
     private static final String SOURCE_SERVICE = "transaction-service";
 
     private final TokenizationService tokenizationService;
@@ -166,6 +169,43 @@ public class TransactionService {
         event.setSourceService(SOURCE_SERVICE);
         event.setTraceId(MDC.get("traceId"));
         event.setOccurredAt(now);
+        event.setPayload(payload);
+        return event;
+    }
+
+    /**
+     * PENDING sweep (013). Times out one transaction: the conditional PENDING→FAILED(TIMEOUT) update is
+     * the only thing that can win, so a late authorization result for the same transaction is ignored
+     * afterwards. The winning update writes the FAILED outcome and {@code transaction.timed_out} to the
+     * outbox in the same DB transaction. Returns false when another actor already changed the row.
+     */
+    @Transactional
+    public boolean timeOutPending(UUID id, Instant now) {
+        if (transactionRepository.failPendingAsTimedOut(id, now) != 1) {
+            return false;
+        }
+        Transaction tx = transactionRepository.findById(id)
+                .orElseThrow(() -> new IllegalStateException("timed-out transaction " + id + " vanished"));
+        outboxService.append(TOPIC_STATUS_UPDATED, stableEventId(id, TOPIC_STATUS_UPDATED, "TransactionFailed"),
+                id.toString(), "TransactionFailed",
+                finalEvent("TransactionFailed", tx, TransactionStatus.FAILED, REASON_TIMEOUT));
+        outboxService.append(TOPIC_TRANSACTION_TIMED_OUT, stableEventId(id, TOPIC_TRANSACTION_TIMED_OUT, "TransactionTimedOut"),
+                id.toString(), "TransactionTimedOut", timedOutEvent(tx));
+        log.info("Transaction {} timed out in PENDING", id);
+        return true;
+    }
+
+    private TransactionTimedOutEvent timedOutEvent(Transaction tx) {
+        TransactionTimedOutEvent.Payload payload = new TransactionTimedOutEvent.Payload();
+        payload.setTransactionId(tx.getId().toString());
+        payload.setCardToken(tx.getCardToken());
+
+        TransactionTimedOutEvent event = new TransactionTimedOutEvent();
+        event.setEventId(stableEventId(tx.getId(), TOPIC_TRANSACTION_TIMED_OUT, "TransactionTimedOut").toString());
+        event.setEventType("TransactionTimedOut");
+        event.setSourceService(SOURCE_SERVICE);
+        event.setTraceId(MDC.get("traceId"));
+        event.setOccurredAt(Instant.now());
         event.setPayload(payload);
         return event;
     }

@@ -69,3 +69,12 @@ transaction:
   outbox:
     poll-interval-ms: ${TRANSACTION_OUTBOX_POLL_MS:500}
     max-attempts: ${TRANSACTION_OUTBOX_MAX_ATTEMPTS:5}
+  # 013 timers, in seconds unless noted. Checked at startup by TimerOrdering.
+  timeouts:
+    pending-timeout-seconds: ${TRANSACTION_PENDING_TIMEOUT_SECONDS:300}   # P (owner: 300 s)
+    sweep-interval-ms: ${TRANSACTION_SWEEP_INTERVAL_MS:30000}            # I (owner: 30 s)
+    sweep-enabled: ${TRANSACTION_SWEEP_ENABLED:true}
+    max-delivery-lag-seconds: 60                                          # K (owner: 60 s)
+    mastercard-read-timeout-seconds: 10                                   # M
+    status-retrieve-buffer-seconds: 2                                     # b (R = 2M + b = 22 s)
+    margin-seconds: 60                                                    # m (owner: 60 s)

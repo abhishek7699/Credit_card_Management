@@ -352,6 +352,59 @@ class TransactionServiceTest {
     }
 
     @Test
+    void timeOutOfAPendingTransactionWritesFailedAndTimedOutToTheOutbox() {
+        UUID id = UUID.randomUUID();
+        java.time.Instant now = java.time.Instant.parse("2026-11-12T12:00:00Z");
+        when(transactionRepository.failPendingAsTimedOut(id, now)).thenReturn(1);
+        when(transactionRepository.findById(id)).thenReturn(Optional.of(pendingTransaction(id)));
+
+        assertThat(transactionService.timeOutPending(id, now)).isTrue();
+
+        ArgumentCaptor<com.creditcard.transaction.event.StatusUpdateEvent> status =
+                ArgumentCaptor.forClass(com.creditcard.transaction.event.StatusUpdateEvent.class);
+        verify(outboxService).append(eq("transaction.status.updated"),
+                eq(TransactionService.stableEventId(id, "transaction.status.updated", "TransactionFailed")),
+                eq(id.toString()), eq("TransactionFailed"), status.capture());
+        assertThat(status.getValue().getPayload().getOutcome()).isEqualTo("FAILED");
+        assertThat(status.getValue().getPayload().getReasonCode()).isEqualTo("TIMEOUT");
+
+        ArgumentCaptor<com.creditcard.transaction.event.TransactionTimedOutEvent> timedOut =
+                ArgumentCaptor.forClass(com.creditcard.transaction.event.TransactionTimedOutEvent.class);
+        verify(outboxService).append(eq("transaction.timed_out"),
+                eq(TransactionService.stableEventId(id, "transaction.timed_out", "TransactionTimedOut")),
+                eq(id.toString()), eq("TransactionTimedOut"), timedOut.capture());
+        assertThat(timedOut.getValue().getEventType()).isEqualTo("TransactionTimedOut");
+        assertThat(timedOut.getValue().getPayload().getTransactionId()).isEqualTo(id.toString());
+        assertThat(timedOut.getValue().getPayload().getCardToken()).isEqualTo("vault:v1:token");
+        verify(outboxService, times(2)).append(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void timeOutLosingToAnEarlierOutcomeWritesNothing() {
+        UUID id = UUID.randomUUID();
+        java.time.Instant now = java.time.Instant.now();
+        when(transactionRepository.failPendingAsTimedOut(id, now)).thenReturn(0);
+
+        assertThat(transactionService.timeOutPending(id, now)).isFalse();
+
+        verify(transactionRepository, never()).findById(any());
+        verify(outboxService, never()).append(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void timeOutOfARowThatVanishedFailsLoudly() {
+        UUID id = UUID.randomUUID();
+        java.time.Instant now = java.time.Instant.now();
+        when(transactionRepository.failPendingAsTimedOut(id, now)).thenReturn(1);
+        when(transactionRepository.findById(id)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> transactionService.timeOutPending(id, now))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("vanished");
+        verify(outboxService, never()).append(any(), any(), any(), any(), any());
+    }
+
+    @Test
     void eventTypeIsDefinedOnlyForFinalStatuses() {
         assertThatThrownBy(() -> TransactionService.eventTypeFor(TransactionStatus.PENDING))
                 .isInstanceOf(IllegalArgumentException.class)
