@@ -1,7 +1,7 @@
 # 013 — PENDING transaction timeout with credit release (DESIGN v3)
 
 Status: option A, outbox and topic decisions approved. Phase 1 implemented (see Phases).
-Point 5 (transaction.authorized) evaluated, awaiting decision.
+Point 5 decided: option Y. Phase 1 follow-up applies it (see "Decisions applied after phase 1").
 
 ## Owner answers applied
 
@@ -228,3 +228,41 @@ settlement's existing fields. Authorization stops publishing it.
 **Recommendation: Y.** Settlement only sees transactions that transaction-service recorded as AUTHORIZED,
 and the invariant holds by construction. It also removes the one ordering problem in the design. The
 cost is that settlement's input now depends on the outbox relay (latency only).
+
+## Owner decisions not recorded above
+
+1. **Branch and number:** 013 is on branch `013-transaction-pending-timeout`, created from `main`, using the next free spec number.
+2. **Sequencing:** 011-charges merged to `main` first (PR #13, merge commit 417b04f). Then 013 and 014 were rebased onto it, and the booking part of this design was redone against the post-2c checkout flow before implementation.
+3. **Gate G0:** 013 must be implemented and merged to `main` before any 014 task starts.
+4. **Scope:** no refunds, voids or fraud reversals in 013. External behavior stays the same, so existing booking and e2e expected outcomes must not change.
+5. **Process:** implement one phase at a time. Commit each phase, then stop at a checkpoint. Approval is per phase, not per task.
+6. **Values:** the owner sets timeout and sweep values. I ask for them and do not pick them.
+
+## Decisions applied after phase 1 (owner)
+
+1. **Option Y.** transaction-service publishes `transaction.authorized` through the outbox, only when its
+   conditional PENDING→AUTHORIZED update wins. Authorization no longer publishes it. Settlement's consumer is
+   unchanged. The settlement consumer for `transaction.timed_out` is removed from the plan.
+2. **`transaction.initiated` stays a direct publish.** The PENDING sweep covers a crash before it is sent.
+   Outbox rows are published immediately after the transaction commits, and marked sent on success. The
+   polling relay picks up only rows that are not sent. **Relay poll interval: 500 ms**
+   (`TRANSACTION_OUTBOX_POLL_MS`). This adds at most about 0.5 s to the normal path, so **K stays 60 s**.
+3. **Relay failure handling.** Ordering matters only within one transaction (`message_key` = transactionId).
+   - Kafka transport failure (timeout, broker down): the pass stops. No attempt is counted.
+   - Row-specific failure (stored JSON cannot be read, or the broker rejects the record): the attempt is
+     counted and only later rows for the same transaction wait. Other transactions still go out.
+   - After `transaction.outbox.max-attempts` (default 5) the row is marked failed (`failed_at`, `last_error`),
+     logged with its transactionId, and counted in the `transaction_outbox_failed_total` metric.
+4. **Values:** P = 300 s, I = 30 s, K = 60 s, m = 60 s.
+5. **Stable eventId** = nameUUID(transactionId + ":" + topic + ":" + eventType). The topic is included because
+   `transaction.status.updated` and `transaction.authorized` both carry `TransactionAuthorized` for the same
+   transaction, and the outbox primary key is eventId. The earlier formula (without topic) would have collided.
+6. **Outbox producer** sends stored JSON with type-info headers off. Settlement's consumer falls back to its own
+   default type, so a header naming transaction-service's class would break it.
+7. **Immediate publish** runs through the publisher's proxy after commit. A failure is logged and the row stays
+   for the relay. Calling the publisher from inside itself would skip its transaction.
+
+## Open, not yet decided by the owner
+
+- None for phase 1 follow-up. Phase 2 uses the values above.
+

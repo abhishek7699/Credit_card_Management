@@ -3,6 +3,7 @@ package com.creditcard.transaction.service;
 import com.creditcard.transaction.domain.Transaction;
 import com.creditcard.transaction.domain.TransactionStatus;
 import com.creditcard.transaction.event.StatusUpdateEvent;
+import com.creditcard.transaction.event.TransactionAuthorizedEvent;
 import com.creditcard.transaction.event.TransactionInitiatedEvent;
 import com.creditcard.transaction.repository.TransactionRepository;
 import org.slf4j.Logger;
@@ -24,6 +25,8 @@ public class TransactionService {
     private static final Logger log = LoggerFactory.getLogger(TransactionService.class);
     private static final String TOPIC_TRANSACTION_INITIATED = "transaction.initiated";
     public static final String TOPIC_STATUS_UPDATED = "transaction.status.updated";
+    public static final String TOPIC_TRANSACTION_AUTHORIZED = "transaction.authorized";
+    private static final String EVENT_TYPE_AUTHORIZED = "TransactionAuthorized";
     private static final String SOURCE_SERVICE = "transaction-service";
 
     private final TokenizationService tokenizationService;
@@ -89,13 +92,23 @@ public class TransactionService {
 
         int updated = transactionRepository.transitionStatus(id, TransactionStatus.PENDING, target, Instant.now());
         if (updated == 1) {
-            outboxService.append(TOPIC_STATUS_UPDATED, stableEventId(id, eventType), id.toString(), event);
+            outboxService.append(TOPIC_STATUS_UPDATED, stableEventId(id, TOPIC_STATUS_UPDATED, eventType),
+                    id.toString(), eventType, event);
+            if (target == TransactionStatus.AUTHORIZED) {
+                outboxService.append(TOPIC_TRANSACTION_AUTHORIZED,
+                        stableEventId(id, TOPIC_TRANSACTION_AUTHORIZED, EVENT_TYPE_AUTHORIZED),
+                        id.toString(), EVENT_TYPE_AUTHORIZED, authorizedEvent(tx));
+            }
         }
     }
 
-    /** Stable across relay replays: derived from the transaction and the final event type. */
-    public static UUID stableEventId(UUID transactionId, String eventType) {
-        return UUID.nameUUIDFromBytes((transactionId + ":" + eventType).getBytes(StandardCharsets.UTF_8));
+    /**
+     * Stable across relay replays. Derived from the transaction, the topic and the event type, so two
+     * events for the same transaction on different topics (both "TransactionAuthorized") never share an
+     * outbox primary key.
+     */
+    public static UUID stableEventId(UUID transactionId, String topic, String eventType) {
+        return UUID.nameUUIDFromBytes((transactionId + ":" + topic + ":" + eventType).getBytes(StandardCharsets.UTF_8));
     }
 
     static TransactionStatus finalStatusFor(String outcome) {
@@ -127,11 +140,32 @@ public class TransactionService {
         payload.setReasonCode(reasonCode);
 
         StatusUpdateEvent event = new StatusUpdateEvent();
-        event.setEventId(stableEventId(tx.getId(), eventType).toString());
+        event.setEventId(stableEventId(tx.getId(), TOPIC_STATUS_UPDATED, eventType).toString());
         event.setEventType(eventType);
         event.setSourceService(SOURCE_SERVICE);
         event.setTraceId(MDC.get("traceId"));
         event.setOccurredAt(Instant.now());
+        event.setPayload(payload);
+        return event;
+    }
+
+    private TransactionAuthorizedEvent authorizedEvent(Transaction tx) {
+        Instant now = Instant.now();
+        TransactionAuthorizedEvent.Payload payload = new TransactionAuthorizedEvent.Payload();
+        payload.setTransactionId(tx.getId().toString());
+        payload.setMerchantId(tx.getMerchantId());
+        payload.setCardToken(tx.getCardToken());
+        payload.setMaskedCardNumber(tx.getMaskedCardNumber());
+        payload.setAmount(tx.getAmount());
+        payload.setCurrencyCode(tx.getCurrencyCode());
+        payload.setAuthorizedAt(now);
+
+        TransactionAuthorizedEvent event = new TransactionAuthorizedEvent();
+        event.setEventId(stableEventId(tx.getId(), TOPIC_TRANSACTION_AUTHORIZED, EVENT_TYPE_AUTHORIZED).toString());
+        event.setEventType(EVENT_TYPE_AUTHORIZED);
+        event.setSourceService(SOURCE_SERVICE);
+        event.setTraceId(MDC.get("traceId"));
+        event.setOccurredAt(now);
         event.setPayload(payload);
         return event;
     }

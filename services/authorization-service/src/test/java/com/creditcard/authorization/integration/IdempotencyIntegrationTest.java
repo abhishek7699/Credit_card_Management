@@ -52,7 +52,7 @@ import static org.awaitility.Awaitility.await;
 @SpringBootTest
 @EmbeddedKafka(
     partitions = 1,
-    topics = {"transaction.initiated", "transaction.authorization.result", "transaction.authorized"},
+    topics = {"transaction.initiated", "transaction.authorization.result"},
     bootstrapServersProperty = "spring.kafka.bootstrap-servers"
 )
 @Testcontainers

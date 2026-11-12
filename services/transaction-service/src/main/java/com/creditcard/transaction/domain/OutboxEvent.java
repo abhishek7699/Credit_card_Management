@@ -40,6 +40,17 @@ public class OutboxEvent {
     @Column(name = "sent_at")
     private Instant sentAt;
 
+    /** Row-level failed attempts so far (013 relay). Transport failures are not counted. */
+    @Column(name = "attempts", nullable = false)
+    private int attempts;
+
+    @Column(name = "last_error", length = 512)
+    private String lastError;
+
+    /** Set when the row reached the attempt limit; the relay no longer picks it up. */
+    @Column(name = "failed_at")
+    private Instant failedAt;
+
     protected OutboxEvent() {}
 
     public OutboxEvent(UUID eventId, String topic, String messageKey, String eventType, String payload) {
@@ -63,4 +74,7 @@ public class OutboxEvent {
     public Instant getCreatedAt() { return createdAt; }
     public Instant getSentAt() { return sentAt; }
     public void setSentAt(Instant sentAt) { this.sentAt = sentAt; }
+    public int getAttempts() { return attempts; }
+    public String getLastError() { return lastError; }
+    public Instant getFailedAt() { return failedAt; }
 }

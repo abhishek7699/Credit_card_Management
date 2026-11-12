@@ -4,10 +4,12 @@ import com.creditcard.transaction.domain.Transaction;
 import com.creditcard.transaction.domain.TransactionStatus;
 import com.creditcard.transaction.repository.OutboxRepository;
 import com.creditcard.transaction.repository.TransactionRepository;
+import com.creditcard.transaction.service.OutboxPublisher;
 import com.creditcard.transaction.service.OutboxRelay;
 import com.creditcard.transaction.service.TransactionService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
@@ -17,6 +19,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.boot.test.mock.mockito.SpyBean;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.kafka.test.context.EmbeddedKafka;
 import org.springframework.test.context.ActiveProfiles;
@@ -34,6 +37,9 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doCallRealMethod;
+import static org.mockito.Mockito.doThrow;
 
 /**
  * 013 outbox guarantees, against real Postgres and embedded Kafka. The scheduled relay is
@@ -43,13 +49,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 @Testcontainers
 @EmbeddedKafka(
         partitions = 1,
-        topics = {"transaction.status.updated"},
+        topics = {"transaction.status.updated", "transaction.authorized"},
         bootstrapServersProperty = "spring.kafka.bootstrap-servers"
 )
 @ActiveProfiles("test")
 class OutboxRelayIntegrationTest {
 
     private static final String TOPIC = "transaction.status.updated";
+    private static final String STATUS_TOPIC = "transaction.status.updated";
 
     @Container
     static PostgreSQLContainer postgres = new PostgreSQLContainer("postgres:15-alpine");
@@ -63,6 +70,10 @@ class OutboxRelayIntegrationTest {
 
     @MockBean
     private VaultTemplate vaultTemplate;
+
+    /** Spied so a test can skip the immediate post-commit publish and leave the row for the relay. */
+    @SpyBean
+    private OutboxPublisher outboxPublisher;
 
     @Autowired
     private TransactionService transactionService;
@@ -82,6 +93,9 @@ class OutboxRelayIntegrationTest {
     @Autowired
     private ObjectMapper objectMapper;
 
+    @Autowired
+    private MeterRegistry meterRegistry;
+
     @Value("${spring.kafka.bootstrap-servers}")
     private String bootstrapServers;
 
@@ -93,10 +107,13 @@ class OutboxRelayIntegrationTest {
     void crashAfterCommitBeforePublishIsRecoveredByTheRelay() {
         UUID txId = saveTransaction();
 
-        // Commit the outcome. The relay is off, so nothing is published: this is the "crash".
+        // The "crash": the immediate publish after commit fails, so the committed row stays unsent.
+        doThrow(new IllegalStateException("simulated crash before publish")).when(outboxPublisher).publish(any());
         transactionService.applyAuthorizationResult(txId.toString(), "AUTHORIZED", null);
+        // "Restart": the publisher works again; only the relay can send the row now.
+        doCallRealMethod().when(outboxPublisher).publish(any());
 
-        UUID eventId = TransactionService.stableEventId(txId, "TransactionAuthorized");
+        UUID eventId = TransactionService.stableEventId(txId, STATUS_TOPIC, "TransactionAuthorized");
         assertThat(transactionRepository.findById(txId).orElseThrow().getStatus())
                 .isEqualTo(TransactionStatus.AUTHORIZED);
         assertThat(outboxRepository.findById(eventId)).isPresent();
@@ -123,7 +140,7 @@ class OutboxRelayIntegrationTest {
     void relayPublishingTwiceProducesIdenticalEventsAndOneStateChange() {
         UUID txId = saveTransaction();
         transactionService.applyAuthorizationResult(txId.toString(), "DECLINED", "51");
-        UUID eventId = TransactionService.stableEventId(txId, "TransactionDeclined");
+        UUID eventId = TransactionService.stableEventId(txId, STATUS_TOPIC, "TransactionDeclined");
 
         outboxRelay.relayBatch();
         // Simulate the lost mark: the row looks unsent again, so the relay sends it a second time.
@@ -141,8 +158,82 @@ class OutboxRelayIntegrationTest {
         transactionService.applyAuthorizationResult(txId.toString(), "AUTHORIZED", null);
         assertThat(transactionRepository.findById(txId).orElseThrow().getStatus())
                 .isEqualTo(TransactionStatus.DECLINED);
-        assertThat(outboxRepository.findById(TransactionService.stableEventId(txId, "TransactionAuthorized")))
+        assertThat(outboxRepository.findById(
+                TransactionService.stableEventId(txId, "transaction.authorized", "TransactionAuthorized")))
                 .isEmpty();
+    }
+
+    /**
+     * One row that cannot be published (stored JSON is invalid) must not block other transactions. It
+     * blocks only its own transaction, and it stops being retried once it reaches the attempt limit
+     * (default 5), after which its transaction's later event goes out.
+     */
+    @Test
+    void unpublishableRowBlocksOnlyItsOwnTransactionAndIsMarkedFailedAfterTheLimit() throws Exception {
+        UUID poisonId = UUID.randomUUID();
+        UUID sameTxId = UUID.randomUUID();
+        UUID otherTxId = UUID.randomUUID();
+        UUID poisonTx = UUID.randomUUID();
+        UUID otherTx = UUID.randomUUID();
+        double failedBefore = meterRegistry.counter("transaction.outbox.failed").count();
+
+        insertRow(poisonId, poisonTx, "not json");
+        insertRow(sameTxId, poisonTx, json(sameTxId, poisonTx));
+        insertRow(otherTxId, otherTx, json(otherTxId, otherTx));
+
+        outboxRelay.relayBatch();
+        assertThat(sent(otherTxId)).isTrue();
+        assertThat(sent(sameTxId)).isFalse();
+        assertThat(attempts(poisonId)).isEqualTo(1);
+
+        for (int pass = 2; pass <= 5; pass++) {
+            outboxRelay.relayBatch();
+        }
+        assertThat(failed(poisonId)).isTrue();
+        assertThat(lastError(poisonId)).contains("not valid JSON");
+        assertThat(meterRegistry.counter("transaction.outbox.failed").count()).isEqualTo(failedBefore + 1);
+
+        outboxRelay.relayBatch();
+        assertThat(sent(sameTxId)).isTrue();
+        assertThat(readAll(otherTx)).hasSize(1);
+    }
+
+    /**
+     * Inserts a committed unsent row directly. The test profile builds the schema from the entity
+     * (Flyway is off), so every NOT NULL column is supplied here, as the entity would write it.
+     */
+    private void insertRow(UUID eventId, UUID txId, String payload) {
+        jdbcTemplate.update("INSERT INTO transaction_outbox "
+                + "(event_id, topic, message_key, event_type, payload, created_at, attempts) "
+                + "VALUES (?, ?, ?, ?, ?, now(), 0)",
+                eventId, TOPIC, txId.toString(), "TransactionAuthorized", payload);
+    }
+
+    private String json(UUID eventId, UUID txId) throws Exception {
+        return objectMapper.writeValueAsString(java.util.Map.of(
+                "eventId", eventId.toString(),
+                "eventType", "TransactionAuthorized",
+                "payload", java.util.Map.of("transactionId", txId.toString(), "outcome", "AUTHORIZED")));
+    }
+
+    private boolean sent(UUID eventId) {
+        return Boolean.TRUE.equals(jdbcTemplate.queryForObject(
+                "SELECT sent_at IS NOT NULL FROM transaction_outbox WHERE event_id = ?", Boolean.class, eventId));
+    }
+
+    private boolean failed(UUID eventId) {
+        return Boolean.TRUE.equals(jdbcTemplate.queryForObject(
+                "SELECT failed_at IS NOT NULL FROM transaction_outbox WHERE event_id = ?", Boolean.class, eventId));
+    }
+
+    private int attempts(UUID eventId) {
+        return jdbcTemplate.queryForObject(
+                "SELECT attempts FROM transaction_outbox WHERE event_id = ?", Integer.class, eventId);
+    }
+
+    private String lastError(UUID eventId) {
+        return jdbcTemplate.queryForObject(
+                "SELECT last_error FROM transaction_outbox WHERE event_id = ?", String.class, eventId);
     }
 
     private UUID saveTransaction() {

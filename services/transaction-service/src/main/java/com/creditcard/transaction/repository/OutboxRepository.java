@@ -12,9 +12,25 @@ import java.util.UUID;
 
 public interface OutboxRepository extends JpaRepository<OutboxEvent, UUID> {
 
-    List<OutboxEvent> findTop100BySentAtIsNullOrderByCreatedAtAsc();
+    /** Rows the relay still has to send: not sent yet, and not given up on. */
+    List<OutboxEvent> findTop100BySentAtIsNullAndFailedAtIsNullOrderByCreatedAtAsc();
 
     @Modifying
     @Query("UPDATE OutboxEvent e SET e.sentAt = :sentAt WHERE e.eventId = :eventId AND e.sentAt IS NULL")
     int markSent(@Param("eventId") UUID eventId, @Param("sentAt") Instant sentAt);
+
+    @Modifying
+    @Query("UPDATE OutboxEvent e SET e.attempts = :attempts, e.lastError = :error "
+            + "WHERE e.eventId = :eventId AND e.sentAt IS NULL AND e.failedAt IS NULL")
+    int recordAttempt(@Param("eventId") UUID eventId,
+                      @Param("attempts") int attempts,
+                      @Param("error") String error);
+
+    @Modifying
+    @Query("UPDATE OutboxEvent e SET e.attempts = :attempts, e.lastError = :error, e.failedAt = :failedAt "
+            + "WHERE e.eventId = :eventId AND e.sentAt IS NULL AND e.failedAt IS NULL")
+    int markFailed(@Param("eventId") UUID eventId,
+                   @Param("attempts") int attempts,
+                   @Param("error") String error,
+                   @Param("failedAt") Instant failedAt);
 }

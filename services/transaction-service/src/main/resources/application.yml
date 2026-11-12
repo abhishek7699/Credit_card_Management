@@ -68,3 +68,4 @@ logging:
 transaction:
   outbox:
     poll-interval-ms: ${TRANSACTION_OUTBOX_POLL_MS:500}
+    max-attempts: ${TRANSACTION_OUTBOX_MAX_ATTEMPTS:5}

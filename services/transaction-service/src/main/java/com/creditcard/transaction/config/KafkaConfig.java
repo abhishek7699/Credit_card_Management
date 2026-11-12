@@ -65,6 +65,30 @@ public class KafkaConfig {
         return new KafkaTemplate<>(statusEventProducerFactory());
     }
 
+    /**
+     * Outbox producer (013). Sends each row's stored JSON as-is, so every topic keeps its own shape.
+     * Type-info headers are off: settlement-service's consumer reads the default type and would try
+     * to load transaction-service's class from a header if one were sent.
+     */
+    @Bean
+    public ProducerFactory<String, Object> outboxProducerFactory() {
+        Map<String, Object> props = new HashMap<>();
+        props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
+        props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
+        props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, JsonSerializer.class);
+        props.put(ProducerConfig.ACKS_CONFIG, "all");
+        props.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, true);
+        props.put(ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION, 1);
+        props.put(ProducerConfig.RETRIES_CONFIG, Integer.MAX_VALUE);
+        props.put(JsonSerializer.ADD_TYPE_INFO_HEADERS, false);
+        return new DefaultKafkaProducerFactory<>(props);
+    }
+
+    @Bean
+    public KafkaTemplate<String, Object> outboxKafkaTemplate() {
+        return new KafkaTemplate<>(outboxProducerFactory());
+    }
+
     @Bean
     public ConsumerFactory<String, StatusUpdateEvent> consumerFactory(MeterRegistry meterRegistry) {
         Map<String, Object> props = new HashMap<>();

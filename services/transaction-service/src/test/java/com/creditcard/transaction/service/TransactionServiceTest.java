@@ -243,12 +243,46 @@ class TransactionServiceTest {
         ArgumentCaptor<com.creditcard.transaction.event.StatusUpdateEvent> captor =
                 ArgumentCaptor.forClass(com.creditcard.transaction.event.StatusUpdateEvent.class);
         verify(outboxService).append(eq("transaction.status.updated"),
-                eq(TransactionService.stableEventId(id, "TransactionAuthorized")), eq(id.toString()), captor.capture());
+                eq(TransactionService.stableEventId(id, "transaction.status.updated", "TransactionAuthorized")),
+                eq(id.toString()), eq("TransactionAuthorized"), captor.capture());
         assertThat(captor.getValue().getEventType()).isEqualTo("TransactionAuthorized");
         assertThat(captor.getValue().getEventId())
-                .isEqualTo(TransactionService.stableEventId(id, "TransactionAuthorized").toString());
+                .isEqualTo(TransactionService.stableEventId(id, "transaction.status.updated", "TransactionAuthorized").toString());
         assertThat(captor.getValue().getPayload().getOutcome()).isEqualTo("AUTHORIZED");
         assertThat(captor.getValue().getPayload().getCardToken()).isEqualTo("vault:v1:token");
+    }
+
+    @Test
+    void winningAuthorizedTransitionAlsoWritesTransactionAuthorizedForSettlement() {
+        UUID id = UUID.randomUUID();
+        Transaction tx = pendingTransaction(id);
+        tx.setMerchantId("merchant-7");
+        tx.setMaskedCardNumber("****-****-****-4242");
+        tx.setAmount(new java.math.BigDecimal("42.50"));
+        tx.setCurrencyCode("USD");
+        when(transactionRepository.findById(id)).thenReturn(Optional.of(tx));
+        when(transactionRepository.transitionStatus(eq(id), eq(TransactionStatus.PENDING),
+                eq(TransactionStatus.AUTHORIZED), any())).thenReturn(1);
+
+        transactionService.applyAuthorizationResult(id.toString(), "AUTHORIZED", null);
+
+        ArgumentCaptor<com.creditcard.transaction.event.TransactionAuthorizedEvent> captor =
+                ArgumentCaptor.forClass(com.creditcard.transaction.event.TransactionAuthorizedEvent.class);
+        verify(outboxService).append(eq("transaction.authorized"),
+                eq(TransactionService.stableEventId(id, "transaction.authorized", "TransactionAuthorized")),
+                eq(id.toString()), eq("TransactionAuthorized"), captor.capture());
+        var event = captor.getValue();
+        assertThat(event.getEventType()).isEqualTo("TransactionAuthorized");
+        assertThat(event.getSourceService()).isEqualTo("transaction-service");
+        assertThat(event.getOccurredAt()).isNotNull();
+        assertThat(event.getPayload().getTransactionId()).isEqualTo(id.toString());
+        assertThat(event.getPayload().getMerchantId()).isEqualTo("merchant-7");
+        assertThat(event.getPayload().getCardToken()).isEqualTo("vault:v1:token");
+        assertThat(event.getPayload().getMaskedCardNumber()).isEqualTo("****-****-****-4242");
+        assertThat(event.getPayload().getAmount()).isEqualByComparingTo("42.50");
+        assertThat(event.getPayload().getCurrencyCode()).isEqualTo("USD");
+        assertThat(event.getPayload().getAuthorizedAt()).isNotNull();
+        verify(outboxService, times(2)).append(any(), any(), any(), any(), any());
     }
 
     @Test
@@ -261,9 +295,12 @@ class TransactionServiceTest {
         transactionService.applyAuthorizationResult(id.toString(), "FAILED", "INVALID_EVENT_PAYLOAD");
 
         verify(outboxService).append(eq("transaction.status.updated"),
-                eq(TransactionService.stableEventId(id, "TransactionDeclined")), eq(id.toString()), any());
+                eq(TransactionService.stableEventId(id, "transaction.status.updated", "TransactionDeclined")),
+                eq(id.toString()), eq("TransactionDeclined"), any());
         verify(outboxService).append(eq("transaction.status.updated"),
-                eq(TransactionService.stableEventId(id, "TransactionFailed")), eq(id.toString()), any());
+                eq(TransactionService.stableEventId(id, "transaction.status.updated", "TransactionFailed")),
+                eq(id.toString()), eq("TransactionFailed"), any());
+        verify(outboxService, never()).append(eq("transaction.authorized"), any(), any(), any(), any());
     }
 
     @Test
@@ -274,7 +311,7 @@ class TransactionServiceTest {
 
         transactionService.applyAuthorizationResult(id.toString(), "AUTHORIZED", null);
 
-        verify(outboxService, never()).append(any(), any(), any(), any());
+        verify(outboxService, never()).append(any(), any(), any(), any(), any());
     }
 
     @Test
@@ -285,7 +322,7 @@ class TransactionServiceTest {
         transactionService.applyAuthorizationResult(id.toString(), null, null);
 
         verify(transactionRepository, never()).transitionStatus(any(), any(), any(), any());
-        verify(outboxService, never()).append(any(), any(), any(), any());
+        verify(outboxService, never()).append(any(), any(), any(), any(), any());
     }
 
     @Test
@@ -296,19 +333,22 @@ class TransactionServiceTest {
         transactionService.applyAuthorizationResult(id.toString(), "AUTHORIZED", null);
 
         verify(transactionRepository, never()).transitionStatus(any(), any(), any(), any());
-        verify(outboxService, never()).append(any(), any(), any(), any());
+        verify(outboxService, never()).append(any(), any(), any(), any(), any());
     }
 
     @Test
-    void stableEventIdIsDeterministicAndDependsOnStatus() {
+    void stableEventIdIsDeterministicAndDependsOnTopicAndType() {
         UUID id = UUID.randomUUID();
+        String status = "transaction.status.updated";
 
-        assertThat(TransactionService.stableEventId(id, "TransactionAuthorized"))
-                .isEqualTo(TransactionService.stableEventId(id, "TransactionAuthorized"));
-        assertThat(TransactionService.stableEventId(id, "TransactionAuthorized"))
-                .isNotEqualTo(TransactionService.stableEventId(id, "TransactionDeclined"));
-        assertThat(TransactionService.stableEventId(id, "TransactionAuthorized"))
-                .isNotEqualTo(TransactionService.stableEventId(UUID.randomUUID(), "TransactionAuthorized"));
+        assertThat(TransactionService.stableEventId(id, status, "TransactionAuthorized"))
+                .isEqualTo(TransactionService.stableEventId(id, status, "TransactionAuthorized"));
+        assertThat(TransactionService.stableEventId(id, status, "TransactionAuthorized"))
+                .isNotEqualTo(TransactionService.stableEventId(id, status, "TransactionDeclined"));
+        assertThat(TransactionService.stableEventId(id, status, "TransactionAuthorized"))
+                .isNotEqualTo(TransactionService.stableEventId(id, "transaction.authorized", "TransactionAuthorized"));
+        assertThat(TransactionService.stableEventId(id, status, "TransactionAuthorized"))
+                .isNotEqualTo(TransactionService.stableEventId(UUID.randomUUID(), status, "TransactionAuthorized"));
     }
 
     @Test
