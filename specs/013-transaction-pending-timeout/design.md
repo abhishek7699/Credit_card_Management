@@ -1,7 +1,8 @@
 # 013 — PENDING transaction timeout with credit release (DESIGN v3)
 
-Status: option A, outbox and topic decisions approved. Phase 1 implemented (see Phases).
+Status: implemented. Phases 1, 2 and 4 are done; phase 3 is superseded by option Y (see Phases).
 Point 5 decided: option Y. Phase 1 follow-up applies it (see "Decisions applied after phase 1").
+Booking startup check for timer rule 2 is deferred to docs/BACKLOG.md.
 
 ## Owner answers applied
 
@@ -199,9 +200,14 @@ notification-service       ← transaction.status.updated (FINAL only)
 - **Phase 2:** 013 sweep (PENDING > 300 s, every 30 s, conditional PENDING→FAILED with reason TIMEOUT,
   outbox for `TransactionFailed` and `transaction.timed_out`); authorization consumer of
   `transaction.timed_out` (release once, TIMED_OUT marker for late initiated); TimerOrderingTest.
-- **Phase 3:** settlement (see point 5 below). Under the current design: settlement consumer of
-  `transaction.timed_out`. Under option Y: no settlement timeout consumer needed.
-- **Phase 4:** docs (quickstart, BACKLOG), e2e run, final gate.
+- **Phase 2 (done):** PENDING sweep, `transaction.timed_out`, authorization release, timeout markers,
+  TimerOrderingTest.
+- **Phase 3: superseded by option Y.** Settlement only receives `transaction.authorized`, which
+  transaction-service writes only when the AUTHORIZED update wins, so a timed-out transaction is never
+  settled. The integration test `aTimedOutTransactionNeverPublishesTransactionAuthorized` proves it.
+  No settlement code was built.
+- **Phase 4 (done):** README (architecture, outbox and timeout, known limitations), this status, BACKLOG
+  entry, final gate.
 
 ## Point 5: should transaction-service publish transaction.authorized? (evaluation, not implemented)
 
