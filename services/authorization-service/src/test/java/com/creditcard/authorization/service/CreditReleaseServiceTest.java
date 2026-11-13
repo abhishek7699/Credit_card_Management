@@ -45,8 +45,9 @@ class CreditReleaseServiceTest {
     private TimeoutMarkerRepository timeoutMarkerRepository;
 
     private CreditReleaseService service() {
-        return new CreditReleaseService(idempotencyService, cardAccountRepository,
-                authorizationRecordRepository, timeoutMarkerRepository);
+        return new CreditReleaseService(idempotencyService, cardAccountRepository, timeoutMarkerRepository,
+                new com.creditcard.authorization.processor.SimulatedProcessor(
+                        cardAccountRepository, authorizationRecordRepository));
     }
 
     /** Not a duplicate: the release proceeds. */

@@ -9,7 +9,9 @@ import com.creditcard.authorization.kafka.event.AuthorizationResultEvent;
 import com.creditcard.authorization.kafka.event.TransactionInitiatedEvent;
 import com.creditcard.authorization.repository.AuthorizationRecordRepository;
 import com.creditcard.authorization.repository.CardAccountRepository;
+import com.creditcard.authorization.processor.SimulatedProcessor;
 import com.creditcard.authorization.repository.TimeoutMarkerRepository;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -42,8 +44,15 @@ class AuthorizationServiceTest {
     @Mock
     private TimeoutMarkerRepository timeoutMarkerRepository;
 
-    @InjectMocks
     private AuthorizationService authorizationService;
+
+    /** Spec 014 phase 1 wiring: the same mocks, now passed through the new constructor. */
+    @BeforeEach
+    void wireService() {
+        authorizationService = new AuthorizationService(
+                new SimulatedProcessor(cardAccountRepository, authorizationRecordRepository),
+                cardAccountRepository, authorizationRecordRepository, timeoutMarkerRepository);
+    }
 
     @Test
     void shouldAuthorizeAndDeductCreditWhenCardActiveAndSufficient() {

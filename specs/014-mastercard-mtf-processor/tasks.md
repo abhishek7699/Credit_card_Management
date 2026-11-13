@@ -55,7 +55,7 @@
 
 ### Tests first (Principle II)
 
-- [ ] T009 [P] [US1] Write `services/authorization-service/src/test/java/com/creditcard/authorization/processor/ReleaseHoldNoOpTest.java`. Cover `SimulatedProcessor.releaseHold` with no authorization record: it returns `NO_OP`, makes no change to `card_accounts.available_credit`, and writes no record.
+- [ ] T009 [P] [US1] Write `services/authorization-service/src/test/java/com/creditcard/authorization/processor/ReleaseHoldNoOpTest.java`. Cover `SimulatedProcessor.releaseHold` with no authorization record: it returns `NO_AUTHORIZATION`, makes no change to `card_accounts.available_credit`, and writes no record.
 - [ ] T010 [P] [US1] Write `services/authorization-service/src/test/java/com/creditcard/authorization/processor/SweepVsInFlightAuthorizeTest.java`. Cover: a timeout marker written first makes a later `authorize` return empty and leave credit unchanged.
 
 ### Implementation
