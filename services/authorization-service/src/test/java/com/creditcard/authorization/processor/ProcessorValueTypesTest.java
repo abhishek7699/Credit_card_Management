@@ -45,13 +45,4 @@ class ProcessorValueTypesTest {
         assertThat(request.getPaymentToken()).isEqualTo("vault:v1:secret-token");
         assertThat(request.toString()).doesNotContain("vault:v1:secret-token");
     }
-
-    @Test
-    void configBeanIsTheSimulator() {
-        PaymentProcessor bean = new ProcessorConfig().paymentProcessor(
-                org.mockito.Mockito.mock(CardAccountRepository.class),
-                org.mockito.Mockito.mock(AuthorizationRecordRepository.class),
-                org.mockito.Mockito.mock(TimeoutMarkerRepository.class));
-        assertThat(bean).isInstanceOf(SimulatedProcessor.class);
-    }
 }

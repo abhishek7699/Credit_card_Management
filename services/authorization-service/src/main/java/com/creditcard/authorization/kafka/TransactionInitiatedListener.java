@@ -67,7 +67,7 @@ public class TransactionInitiatedListener {
             Optional<AuthorizationResultEvent> decision = authorizationService.authorize(event);
             if (decision.isEmpty()) {
                 // 013: the transaction already timed out. Its FAILED outcome is recorded, so no result is sent.
-                log.info("Skipping authorization txId={}: the transaction already timed out", payload.getTransactionId());
+                log.info("No authorization result for txId={}: it timed out or the processor could not decide", payload.getTransactionId());
                 return;
             }
             AuthorizationResultEvent result = decision.get();

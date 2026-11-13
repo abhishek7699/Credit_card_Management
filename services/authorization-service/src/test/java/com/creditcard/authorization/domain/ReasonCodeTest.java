@@ -7,8 +7,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 class ReasonCodeTest {
 
     @Test
-    void shouldHaveFiveValues() {
-        assertThat(ReasonCode.values()).hasSize(5);
+    void shouldHaveSixValues() {
+        // PROCESSOR_DECLINED was added for spec 014 phase 2 (a decline by an external processor)
+        assertThat(ReasonCode.values()).hasSize(6);
     }
 
     @Test
@@ -18,7 +19,8 @@ class ReasonCodeTest {
                 ReasonCode.CARD_NOT_ACTIVE,
                 ReasonCode.INSUFFICIENT_CREDIT,
                 ReasonCode.INVALID_EVENT_PAYLOAD,
-                ReasonCode.INTERNAL_ERROR
+                ReasonCode.INTERNAL_ERROR,
+                ReasonCode.PROCESSOR_DECLINED
         );
     }
 }

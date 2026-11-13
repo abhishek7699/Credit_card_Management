@@ -63,7 +63,7 @@ public class AuthorizationService {
         }
         if (decision.getOutcome() == ProcessorOutcome.DECLINED) {
             return Optional.of(persistAndReturn(payload, AuthorizationOutcome.DECLINED,
-                    ReasonCode.valueOf(decision.getReasonCode())));
+                    ReasonCode.valueOf(decision.getReasonCode()), decision.getProcessorCode()));
         }
         return Optional.empty();
     }
@@ -72,6 +72,14 @@ public class AuthorizationService {
             TransactionInitiatedEvent.Payload payload,
             AuthorizationOutcome outcome,
             ReasonCode reasonCode) {
+        return persistAndReturn(payload, outcome, reasonCode, null);
+    }
+
+    AuthorizationResultEvent persistAndReturn(
+            TransactionInitiatedEvent.Payload payload,
+            AuthorizationOutcome outcome,
+            ReasonCode reasonCode,
+            String processorCode) {
 
         if (outcome == AuthorizationOutcome.RELEASED) {
             throw new IllegalStateException(
@@ -85,6 +93,7 @@ public class AuthorizationService {
         record.setCurrencyCode(payload.getCurrencyCode());
         record.setOutcome(outcome);
         record.setReasonCode(reasonCode);
+        record.setProcessorReasonCode(processorCode);
         record.setDecidedAt(Instant.now());
         authorizationRecordRepository.save(record);
 

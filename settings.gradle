@@ -16,3 +16,6 @@ include ':services:settlement-service'
 include ':services:reporting-service'
 include ':services:api-gateway'
 include ':services:booking-service'
+
+// Shared library: Mastercard Gateway REST client, used by authorization-service and (phase 4) settlement-service
+include ':libs:mastercard-gateway'
