@@ -113,4 +113,3 @@ These were named up front as out of scope for every layer until explicitly start
 ## Spec 014 phase 2 deferrals
 
 - **Unresolved VOID retry**: when a VOID and its status lookup are both unresolved, the hold stays and `RELEASE_REJECTED` (`VOID_UNKNOWN`) is recorded with no retry. Needs a retry path (deterministic VOID ID makes it safe to repeat).
-- **Committed test TLS key**: `libs/mastercard-gateway/src/testFixtures/resources/test-keystore.p12` is a self-signed test-only key committed to the repo. Move it to generation at test time or confirm it may stay.
