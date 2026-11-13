@@ -16,6 +16,10 @@ dependencies {
     // Exposes /actuator/prometheus for k8s/monitoring to scrape
     implementation 'io.micrometer:micrometer-registry-prometheus'
 
+    // Mastercard Gateway REST client, shared with authorization-service (spec 014 phase 4)
+    implementation project(':libs:mastercard-gateway')
+    testImplementation testFixtures(project(':libs:mastercard-gateway'))
+
     // Spring Boot — Batch (NO @EnableBatchProcessing; Boot 3.x auto-configures)
     implementation 'org.springframework.boot:spring-boot-starter-batch'
 

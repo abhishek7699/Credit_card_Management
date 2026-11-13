@@ -85,6 +85,29 @@ public final class MastercardGatewayClient {
                 orderPath(transactionId, voidTransactionId(transactionId)), body);
     }
 
+    /** CAPTURE the authorized amount (settlement, spec 014 phase 4). The transaction ID is derived from ours, so a retry reuses it. */
+    public GatewayResult capture(UUID transactionId, BigDecimal amount, String currency) {
+        Map<String, Object> body = Map.of(
+                "apiOperation", "CAPTURE",
+                "transaction", Map.of(
+                        "amount", amount.setScale(2).toPlainString(),
+                        "currency", currency,
+                        "targetTransactionId", authorizeTransactionId(transactionId).toString()));
+        return send(Operation.CAPTURE, transactionId, HttpMethod.PUT,
+                orderPath(transactionId, captureTransactionId(transactionId)), body);
+    }
+
+    /** Retrieve the CAPTURE transaction's status. Used when a CAPTURE result is UNKNOWN. */
+    public GatewayResult retrieveCapture(UUID transactionId) {
+        return send(Operation.RETRIEVE, transactionId, HttpMethod.GET,
+                orderPath(transactionId, captureTransactionId(transactionId)), null);
+    }
+
+    /** Deterministic ID for the CAPTURE transaction: transactionId + ":CAPTURE". */
+    public static UUID captureTransactionId(UUID transactionId) {
+        return UUID.nameUUIDFromBytes((transactionId + ":CAPTURE").getBytes(StandardCharsets.UTF_8));
+    }
+
     /** Retrieve the VOID transaction's status. Used when a VOID result is UNKNOWN. */
     public GatewayResult retrieveVoid(UUID transactionId) {
         return send(Operation.RETRIEVE, transactionId, HttpMethod.GET,
@@ -179,6 +202,6 @@ public final class MastercardGatewayClient {
     }
 
     enum Operation {
-        AUTHORIZE, RETRIEVE, VOID
+        AUTHORIZE, CAPTURE, RETRIEVE, VOID
     }
 }

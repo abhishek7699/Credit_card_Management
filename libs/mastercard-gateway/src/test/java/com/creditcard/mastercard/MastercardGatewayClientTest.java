@@ -256,6 +256,37 @@ class MastercardGatewayClientTest {
     }
 
     @Test
+    void captureSendsCaptureWithDerivedIdsAndTargetsTheAuthorization() {
+        stubPut("{\"result\":\"SUCCESS\",\"response\":{\"gatewayCode\":\"APPROVED\"}}");
+        UUID captureId = MastercardGatewayClient.captureTransactionId(txId);
+
+        GatewayResult result = client().capture(txId, new BigDecimal("12.5"), "USD");
+
+        assertThat(result.outcome()).isEqualTo(GatewayOutcome.APPROVED);
+        assertThat(captureId).isNotEqualTo(txId);
+        server.verify(putRequestedFor(urlPathEqualTo(orderPath(txId, captureId)))
+                .withRequestBody(equalToJson("{\"apiOperation\":\"CAPTURE\",\"transaction\":{\"amount\":\"12.50\","
+                        + "\"currency\":\"USD\",\"targetTransactionId\":\""
+                        + MastercardGatewayClient.authorizeTransactionId(txId) + "\"}}")));
+    }
+
+    @Test
+    void captureDeclinedIsDeclined() {
+        stubPut("{\"result\":\"FAILURE\",\"response\":{\"gatewayCode\":\"DECLINED\"}}");
+
+        assertThat(client().capture(txId, BigDecimal.TEN, "USD").outcome()).isEqualTo(GatewayOutcome.DECLINED);
+    }
+
+    @Test
+    void retrieveCaptureLooksUpTheCaptureTransaction() {
+        stubGet(200, "{\"result\":\"SUCCESS\",\"response\":{\"gatewayCode\":\"APPROVED\"}}");
+
+        assertThat(client().retrieveCapture(txId).outcome()).isEqualTo(GatewayOutcome.APPROVED);
+        server.verify(getRequestedFor(urlPathEqualTo(
+                orderPath(txId, MastercardGatewayClient.captureTransactionId(txId)))));
+    }
+
+    @Test
     void voidServerErrorIsUnknown() {
         stubPutStatus(503, "{}");
 

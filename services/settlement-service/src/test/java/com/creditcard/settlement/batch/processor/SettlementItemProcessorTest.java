@@ -1,10 +1,14 @@
 package com.creditcard.settlement.batch.processor;
 
+import com.creditcard.settlement.capture.CaptureGateway;
+import com.creditcard.settlement.capture.CaptureResult;
+import com.creditcard.settlement.capture.SimulatedCaptureGateway;
 import com.creditcard.settlement.domain.SettlementTransaction;
 import com.creditcard.settlement.exception.AlreadySettledException;
 import com.creditcard.settlement.model.SettledItem;
 import com.creditcard.settlement.service.InterchangeFeeService;
 import org.junit.jupiter.api.BeforeEach;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
@@ -12,14 +16,40 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class SettlementItemProcessorTest {
 
     private SettlementItemProcessor processor;
+    private SimpleMeterRegistry meters;
 
     @BeforeEach
     void setUp() {
-        processor = new SettlementItemProcessor(new InterchangeFeeService(new BigDecimal("0.02")));
+        meters = new SimpleMeterRegistry();
+        processor = new SettlementItemProcessor(new InterchangeFeeService(new BigDecimal("0.02")),
+                new SimulatedCaptureGateway(), meters);
+    }
+
+    @Test
+    void process_failedCapture_isFilteredAndCounted() {
+        CaptureGateway failing = mock(CaptureGateway.class);
+        when(failing.capture(any(), any(), any())).thenReturn(CaptureResult.FAILED);
+        processor = new SettlementItemProcessor(new InterchangeFeeService(new BigDecimal("0.02")), failing, meters);
+
+        assertThat(processor.process(buildTx("AUTHORIZED", "100.00"))).isNull();
+        assertThat(meters.counter("settlement.capture.deferred", "outcome", "FAILED").count()).isEqualTo(1.0);
+    }
+
+    @Test
+    void process_unknownCapture_isFilteredAndCounted() {
+        CaptureGateway unknown = mock(CaptureGateway.class);
+        when(unknown.capture(any(), any(), any())).thenReturn(CaptureResult.UNKNOWN);
+        processor = new SettlementItemProcessor(new InterchangeFeeService(new BigDecimal("0.02")), unknown, meters);
+
+        assertThat(processor.process(buildTx("AUTHORIZED", "100.00"))).isNull();
+        assertThat(meters.counter("settlement.capture.deferred", "outcome", "UNKNOWN").count()).isEqualTo(1.0);
     }
 
     @Test
