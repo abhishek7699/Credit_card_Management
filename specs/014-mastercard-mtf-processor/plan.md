@@ -188,6 +188,11 @@ before the refactor, then the same tests against the interface.
    `SUCCESS`. If not, change `mastercard.api-version` and repeat.
 2. Gate G3b: confirm the test cards and their outcomes on the MTF portal's test-cards page.
    Update research R7 and quickstart.md with the confirmed values.
+2a. Gate G3c: confirm the request and response formats for AUTHORIZE, VOID and CAPTURE against
+   Mastercard Gateway's API reference or its official Postman collection. Check `targetTransactionId`,
+   the amount and currency field names, and the success values (`result`, `response.gatewayCode`).
+   Update the WireMock tests in `libs/mastercard-gateway` and the processors if anything differs.
+   Until G3c, the Mastercard path is off by default and its formats are unconfirmed.
 3. Credentials read from environment (`MASTERCARD_BASE_URL`, `MASTERCARD_MERCHANT_ID`,
    `MASTERCARD_API_PASSWORD`). Missing or wrong credentials fail the first payment with a clear
    configuration error. The Mastercard path never falls back to the simulator.
