@@ -1,13 +1,18 @@
 <!--
 SYNC IMPACT REPORT
 ==================
-Version change: 1.2.1 → 1.3.0 (MINOR — governed scope expanded: booking-service added
-to Principle V's list of in-scope services, per the Roadmap in CLAUDE.md starting the
-"2a Booking" layer on top of the existing 7-service payment core)
+Version change: 1.3.0 → 1.4.0 (MINOR — new principle added: IX. External Provider Calls.
+Governs calls from a service to a third party (payment processors, email/SMS providers).
+Added so such calls are not forced into Principle V's service-to-service rules.)
+
+Previous: 1.2.1 → 1.3.0 (MINOR — booking-service added to Principle V's in-scope list,
+per the Roadmap in CLAUDE.md starting the "2a Booking" layer)
 
 Modified principles:
   - V. Layered Microservice Architecture & Communication Tiers — "Services in scope"
     list now includes `booking-service`
+  - V. Communication Tiers: one bullet added pointing external provider calls to IX
+  - IX. External Provider Calls: NEW
   - (no principle renamed or restructured)
 
 Security & Compliance Standards: no changes
@@ -117,6 +122,8 @@ Rules:
   tables directly.
 - The `api-gateway` terminates all external REST traffic and routes internally via gRPC
   or Kafka — it does not forward raw HTTP to downstream services.
+- Calls from a service to a third-party provider are not service-to-service calls. They
+  are governed by Principle IX.
 
 Services in scope: `api-gateway`, `transaction-service`, `authorization-service`,
 `fraud-detection-service`, `notification-service`, `settlement-service`,
@@ -197,6 +204,28 @@ Rules:
 - Any PR touching `packages/shared` MUST be validated against both `apps/web` and
   `apps/mobile` to confirm no breakage — even before the mobile app exists (add a type-check
   pass for the mobile app's expected usage as soon as Phase 3 specs are written).
+
+### IX. External Provider Calls
+
+A call from a service to an external provider (a payment processor, an email or SMS
+provider, or any third party outside this system) is a separate tier. Principle V's rule
+against plain REST between services does not apply to it. Every such integration MUST:
+
+- use HTTPS only, with TLS certificate verification enabled (no trust-all clients);
+- set an explicit connect timeout and an explicit read timeout, and treat expiry of either as
+  an unknown result;
+- read credentials from environment variables (or the secret manager named in Security &
+  Compliance), never from source or images, and mask them in any configuration output;
+- never log card data, session payloads, credentials, or full provider request or response
+  bodies;
+- treat an unknown result (timeout, connection loss, unparseable response, provider server
+  error) as unknown: look up the provider's status for that transaction before deciding the
+  outcome, and never record a decline from an unknown result alone;
+- send this system's own identifiers as the provider's order and transaction identifiers, so
+  a retried request cannot create a second financial effect.
+
+Tests MUST cover the unknown-result path (status checked before any decision) and MUST
+assert that no secret or card value appears in captured log output.
 
 ## Security & Compliance Standards
 
@@ -279,4 +308,4 @@ begin until the web app is stable and approved.
   block the merge.
 - For runtime development guidance, refer to `CLAUDE.md` at the repository root.
 
-**Version**: 1.3.0 | **Ratified**: 2026-06-11 | **Last Amended**: 2026-10-29
+**Version**: 1.4.0 | **Ratified**: 2026-06-11 | **Last Amended**: 2026-11-12
