@@ -1,15 +1,15 @@
-package com.creditcard.authorization.kafka.event;
+package com.creditcard.transaction.event;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
 import java.math.BigDecimal;
 import java.time.Instant;
-import java.util.UUID;
 
 /**
- * Outbound event on {@code transaction.authorized}, consumed by settlement-service. Published
- * only for the AUTHORIZED outcome. Shape mirrors settlement-service's own
- * {@code TransactionAuthorizedEvent} (see specs/005-settlement-service/contracts/events.md).
+ * Outbound event on {@code transaction.authorized}, consumed by settlement-service (013 option Y).
+ * transaction-service publishes it only when its conditional PENDING→AUTHORIZED update wins, so a
+ * timed-out transaction never reaches settlement. The shape matches settlement's own
+ * TransactionAuthorizedEvent (specs/005-settlement-service/contracts/events.md).
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class TransactionAuthorizedEvent {
@@ -22,25 +22,6 @@ public class TransactionAuthorizedEvent {
     private Payload payload;
 
     public TransactionAuthorizedEvent() {}
-
-    /** Builds the event from the inbound {@code transaction.initiated} payload. */
-    public static TransactionAuthorizedEvent from(TransactionInitiatedEvent.Payload src, Instant authorizedAt) {
-        TransactionAuthorizedEvent e = new TransactionAuthorizedEvent();
-        e.eventId = UUID.randomUUID().toString();
-        e.eventType = "TransactionAuthorized";
-        e.sourceService = "authorization-service";
-        e.occurredAt = Instant.now();
-        Payload p = new Payload();
-        p.setTransactionId(src.getTransactionId());
-        p.setMerchantId(src.getMerchantId());
-        p.setCardToken(src.getCardToken());
-        p.setMaskedCardNumber(src.getMaskedCardNumber());
-        p.setAmount(src.getAmount());
-        p.setCurrencyCode(src.getCurrencyCode());
-        p.setAuthorizedAt(authorizedAt);
-        e.payload = p;
-        return e;
-    }
 
     public String getEventId() { return eventId; }
     public void setEventId(String eventId) { this.eventId = eventId; }
@@ -62,8 +43,7 @@ public class TransactionAuthorizedEvent {
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class Payload {
-
-        private UUID transactionId;
+        private String transactionId;
         private String merchantId;
         private String cardToken;
         private String maskedCardNumber;
@@ -71,8 +51,10 @@ public class TransactionAuthorizedEvent {
         private String currencyCode;
         private Instant authorizedAt;
 
-        public UUID getTransactionId() { return transactionId; }
-        public void setTransactionId(UUID transactionId) { this.transactionId = transactionId; }
+        public Payload() {}
+
+        public String getTransactionId() { return transactionId; }
+        public void setTransactionId(String transactionId) { this.transactionId = transactionId; }
 
         public String getMerchantId() { return merchantId; }
         public void setMerchantId(String merchantId) { this.merchantId = merchantId; }

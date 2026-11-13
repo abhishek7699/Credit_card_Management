@@ -1,6 +1,7 @@
 package com.creditcard.authorization.config;
 
 import com.creditcard.authorization.kafka.event.TransactionInitiatedEvent;
+import com.creditcard.authorization.kafka.event.TransactionTimedOutEvent;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.common.serialization.StringDeserializer;
@@ -29,6 +30,28 @@ public class KafkaConsumerConfig {
 
     @Bean
     public ConsumerFactory<String, TransactionInitiatedEvent> consumerFactory(MeterRegistry meterRegistry) {
+        return consumerFactory(meterRegistry, TransactionInitiatedEvent.class);
+    }
+
+    @Bean
+    public ConcurrentKafkaListenerContainerFactory<String, TransactionInitiatedEvent> kafkaListenerContainerFactory(
+            ConsumerFactory<String, TransactionInitiatedEvent> consumerFactory) {
+        return containerFactory(consumerFactory);
+    }
+
+    /** {@code transaction.timed_out} (013): its own factory, because the default value type differs. */
+    @Bean
+    public ConsumerFactory<String, TransactionTimedOutEvent> timedOutConsumerFactory(MeterRegistry meterRegistry) {
+        return consumerFactory(meterRegistry, TransactionTimedOutEvent.class);
+    }
+
+    @Bean
+    public ConcurrentKafkaListenerContainerFactory<String, TransactionTimedOutEvent> timedOutContainerFactory(
+            ConsumerFactory<String, TransactionTimedOutEvent> timedOutConsumerFactory) {
+        return containerFactory(timedOutConsumerFactory);
+    }
+
+    private <T> ConsumerFactory<String, T> consumerFactory(MeterRegistry meterRegistry, Class<T> valueType) {
         Map<String, Object> props = new HashMap<>();
         props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
         props.put(ConsumerConfig.GROUP_ID_CONFIG, groupId);
@@ -38,10 +61,10 @@ public class KafkaConsumerConfig {
         props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
         props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, ErrorHandlingDeserializer.class);
         props.put(ErrorHandlingDeserializer.VALUE_DESERIALIZER_CLASS, JsonDeserializer.class.getName());
-        props.put(JsonDeserializer.VALUE_DEFAULT_TYPE, TransactionInitiatedEvent.class.getName());
+        props.put(JsonDeserializer.VALUE_DEFAULT_TYPE, valueType.getName());
         props.put(JsonDeserializer.TRUSTED_PACKAGES, "com.creditcard.*");
         props.put(JsonDeserializer.USE_TYPE_INFO_HEADERS, false);
-        DefaultKafkaConsumerFactory<String, TransactionInitiatedEvent> factory = new DefaultKafkaConsumerFactory<>(props);
+        DefaultKafkaConsumerFactory<String, T> factory = new DefaultKafkaConsumerFactory<>(props);
         // Exposes kafka_consumer_fetch_manager_records_lag (and the rest of the
         // kafka-clients consumer metrics) via Micrometer -> /actuator/prometheus,
         // for k8s/monitoring's Grafana dashboard. Needed because this is a
@@ -51,11 +74,8 @@ public class KafkaConsumerConfig {
         return factory;
     }
 
-    @Bean
-    public ConcurrentKafkaListenerContainerFactory<String, TransactionInitiatedEvent> kafkaListenerContainerFactory(
-            ConsumerFactory<String, TransactionInitiatedEvent> consumerFactory) {
-        ConcurrentKafkaListenerContainerFactory<String, TransactionInitiatedEvent> factory =
-                new ConcurrentKafkaListenerContainerFactory<>();
+    private <T> ConcurrentKafkaListenerContainerFactory<String, T> containerFactory(ConsumerFactory<String, T> consumerFactory) {
+        ConcurrentKafkaListenerContainerFactory<String, T> factory = new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(consumerFactory);
         factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.MANUAL_IMMEDIATE);
         return factory;

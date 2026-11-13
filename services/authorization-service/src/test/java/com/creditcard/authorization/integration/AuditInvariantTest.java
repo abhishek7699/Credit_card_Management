@@ -55,7 +55,7 @@ import static org.awaitility.Awaitility.await;
 @SpringBootTest
 @EmbeddedKafka(
     partitions = 1,
-    topics = {"transaction.initiated", "transaction.status.updated", "transaction.authorized"},
+    topics = {"transaction.initiated", "transaction.authorization.result"},
     bootstrapServersProperty = "spring.kafka.bootstrap-servers"
 )
 @Testcontainers
@@ -112,7 +112,7 @@ class AuditInvariantTest {
     @BeforeEach
     void setUp() {
         resultConsumer = buildResultConsumer();
-        resultConsumer.subscribe(List.of("transaction.status.updated"));
+        resultConsumer.subscribe(List.of("transaction.authorization.result"));
 
         logAppender = new ListAppender<>();
         logAppender.start();

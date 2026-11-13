@@ -34,11 +34,14 @@ class TransactionServiceTest {
     @Mock
     private KafkaTemplate<String, TransactionInitiatedEvent> kafkaTemplate;
 
+    @Mock
+    private OutboxService outboxService;
+
     private TransactionService transactionService;
 
     @BeforeEach
     void setUp() {
-        transactionService = new TransactionService(tokenizationService, transactionRepository, kafkaTemplate);
+        transactionService = new TransactionService(tokenizationService, transactionRepository, kafkaTemplate, outboxService);
     }
 
     @Test
@@ -165,59 +168,7 @@ class TransactionServiceTest {
         verify(transactionRepository, never()).save(any());
     }
 
-    // ── US2: handleAuthorized / handleDeclined ─────────────────────────────────
-
-    @Test
-    void shouldTransitionPendingToAuthorized() {
-        Transaction pendingTx = buildTransactionWithStatus(TransactionStatus.PENDING);
-        when(transactionRepository.findById(pendingTx.getId())).thenReturn(Optional.of(pendingTx));
-
-        transactionService.handleAuthorized(pendingTx.getId().toString());
-
-        verify(transactionRepository).updateStatusById(pendingTx.getId(), TransactionStatus.AUTHORIZED);
-    }
-
-    @Test
-    void shouldTransitionPendingToDeclined() {
-        Transaction pendingTx = buildTransactionWithStatus(TransactionStatus.PENDING);
-        when(transactionRepository.findById(pendingTx.getId())).thenReturn(Optional.of(pendingTx));
-
-        transactionService.handleDeclined(pendingTx.getId().toString());
-
-        verify(transactionRepository).updateStatusById(pendingTx.getId(), TransactionStatus.DECLINED);
-    }
-
-    @Test
-    void shouldNotOverwriteTerminalStatusWithAuthorized() {
-        Transaction authorizedTx = buildTransactionWithStatus(TransactionStatus.AUTHORIZED);
-        when(transactionRepository.findById(authorizedTx.getId())).thenReturn(Optional.of(authorizedTx));
-
-        transactionService.handleAuthorized(authorizedTx.getId().toString());
-
-        verify(transactionRepository, never()).updateStatusById(any(), any());
-    }
-
-    @Test
-    void shouldNotOverwriteTerminalStatusWithDeclined() {
-        Transaction failedTx = buildTransactionWithStatus(TransactionStatus.FAILED);
-        when(transactionRepository.findById(failedTx.getId())).thenReturn(Optional.of(failedTx));
-
-        transactionService.handleDeclined(failedTx.getId().toString());
-
-        verify(transactionRepository, never()).updateStatusById(any(), any());
-    }
-
-    @Test
-    void handleAuthorizedShouldBeNoOpForUnknownTransaction() {
-        UUID unknownId = UUID.randomUUID();
-        when(transactionRepository.findById(unknownId)).thenReturn(Optional.empty());
-
-        transactionService.handleAuthorized(unknownId.toString());
-
-        verify(transactionRepository, never()).updateStatusById(any(), any());
-    }
-
-    // ── getTransaction ────────────────────────────────────────────────────────
+    // ── getTransaction ─────────────────────────────────────────────────────────
 
     @Test
     void getTransactionShouldReturnTransactionById() {
@@ -239,44 +190,19 @@ class TransactionServiceTest {
 
     // ── US3: handleFailed ─────────────────────────────────────────────────────
 
-    @Test
-    void shouldTransitionPendingToFailed() {
-        Transaction pendingTx = buildTransactionWithStatus(TransactionStatus.PENDING);
-        when(transactionRepository.findById(pendingTx.getId())).thenReturn(Optional.of(pendingTx));
+    // ── 013: conditional final-outcome transitions, written to the outbox ─────
 
-        transactionService.handleFailed(pendingTx.getId().toString());
-
-        verify(transactionRepository).updateStatusById(pendingTx.getId(), TransactionStatus.FAILED);
-    }
-
-    @Test
-    void shouldNotOverwriteAuthorizedWithFailed() {
-        Transaction authorizedTx = buildTransactionWithStatus(TransactionStatus.AUTHORIZED);
-        when(transactionRepository.findById(authorizedTx.getId())).thenReturn(Optional.of(authorizedTx));
-
-        transactionService.handleFailed(authorizedTx.getId().toString());
-
-        verify(transactionRepository, never()).updateStatusById(any(), any());
-    }
-
-    @Test
-    void shouldNotOverwriteDeclinedWithFailed() {
-        Transaction declinedTx = buildTransactionWithStatus(TransactionStatus.DECLINED);
-        when(transactionRepository.findById(declinedTx.getId())).thenReturn(Optional.of(declinedTx));
-
-        transactionService.handleFailed(declinedTx.getId().toString());
-
-        verify(transactionRepository, never()).updateStatusById(any(), any());
-    }
-
-    @Test
-    void handleFailedShouldBeNoOpForUnknownTransaction() {
-        UUID unknownId = UUID.randomUUID();
-        when(transactionRepository.findById(unknownId)).thenReturn(Optional.empty());
-
-        transactionService.handleFailed(unknownId.toString());
-
-        verify(transactionRepository, never()).updateStatusById(any(), any());
+    private Transaction buildSavedTransaction() {
+        Transaction tx = new Transaction();
+        tx.setId(UUID.randomUUID());
+        tx.setCardToken("vault:v1:savedtoken");
+        tx.setMaskedCardNumber("****-****-****-0000");
+        tx.setCardholderName("Jane Doe");
+        tx.setAmount(new BigDecimal("50.00"));
+        tx.setCurrencyCode("USD");
+        tx.setMerchantId("merchant-001");
+        tx.setStatus(TransactionStatus.PENDING);
+        return tx;
     }
 
     private Transaction buildTransactionWithStatus(TransactionStatus status) {
@@ -291,16 +217,206 @@ class TransactionServiceTest {
         return tx;
     }
 
-    private Transaction buildSavedTransaction() {
+    private Transaction pendingTransaction(UUID id) {
         Transaction tx = new Transaction();
-        tx.setId(UUID.randomUUID());
-        tx.setCardToken("vault:v1:savedtoken");
-        tx.setMaskedCardNumber("****-****-****-0000");
-        tx.setCardholderName("Jane Doe");
-        tx.setAmount(new BigDecimal("50.00"));
-        tx.setCurrencyCode("USD");
-        tx.setMerchantId("merchant-001");
+        tx.setCardToken("vault:v1:token");
         tx.setStatus(TransactionStatus.PENDING);
+        try {
+            var f = Transaction.class.getDeclaredField("id");
+            f.setAccessible(true);
+            f.set(tx, id);
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException(e);
+        }
         return tx;
+    }
+
+    @Test
+    void winningAuthorizedTransitionWritesFinalEventToOutbox() {
+        UUID id = UUID.randomUUID();
+        when(transactionRepository.findById(id)).thenReturn(Optional.of(pendingTransaction(id)));
+        when(transactionRepository.transitionStatus(eq(id), eq(TransactionStatus.PENDING),
+                eq(TransactionStatus.AUTHORIZED), any())).thenReturn(1);
+
+        transactionService.applyAuthorizationResult(id.toString(), "AUTHORIZED", null);
+
+        ArgumentCaptor<com.creditcard.transaction.event.StatusUpdateEvent> captor =
+                ArgumentCaptor.forClass(com.creditcard.transaction.event.StatusUpdateEvent.class);
+        verify(outboxService).append(eq("transaction.status.updated"),
+                eq(TransactionService.stableEventId(id, "transaction.status.updated", "TransactionAuthorized")),
+                eq(id.toString()), eq("TransactionAuthorized"), captor.capture());
+        assertThat(captor.getValue().getEventType()).isEqualTo("TransactionAuthorized");
+        assertThat(captor.getValue().getEventId())
+                .isEqualTo(TransactionService.stableEventId(id, "transaction.status.updated", "TransactionAuthorized").toString());
+        assertThat(captor.getValue().getPayload().getOutcome()).isEqualTo("AUTHORIZED");
+        assertThat(captor.getValue().getPayload().getCardToken()).isEqualTo("vault:v1:token");
+    }
+
+    @Test
+    void winningAuthorizedTransitionAlsoWritesTransactionAuthorizedForSettlement() {
+        UUID id = UUID.randomUUID();
+        Transaction tx = pendingTransaction(id);
+        tx.setMerchantId("merchant-7");
+        tx.setMaskedCardNumber("****-****-****-4242");
+        tx.setAmount(new java.math.BigDecimal("42.50"));
+        tx.setCurrencyCode("USD");
+        when(transactionRepository.findById(id)).thenReturn(Optional.of(tx));
+        when(transactionRepository.transitionStatus(eq(id), eq(TransactionStatus.PENDING),
+                eq(TransactionStatus.AUTHORIZED), any())).thenReturn(1);
+
+        transactionService.applyAuthorizationResult(id.toString(), "AUTHORIZED", null);
+
+        ArgumentCaptor<com.creditcard.transaction.event.TransactionAuthorizedEvent> captor =
+                ArgumentCaptor.forClass(com.creditcard.transaction.event.TransactionAuthorizedEvent.class);
+        verify(outboxService).append(eq("transaction.authorized"),
+                eq(TransactionService.stableEventId(id, "transaction.authorized", "TransactionAuthorized")),
+                eq(id.toString()), eq("TransactionAuthorized"), captor.capture());
+        var event = captor.getValue();
+        assertThat(event.getEventType()).isEqualTo("TransactionAuthorized");
+        assertThat(event.getSourceService()).isEqualTo("transaction-service");
+        assertThat(event.getOccurredAt()).isNotNull();
+        assertThat(event.getPayload().getTransactionId()).isEqualTo(id.toString());
+        assertThat(event.getPayload().getMerchantId()).isEqualTo("merchant-7");
+        assertThat(event.getPayload().getCardToken()).isEqualTo("vault:v1:token");
+        assertThat(event.getPayload().getMaskedCardNumber()).isEqualTo("****-****-****-4242");
+        assertThat(event.getPayload().getAmount()).isEqualByComparingTo("42.50");
+        assertThat(event.getPayload().getCurrencyCode()).isEqualTo("USD");
+        assertThat(event.getPayload().getAuthorizedAt()).isNotNull();
+        verify(outboxService, times(2)).append(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void winningDeclinedAndFailedTransitionsWriteTheirOwnEventTypes() {
+        UUID id = UUID.randomUUID();
+        when(transactionRepository.findById(id)).thenReturn(Optional.of(pendingTransaction(id)));
+        when(transactionRepository.transitionStatus(eq(id), eq(TransactionStatus.PENDING), any(), any())).thenReturn(1);
+
+        transactionService.applyAuthorizationResult(id.toString(), "DECLINED", "51");
+        transactionService.applyAuthorizationResult(id.toString(), "FAILED", "INVALID_EVENT_PAYLOAD");
+
+        verify(outboxService).append(eq("transaction.status.updated"),
+                eq(TransactionService.stableEventId(id, "transaction.status.updated", "TransactionDeclined")),
+                eq(id.toString()), eq("TransactionDeclined"), any());
+        verify(outboxService).append(eq("transaction.status.updated"),
+                eq(TransactionService.stableEventId(id, "transaction.status.updated", "TransactionFailed")),
+                eq(id.toString()), eq("TransactionFailed"), any());
+        verify(outboxService, never()).append(eq("transaction.authorized"), any(), any(), any(), any());
+    }
+
+    @Test
+    void losingTransitionWritesNothingToOutbox() {
+        UUID id = UUID.randomUUID();
+        when(transactionRepository.findById(id)).thenReturn(Optional.of(pendingTransaction(id)));
+        when(transactionRepository.transitionStatus(eq(id), eq(TransactionStatus.PENDING), any(), any())).thenReturn(0);
+
+        transactionService.applyAuthorizationResult(id.toString(), "AUTHORIZED", null);
+
+        verify(outboxService, never()).append(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void unknownOutcomeIsIgnoredWithoutTouchingTheRow() {
+        UUID id = UUID.randomUUID();
+
+        transactionService.applyAuthorizationResult(id.toString(), "PENDING", null);
+        transactionService.applyAuthorizationResult(id.toString(), null, null);
+
+        verify(transactionRepository, never()).transitionStatus(any(), any(), any(), any());
+        verify(outboxService, never()).append(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void resultForUnknownTransactionIsIgnored() {
+        UUID id = UUID.randomUUID();
+        when(transactionRepository.findById(id)).thenReturn(Optional.empty());
+
+        transactionService.applyAuthorizationResult(id.toString(), "AUTHORIZED", null);
+
+        verify(transactionRepository, never()).transitionStatus(any(), any(), any(), any());
+        verify(outboxService, never()).append(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void stableEventIdIsDeterministicAndDependsOnTopicAndType() {
+        UUID id = UUID.randomUUID();
+        String status = "transaction.status.updated";
+
+        assertThat(TransactionService.stableEventId(id, status, "TransactionAuthorized"))
+                .isEqualTo(TransactionService.stableEventId(id, status, "TransactionAuthorized"));
+        assertThat(TransactionService.stableEventId(id, status, "TransactionAuthorized"))
+                .isNotEqualTo(TransactionService.stableEventId(id, status, "TransactionDeclined"));
+        assertThat(TransactionService.stableEventId(id, status, "TransactionAuthorized"))
+                .isNotEqualTo(TransactionService.stableEventId(id, "transaction.authorized", "TransactionAuthorized"));
+        assertThat(TransactionService.stableEventId(id, status, "TransactionAuthorized"))
+                .isNotEqualTo(TransactionService.stableEventId(UUID.randomUUID(), status, "TransactionAuthorized"));
+    }
+
+    @Test
+    void timeOutOfAPendingTransactionWritesFailedAndTimedOutToTheOutbox() {
+        UUID id = UUID.randomUUID();
+        java.time.Instant now = java.time.Instant.parse("2026-11-12T12:00:00Z");
+        when(transactionRepository.failPendingAsTimedOut(id, now)).thenReturn(1);
+        when(transactionRepository.findById(id)).thenReturn(Optional.of(pendingTransaction(id)));
+
+        assertThat(transactionService.timeOutPending(id, now)).isTrue();
+
+        ArgumentCaptor<com.creditcard.transaction.event.StatusUpdateEvent> status =
+                ArgumentCaptor.forClass(com.creditcard.transaction.event.StatusUpdateEvent.class);
+        verify(outboxService).append(eq("transaction.status.updated"),
+                eq(TransactionService.stableEventId(id, "transaction.status.updated", "TransactionFailed")),
+                eq(id.toString()), eq("TransactionFailed"), status.capture());
+        assertThat(status.getValue().getPayload().getOutcome()).isEqualTo("FAILED");
+        assertThat(status.getValue().getPayload().getReasonCode()).isEqualTo("TIMEOUT");
+
+        ArgumentCaptor<com.creditcard.transaction.event.TransactionTimedOutEvent> timedOut =
+                ArgumentCaptor.forClass(com.creditcard.transaction.event.TransactionTimedOutEvent.class);
+        verify(outboxService).append(eq("transaction.timed_out"),
+                eq(TransactionService.stableEventId(id, "transaction.timed_out", "TransactionTimedOut")),
+                eq(id.toString()), eq("TransactionTimedOut"), timedOut.capture());
+        assertThat(timedOut.getValue().getEventType()).isEqualTo("TransactionTimedOut");
+        assertThat(timedOut.getValue().getPayload().getTransactionId()).isEqualTo(id.toString());
+        assertThat(timedOut.getValue().getPayload().getCardToken()).isEqualTo("vault:v1:token");
+        verify(outboxService, times(2)).append(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void timeOutLosingToAnEarlierOutcomeWritesNothing() {
+        UUID id = UUID.randomUUID();
+        java.time.Instant now = java.time.Instant.now();
+        when(transactionRepository.failPendingAsTimedOut(id, now)).thenReturn(0);
+
+        assertThat(transactionService.timeOutPending(id, now)).isFalse();
+
+        verify(transactionRepository, never()).findById(any());
+        verify(outboxService, never()).append(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void timeOutOfARowThatVanishedFailsLoudly() {
+        UUID id = UUID.randomUUID();
+        java.time.Instant now = java.time.Instant.now();
+        when(transactionRepository.failPendingAsTimedOut(id, now)).thenReturn(1);
+        when(transactionRepository.findById(id)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> transactionService.timeOutPending(id, now))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("vanished");
+        verify(outboxService, never()).append(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void eventTypeIsDefinedOnlyForFinalStatuses() {
+        assertThatThrownBy(() -> TransactionService.eventTypeFor(TransactionStatus.PENDING))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("not a final status");
+    }
+
+    @Test
+    void finalStatusMappingCoversOnlyTheThreeFinalOutcomes() {
+        assertThat(TransactionService.finalStatusFor("AUTHORIZED")).isEqualTo(TransactionStatus.AUTHORIZED);
+        assertThat(TransactionService.finalStatusFor("DECLINED")).isEqualTo(TransactionStatus.DECLINED);
+        assertThat(TransactionService.finalStatusFor("FAILED")).isEqualTo(TransactionStatus.FAILED);
+        assertThat(TransactionService.finalStatusFor("PENDING")).isNull();
+        assertThat(TransactionService.finalStatusFor(null)).isNull();
     }
 }

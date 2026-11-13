@@ -1,6 +1,7 @@
 package com.creditcard.authorization.config;
 
 import com.creditcard.authorization.kafka.event.TransactionInitiatedEvent;
+import com.creditcard.authorization.kafka.event.TransactionTimedOutEvent;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
@@ -56,5 +57,15 @@ class KafkaConsumerConfigTest {
         Object isolationLevel = factory.getConfigurationProperties()
                 .get(ConsumerConfig.ISOLATION_LEVEL_CONFIG);
         assertThat(isolationLevel).isEqualTo("read_committed");
+    }
+
+    @Test
+    void timedOutFactoryDefaultsToTheTimedOutTypeAndAcknowledgesManually() {
+        ConsumerFactory<String, TransactionTimedOutEvent> consumers = config.timedOutConsumerFactory(meterRegistry);
+
+        assertThat(consumers.getConfigurationProperties().get("spring.json.value.default.type"))
+                .isEqualTo(TransactionTimedOutEvent.class.getName());
+        assertThat(config.timedOutContainerFactory(consumers).getContainerProperties().getAckMode())
+                .isEqualTo(ContainerProperties.AckMode.MANUAL_IMMEDIATE);
     }
 }

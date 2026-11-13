@@ -2,7 +2,6 @@ package com.creditcard.authorization.kafka;
 
 import com.creditcard.authorization.domain.ReasonCode;
 import com.creditcard.authorization.kafka.event.AuthorizationResultEvent;
-import com.creditcard.authorization.kafka.event.TransactionAuthorizedEvent;
 import com.creditcard.authorization.kafka.event.TransactionInitiatedEvent;
 import com.creditcard.authorization.service.AuthorizationService;
 import com.creditcard.authorization.service.IdempotencyService;
@@ -14,16 +13,14 @@ import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.stereotype.Component;
 
-import java.time.Instant;
+import java.util.Optional;
 import java.util.UUID;
 
 @Component
 public class TransactionInitiatedListener {
 
     private static final Logger log = LoggerFactory.getLogger(TransactionInitiatedListener.class);
-    private static final String RESULT_TOPIC = "transaction.status.updated";
-    private static final String AUTHORIZED_TOPIC = "transaction.authorized";
-    private static final String EVENT_TYPE_AUTHORIZED = "TransactionAuthorized";
+    private static final String RESULT_TOPIC = "transaction.authorization.result";
 
     private final AuthorizationService authorizationService;
     private final IdempotencyService idempotencyService;
@@ -67,13 +64,14 @@ public class TransactionInitiatedListener {
                 return;
             }
 
-            AuthorizationResultEvent result = authorizationService.authorize(event);
-            kafkaTemplate.send(RESULT_TOPIC, txKey, result);
-
-            if (EVENT_TYPE_AUTHORIZED.equals(result.getEventType())) {
-                kafkaTemplate.send(AUTHORIZED_TOPIC, txKey,
-                        TransactionAuthorizedEvent.from(payload, Instant.now()));
+            Optional<AuthorizationResultEvent> decision = authorizationService.authorize(event);
+            if (decision.isEmpty()) {
+                // 013: the transaction already timed out. Its FAILED outcome is recorded, so no result is sent.
+                log.info("Skipping authorization txId={}: the transaction already timed out", payload.getTransactionId());
+                return;
             }
+            AuthorizationResultEvent result = decision.get();
+            kafkaTemplate.send(RESULT_TOPIC, txKey, result);
 
             log.info("Authorization decision={} txId={}", result.getEventType(), payload.getTransactionId());
         } catch (Exception ex) {

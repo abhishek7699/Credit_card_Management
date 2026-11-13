@@ -62,19 +62,38 @@ class TransactionRepositoryTest {
     }
 
     @Test
-    void shouldUpdateStatusById() {
+    void transitionFromPendingSucceedsOnce() {
         Transaction saved = transactionRepository.save(buildTransaction());
 
-        int updated = transactionRepository.updateStatusById(saved.getId(), TransactionStatus.AUTHORIZED);
+        int first = transactionRepository.transitionStatus(saved.getId(), TransactionStatus.PENDING,
+                TransactionStatus.AUTHORIZED, java.time.Instant.now());
+        int second = transactionRepository.transitionStatus(saved.getId(), TransactionStatus.PENDING,
+                TransactionStatus.DECLINED, java.time.Instant.now());
 
-        assertThat(updated).isEqualTo(1);
+        assertThat(first).isEqualTo(1);
+        assertThat(second).isZero();
         Transaction reloaded = transactionRepository.findById(saved.getId()).orElseThrow();
         assertThat(reloaded.getStatus()).isEqualTo(TransactionStatus.AUTHORIZED);
     }
 
     @Test
+    void terminalStateIsNeverOverwrittenByALateResult() {
+        Transaction saved = transactionRepository.save(buildTransaction());
+        transactionRepository.transitionStatus(saved.getId(), TransactionStatus.PENDING,
+                TransactionStatus.FAILED, java.time.Instant.now());
+
+        int late = transactionRepository.transitionStatus(saved.getId(), TransactionStatus.PENDING,
+                TransactionStatus.AUTHORIZED, java.time.Instant.now());
+
+        assertThat(late).isZero();
+        assertThat(transactionRepository.findById(saved.getId()).orElseThrow().getStatus())
+                .isEqualTo(TransactionStatus.FAILED);
+    }
+
+    @Test
     void shouldReturnZeroWhenUpdatingNonExistentTransaction() {
-        int updated = transactionRepository.updateStatusById(UUID.randomUUID(), TransactionStatus.AUTHORIZED);
+        int updated = transactionRepository.transitionStatus(UUID.randomUUID(), TransactionStatus.PENDING,
+                TransactionStatus.AUTHORIZED, java.time.Instant.now());
 
         assertThat(updated).isZero();
     }

@@ -40,7 +40,7 @@ import static org.mockito.Mockito.when;
 @Testcontainers
 @EmbeddedKafka(
         partitions = 1,
-        topics = {"transaction.initiated", "transaction.status.updated"},
+        topics = {"transaction.initiated", "transaction.status.updated", "transaction.authorization.result"},
         bootstrapServersProperty = "spring.kafka.bootstrap-servers"
 )
 @ActiveProfiles("test")
@@ -98,6 +98,7 @@ class StatusUpdateIntegrationTest {
     private StatusUpdateEvent buildStatusEvent(String eventType, UUID transactionId) {
         StatusUpdateEvent.Payload payload = new StatusUpdateEvent.Payload();
         payload.setTransactionId(transactionId.toString());
+        payload.setOutcome(eventType.replace("Transaction", "").toUpperCase());
 
         StatusUpdateEvent event = new StatusUpdateEvent();
         event.setEventId(UUID.randomUUID().toString());
@@ -116,7 +117,7 @@ class StatusUpdateIntegrationTest {
         assertThat(transactionRepository.findById(txId).orElseThrow().getStatus())
                 .isEqualTo(TransactionStatus.PENDING);
 
-        statusKafkaTemplate.send("transaction.status.updated", txId.toString(),
+        statusKafkaTemplate.send("transaction.authorization.result", txId.toString(),
                 buildStatusEvent("TransactionAuthorized", txId));
 
         await().atMost(Duration.ofSeconds(10)).untilAsserted(() ->
@@ -128,7 +129,7 @@ class StatusUpdateIntegrationTest {
     void pendingTransactionShouldBecomeDeclined() {
         UUID txId = createPendingTransaction();
 
-        statusKafkaTemplate.send("transaction.status.updated", txId.toString(),
+        statusKafkaTemplate.send("transaction.authorization.result", txId.toString(),
                 buildStatusEvent("TransactionDeclined", txId));
 
         await().atMost(Duration.ofSeconds(10)).untilAsserted(() ->
@@ -142,13 +143,13 @@ class StatusUpdateIntegrationTest {
         StatusUpdateEvent event = buildStatusEvent("TransactionAuthorized", txId);
 
         // First delivery
-        statusKafkaTemplate.send("transaction.status.updated", txId.toString(), event);
+        statusKafkaTemplate.send("transaction.authorization.result", txId.toString(), event);
         await().atMost(Duration.ofSeconds(10)).untilAsserted(() ->
                 assertThat(transactionRepository.findById(txId).orElseThrow().getStatus())
                         .isEqualTo(TransactionStatus.AUTHORIZED));
 
         // Second delivery of the same event (same eventId = same idempotency key)
-        statusKafkaTemplate.send("transaction.status.updated", txId.toString(), event);
+        statusKafkaTemplate.send("transaction.authorization.result", txId.toString(), event);
 
         // Status must stay AUTHORIZED, no exception, processed_events has exactly one row for this key
         await().atMost(Duration.ofSeconds(5)).untilAsserted(() ->
@@ -162,7 +163,7 @@ class StatusUpdateIntegrationTest {
     void pendingTransactionShouldBecomeFailed() {
         UUID txId = createPendingTransaction();
 
-        statusKafkaTemplate.send("transaction.status.updated", txId.toString(),
+        statusKafkaTemplate.send("transaction.authorization.result", txId.toString(),
                 buildStatusEvent("TransactionFailed", txId));
 
         await().atMost(Duration.ofSeconds(10)).untilAsserted(() ->
@@ -175,14 +176,14 @@ class StatusUpdateIntegrationTest {
         UUID txId = createPendingTransaction();
 
         // First: AUTHORIZED
-        statusKafkaTemplate.send("transaction.status.updated", txId.toString(),
+        statusKafkaTemplate.send("transaction.authorization.result", txId.toString(),
                 buildStatusEvent("TransactionAuthorized", txId));
         await().atMost(Duration.ofSeconds(10)).untilAsserted(() ->
                 assertThat(transactionRepository.findById(txId).orElseThrow().getStatus())
                         .isEqualTo(TransactionStatus.AUTHORIZED));
 
         // FAILED event should be ignored — terminal guard blocks it
-        statusKafkaTemplate.send("transaction.status.updated", txId.toString(),
+        statusKafkaTemplate.send("transaction.authorization.result", txId.toString(),
                 buildStatusEvent("TransactionFailed", txId));
 
         await().atMost(Duration.ofSeconds(5)).untilAsserted(() ->
@@ -195,14 +196,14 @@ class StatusUpdateIntegrationTest {
         UUID txId = createPendingTransaction();
 
         // First: AUTHORIZED
-        statusKafkaTemplate.send("transaction.status.updated", txId.toString(),
+        statusKafkaTemplate.send("transaction.authorization.result", txId.toString(),
                 buildStatusEvent("TransactionAuthorized", txId));
         await().atMost(Duration.ofSeconds(10)).untilAsserted(() ->
                 assertThat(transactionRepository.findById(txId).orElseThrow().getStatus())
                         .isEqualTo(TransactionStatus.AUTHORIZED));
 
         // Second: DECLINED (different eventId, but terminal guard should block it)
-        statusKafkaTemplate.send("transaction.status.updated", txId.toString(),
+        statusKafkaTemplate.send("transaction.authorization.result", txId.toString(),
                 buildStatusEvent("TransactionDeclined", txId));
 
         // Brief wait then assert still AUTHORIZED

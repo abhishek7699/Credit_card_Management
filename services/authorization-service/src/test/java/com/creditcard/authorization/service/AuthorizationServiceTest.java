@@ -9,9 +9,11 @@ import com.creditcard.authorization.kafka.event.AuthorizationResultEvent;
 import com.creditcard.authorization.kafka.event.TransactionInitiatedEvent;
 import com.creditcard.authorization.repository.AuthorizationRecordRepository;
 import com.creditcard.authorization.repository.CardAccountRepository;
+import com.creditcard.authorization.repository.TimeoutMarkerRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -21,7 +23,9 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -35,16 +39,19 @@ class AuthorizationServiceTest {
     @Mock
     private AuthorizationRecordRepository authorizationRecordRepository;
 
+    @Mock
+    private TimeoutMarkerRepository timeoutMarkerRepository;
+
     @InjectMocks
     private AuthorizationService authorizationService;
 
     @Test
     void shouldAuthorizeAndDeductCreditWhenCardActiveAndSufficient() {
         CardAccount account = buildAccount(CardAccountStatus.ACTIVE, "500.00");
-        when(cardAccountRepository.findByCardToken("vault:v1:tok")).thenReturn(Optional.of(account));
+        when(cardAccountRepository.findByCardTokenForUpdate("vault:v1:tok")).thenReturn(Optional.of(account));
         when(authorizationRecordRepository.save(any())).thenAnswer(i -> i.getArgument(0));
 
-        AuthorizationResultEvent result = authorizationService.authorize(buildEvent("vault:v1:tok", "100.00"));
+        AuthorizationResultEvent result = authorizationService.authorize(buildEvent("vault:v1:tok", "100.00")).orElseThrow();
 
         assertThat(result.getEventType()).isEqualTo("TransactionAuthorized");
         assertThat(result.getPayload().getOutcome()).isEqualTo("AUTHORIZED");
@@ -69,10 +76,10 @@ class AuthorizationServiceTest {
     @Test
     void shouldDeclineWhenInsufficientCredit() {
         CardAccount account = buildAccount(CardAccountStatus.ACTIVE, "50.00");
-        when(cardAccountRepository.findByCardToken("vault:v1:tok")).thenReturn(Optional.of(account));
+        when(cardAccountRepository.findByCardTokenForUpdate("vault:v1:tok")).thenReturn(Optional.of(account));
         when(authorizationRecordRepository.save(any())).thenAnswer(i -> i.getArgument(0));
 
-        AuthorizationResultEvent result = authorizationService.authorize(buildEvent("vault:v1:tok", "100.00"));
+        AuthorizationResultEvent result = authorizationService.authorize(buildEvent("vault:v1:tok", "100.00")).orElseThrow();
 
         assertThat(result.getEventType()).isEqualTo("TransactionDeclined");
         assertThat(result.getPayload().getReasonCode()).isEqualTo(ReasonCode.INSUFFICIENT_CREDIT.name());
@@ -82,10 +89,10 @@ class AuthorizationServiceTest {
     @Test
     void shouldDeclineWhenCardBlocked() {
         CardAccount account = buildAccount(CardAccountStatus.BLOCKED, "1000.00");
-        when(cardAccountRepository.findByCardToken("vault:v1:tok")).thenReturn(Optional.of(account));
+        when(cardAccountRepository.findByCardTokenForUpdate("vault:v1:tok")).thenReturn(Optional.of(account));
         when(authorizationRecordRepository.save(any())).thenAnswer(i -> i.getArgument(0));
 
-        AuthorizationResultEvent result = authorizationService.authorize(buildEvent("vault:v1:tok", "100.00"));
+        AuthorizationResultEvent result = authorizationService.authorize(buildEvent("vault:v1:tok", "100.00")).orElseThrow();
 
         assertThat(result.getEventType()).isEqualTo("TransactionDeclined");
         assertThat(result.getPayload().getReasonCode()).isEqualTo(ReasonCode.CARD_NOT_ACTIVE.name());
@@ -95,10 +102,10 @@ class AuthorizationServiceTest {
     @Test
     void shouldDeclineWhenCardExpired() {
         CardAccount account = buildAccount(CardAccountStatus.EXPIRED, "1000.00");
-        when(cardAccountRepository.findByCardToken("vault:v1:tok")).thenReturn(Optional.of(account));
+        when(cardAccountRepository.findByCardTokenForUpdate("vault:v1:tok")).thenReturn(Optional.of(account));
         when(authorizationRecordRepository.save(any())).thenAnswer(i -> i.getArgument(0));
 
-        AuthorizationResultEvent result = authorizationService.authorize(buildEvent("vault:v1:tok", "100.00"));
+        AuthorizationResultEvent result = authorizationService.authorize(buildEvent("vault:v1:tok", "100.00")).orElseThrow();
 
         assertThat(result.getEventType()).isEqualTo("TransactionDeclined");
         assertThat(result.getPayload().getReasonCode()).isEqualTo(ReasonCode.CARD_NOT_ACTIVE.name());
@@ -121,14 +128,51 @@ class AuthorizationServiceTest {
 
     @Test
     void shouldDeclineWhenCardTokenNotFound() {
-        when(cardAccountRepository.findByCardToken("vault:v1:unknown")).thenReturn(Optional.empty());
+        when(cardAccountRepository.findByCardTokenForUpdate("vault:v1:unknown")).thenReturn(Optional.empty());
         when(authorizationRecordRepository.save(any())).thenAnswer(i -> i.getArgument(0));
 
-        AuthorizationResultEvent result = authorizationService.authorize(buildEvent("vault:v1:unknown", "100.00"));
+        AuthorizationResultEvent result = authorizationService.authorize(buildEvent("vault:v1:unknown", "100.00")).orElseThrow();
 
         assertThat(result.getEventType()).isEqualTo("TransactionDeclined");
         assertThat(result.getPayload().getReasonCode()).isEqualTo(ReasonCode.INVALID_CARD.name());
         verify(cardAccountRepository, never()).save(any());
+    }
+
+    @Test
+    void shouldSkipAuthorizationWhenTheTransactionAlreadyTimedOut() {
+        TransactionInitiatedEvent event = buildEvent("vault:v1:tok", "100.00");
+        CardAccount account = buildAccount(CardAccountStatus.ACTIVE, "500.00");
+        when(cardAccountRepository.findByCardTokenForUpdate("vault:v1:tok")).thenReturn(Optional.of(account));
+        when(timeoutMarkerRepository.existsById(event.getPayload().getTransactionId())).thenReturn(true);
+
+        assertThat(authorizationService.authorize(event)).isEmpty();
+
+        verify(cardAccountRepository, never()).save(any());
+        verify(authorizationRecordRepository, never()).save(any());
+    }
+
+    @Test
+    void theCardIsLockedBeforeTheTimeoutMarkerIsChecked() {
+        TransactionInitiatedEvent event = buildEvent("vault:v1:tok", "100.00");
+        when(cardAccountRepository.findByCardTokenForUpdate("vault:v1:tok")).thenReturn(Optional.empty());
+        when(authorizationRecordRepository.save(any())).thenAnswer(i -> i.getArgument(0));
+
+        authorizationService.authorize(event);
+
+        InOrder order = inOrder(cardAccountRepository, timeoutMarkerRepository);
+        order.verify(cardAccountRepository).findByCardTokenForUpdate("vault:v1:tok");
+        order.verify(timeoutMarkerRepository).existsById(event.getPayload().getTransactionId());
+    }
+
+    @Test
+    void releasedIsNeverAnAuthorizationDecision() {
+        TransactionInitiatedEvent event = buildEvent("vault:v1:tok", "100.00");
+
+        assertThatThrownBy(() -> authorizationService.persistAndReturn(
+                event.getPayload(), AuthorizationOutcome.RELEASED, null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("RELEASED");
+        verify(authorizationRecordRepository, never()).save(any());
     }
 
     private CardAccount buildAccount(CardAccountStatus status, String availableCredit) {

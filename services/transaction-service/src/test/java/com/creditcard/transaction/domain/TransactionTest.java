@@ -64,6 +64,16 @@ class TransactionTest {
     }
 
     @Test
+    void failureReasonRoundTripsForTimeouts() {
+        Transaction tx = new Transaction();
+        assertThat(tx.getFailureReason()).isNull();
+
+        tx.setFailureReason("TIMEOUT");
+
+        assertThat(tx.getFailureReason()).isEqualTo("TIMEOUT");
+    }
+
+    @Test
     void onUpdateShouldSetUpdatedAtWithoutChangingCreatedAt() {
         Transaction tx = new Transaction();
         tx.onCreate();

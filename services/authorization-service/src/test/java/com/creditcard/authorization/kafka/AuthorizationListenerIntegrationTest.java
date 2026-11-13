@@ -3,7 +3,6 @@ package com.creditcard.authorization.kafka;
 import com.creditcard.authorization.domain.CardAccount;
 import com.creditcard.authorization.domain.CardAccountStatus;
 import com.creditcard.authorization.kafka.event.AuthorizationResultEvent;
-import com.creditcard.authorization.kafka.event.TransactionAuthorizedEvent;
 import com.creditcard.authorization.kafka.event.TransactionInitiatedEvent;
 import com.creditcard.authorization.repository.AuthorizationRecordRepository;
 import com.creditcard.authorization.repository.CardAccountRepository;
@@ -50,7 +49,7 @@ import static org.awaitility.Awaitility.await;
 @SpringBootTest
 @EmbeddedKafka(
     partitions = 1,
-    topics = {"transaction.initiated", "transaction.status.updated", "transaction.authorized"},
+    topics = {"transaction.initiated", "transaction.authorization.result"},
     bootstrapServersProperty = "spring.kafka.bootstrap-servers"
 )
 @Testcontainers
@@ -96,26 +95,22 @@ class AuthorizationListenerIntegrationTest {
     private String brokers;
 
     private KafkaConsumer<String, AuthorizationResultEvent> resultConsumer;
-    private KafkaConsumer<String, TransactionAuthorizedEvent> authorizedConsumer;
 
     @BeforeEach
     void setUp() {
         resultConsumer = buildConsumer(AuthorizationResultEvent.class);
-        resultConsumer.subscribe(List.of("transaction.status.updated"));
-        authorizedConsumer = buildConsumer(TransactionAuthorizedEvent.class);
-        authorizedConsumer.subscribe(List.of("transaction.authorized"));
+        resultConsumer.subscribe(List.of("transaction.authorization.result"));
     }
 
     @AfterEach
     void tearDown() {
         resultConsumer.close();
-        authorizedConsumer.close();
         authorizationRecordRepository.deleteAll();
         cardAccountRepository.deleteAll();
     }
 
     @Test
-    void shouldAuthorizeAndPublishTransactionAuthorizedWhenCardActiveAndCreditSufficient() throws Exception {
+    void shouldAuthorizeAndPublishResultAndDeductCreditWhenCardActiveAndCreditSufficient() throws Exception {
         String token = "vault:v1:token-auth-" + UUID.randomUUID();
         UUID txId = UUID.randomUUID();
         String eventId = UUID.randomUUID().toString();
@@ -132,16 +127,6 @@ class AuthorizationListenerIntegrationTest {
             assertThat(result.getPayload().getTransactionId()).isEqualTo(txId);
         });
 
-        await().atMost(10, TimeUnit.SECONDS).untilAsserted(() -> {
-            TransactionAuthorizedEvent authorized = poll(authorizedConsumer, txId);
-            assertThat(authorized).isNotNull();
-            assertThat(authorized.getEventType()).isEqualTo("TransactionAuthorized");
-            assertThat(authorized.getPayload().getMerchantId()).isEqualTo("merchant-42");
-            assertThat(authorized.getPayload().getMaskedCardNumber()).isEqualTo("****-****-****-1111");
-            assertThat(authorized.getPayload().getAmount()).isEqualByComparingTo("100.00");
-            assertThat(authorized.getPayload().getAuthorizedAt()).isNotNull();
-        });
-
         await().atMost(5, TimeUnit.SECONDS).untilAsserted(() -> {
             CardAccount updated = cardAccountRepository.findByCardToken(token).orElseThrow();
             assertThat(updated.getAvailableCredit()).isEqualByComparingTo("400.00");
@@ -149,7 +134,7 @@ class AuthorizationListenerIntegrationTest {
     }
 
     @Test
-    void shouldDeclineWithoutPublishingTransactionAuthorizedWhenInsufficientCredit() throws Exception {
+    void shouldDeclineWithoutDeductingWhenInsufficientCredit() throws Exception {
         String token = "vault:v1:token-decline-" + UUID.randomUUID();
         UUID txId = UUID.randomUUID();
 
@@ -164,8 +149,6 @@ class AuthorizationListenerIntegrationTest {
             assertThat(result.getEventType()).isEqualTo("TransactionDeclined");
             assertThat(result.getPayload().getReasonCode()).isEqualTo("INSUFFICIENT_CREDIT");
         });
-
-        assertThat(poll(authorizedConsumer, txId)).isNull();
     }
 
     @Test

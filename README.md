@@ -48,12 +48,12 @@ flowchart LR
 
     Kafka --> Auth[authorization-service]
     Kafka --> Fraud[fraud-detection-service]
-    Auth -->|transaction.authorized| Kafka
+    Auth -->|transaction.authorization.result| Kafka
+    Kafka --> Txn
+    Txn -->|outbox: transaction.status.updated, transaction.authorized, transaction.timed_out| Kafka
     Kafka --> Settle[settlement-service]
-    Auth -->|transaction.status.updated| Kafka
     Fraud -->|fraud.alert.raised| Kafka
     Kafka --> Notify[notification-service]
-    Kafka --> Txn
     Kafka --> Booking
 
     Booking -->|gRPC InitiateTransaction| Txn
@@ -77,6 +77,21 @@ receives a tokenized or raw card number back from this path — it only
 forwards what the caller submitted to `transaction-service` and reacts
 to the resulting `transaction.status.updated` event, the same contract
 `notification-service` and `settlement-service` already consume.
+
+`transaction-service` is the only publisher of transaction outcomes. Authorization
+and the PENDING timeout sweep report to it, and it records each final state with a
+conditional `PENDING -> final` update. Events for that state are written to a
+transactional outbox in the same database transaction and published right after
+commit; a polling relay (every 500 ms) sends any row that was not sent. Consumers
+therefore see one final outcome per transaction, in the order its events were written
+(events for different transactions are not ordered against each other).
+
+A PENDING transaction older than 300 s is failed with reason `TIMEOUT`, and
+`transaction.timed_out` is published. Authorization releases any credit it held for
+that transaction, and skips a late `transaction.initiated` for it. Settlement only
+receives `transaction.authorized` for transactions that were actually authorized, so a
+timed-out transaction is never settled. Timer values and their rules are in
+`specs/013-transaction-pending-timeout/design.md`.
 
 ## Tech stack
 
@@ -242,6 +257,17 @@ initContainer — those run once per pod, not per container restart, and
 raced Zookeeper's own concurrent recovery) and clear only its own stale
 metadata on a mismatch. Validated by actually restarting Docker Desktop
 with the cluster up, repeatedly, until it recovered on its own.
+
+## Known limitations
+
+- No refunds, voids or reversals. A transaction that was already settled stays settled.
+- The booking-service startup check for the timeout timer rules is not wired yet
+  (see `docs/BACKLOG.md`).
+- Booking's room search does not look at housekeeping status, so check-in can still
+  reject a room that the search returned. The e2e test works around this by reading
+  the board.
+- Local e2e runs reuse the same Docker volumes, so room and booking state carries over
+  between runs.
 
 ## Project layout
 

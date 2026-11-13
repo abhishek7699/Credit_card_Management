@@ -15,6 +15,11 @@ spring:
   flyway:
     enabled: false
 
+transaction:
+  timeouts:
+    # Tests drive the sweep themselves (sweepOnce), so a scheduled pass never races them.
+    sweep-enabled: false
+
 vault:
   host: localhost
   port: 8200

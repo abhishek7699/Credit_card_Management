@@ -40,6 +40,10 @@ public class Transaction {
     @Column(name = "status", nullable = false, length = 20)
     private TransactionStatus status = TransactionStatus.PENDING;
 
+    // 013: why a FAILED transaction failed. Only TIMEOUT is written, by the PENDING sweep.
+    @Column(name = "failure_reason", length = 32)
+    private String failureReason;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
@@ -83,6 +87,9 @@ public class Transaction {
 
     public TransactionStatus getStatus() { return status; }
     public void setStatus(TransactionStatus status) { this.status = status; }
+
+    public String getFailureReason() { return failureReason; }
+    public void setFailureReason(String failureReason) { this.failureReason = failureReason; }
 
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }

@@ -2,7 +2,6 @@ package com.creditcard.authorization.contract;
 
 import com.creditcard.authorization.domain.ReasonCode;
 import com.creditcard.authorization.kafka.event.AuthorizationResultEvent;
-import com.creditcard.authorization.kafka.event.TransactionAuthorizedEvent;
 import com.creditcard.authorization.kafka.event.TransactionInitiatedEvent;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -64,30 +63,4 @@ class KafkaEventSchemaTest {
         assertThat(declined).isNotEqualTo(failed);
     }
 
-    @Test
-    void transactionAuthorizedEventShouldMatchSettlementServiceShape() throws Exception {
-        UUID txId = UUID.randomUUID();
-        Instant authorizedAt = Instant.parse("2026-06-13T23:45:00Z");
-        TransactionInitiatedEvent.Payload src = new TransactionInitiatedEvent.Payload();
-        src.setTransactionId(txId);
-        src.setMerchantId("merchant-e2e-001");
-        src.setCardToken("vault:v1:tok");
-        src.setMaskedCardNumber("****-****-****-1111");
-        src.setAmount(new BigDecimal("99.99"));
-        src.setCurrencyCode("USD");
-
-        TransactionAuthorizedEvent event = TransactionAuthorizedEvent.from(src, authorizedAt);
-        JsonNode json = mapper.readTree(mapper.writeValueAsString(event));
-
-        assertThat(json.get("eventType").asText()).isEqualTo("TransactionAuthorized");
-        assertThat(json.get("sourceService").asText()).isEqualTo("authorization-service");
-        JsonNode payload = json.get("payload");
-        assertThat(payload.get("transactionId").asText()).isEqualTo(txId.toString());
-        assertThat(payload.get("merchantId").asText()).isEqualTo("merchant-e2e-001");
-        assertThat(payload.get("cardToken").asText()).isEqualTo("vault:v1:tok");
-        assertThat(payload.get("maskedCardNumber").asText()).isEqualTo("****-****-****-1111");
-        assertThat(new BigDecimal(payload.get("amount").asText())).isEqualByComparingTo("99.99");
-        assertThat(payload.get("currencyCode").asText()).isEqualTo("USD");
-        assertThat(payload.has("authorizedAt")).isTrue();
-    }
 }

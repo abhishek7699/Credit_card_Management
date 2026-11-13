@@ -101,3 +101,11 @@ These were named up front as out of scope for every layer until explicitly start
   2f's planned staff-cancellation feature is expected to reuse the
   `CANCELLED` status and this enum rather than reintroducing them. If 2f ships
   without ever touching this enum, these four values should be revisited.
+
+## Carried from 013 (transaction PENDING timeout)
+
+- **booking-service startup check for timer rule 2**: at startup, booking-service must check
+  `P + m + d <= S` (300 + 60 + 5 <= 600 with the current values) against its own
+  `BOOKING_CHECKOUT_TIMEOUT_MINUTES`, and refuse to start if it fails. `TimerOrdering.checkBookingWindow`
+  exists in transaction-service but is not wired into booking-service. Deferred from 013 phase 2 on
+  owner instruction; the values in use satisfy the rule today (design.md, Timer rules).
