@@ -13,6 +13,9 @@ ext {
 }
 
 dependencies {
+    // Mastercard Gateway REST client (shared module, spec 014 phase 2)
+    implementation project(':libs:mastercard-gateway')
+
     // Exposes /actuator/prometheus for k8s/monitoring to scrape
     implementation 'io.micrometer:micrometer-registry-prometheus'
 
@@ -52,6 +55,8 @@ dependencies {
     testImplementation 'org.mockito:mockito-core'
     testImplementation 'com.fasterxml.jackson.datatype:jackson-datatype-jsr310'
     testImplementation 'org.awaitility:awaitility'
+    // TLS WireMock server for the Mastercard processor tests (spec 014 phase 2)
+    testImplementation testFixtures(project(':libs:mastercard-gateway'))
 }
 
 // ── JaCoCo — 100% instruction + branch coverage gate ──────────────────────────

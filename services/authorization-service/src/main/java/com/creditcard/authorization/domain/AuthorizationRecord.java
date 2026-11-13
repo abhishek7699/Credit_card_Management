@@ -33,6 +33,9 @@ public class AuthorizationRecord {
     @Column(name = "reason_code", length = 50)
     private ReasonCode reasonCode;
 
+    @Column(name = "processor_reason_code", length = 100)
+    private String processorReasonCode;
+
     @Column(name = "decided_at", nullable = false)
     private Instant decidedAt;
 
@@ -49,6 +52,8 @@ public class AuthorizationRecord {
     public AuthorizationOutcome getOutcome() { return outcome; }
     public void setOutcome(AuthorizationOutcome outcome) { this.outcome = outcome; }
     public ReasonCode getReasonCode() { return reasonCode; }
+    public String getProcessorReasonCode() { return processorReasonCode; }
+    public void setProcessorReasonCode(String processorReasonCode) { this.processorReasonCode = processorReasonCode; }
     public void setReasonCode(ReasonCode reasonCode) { this.reasonCode = reasonCode; }
     public Instant getDecidedAt() { return decidedAt; }
     public void setDecidedAt(Instant decidedAt) { this.decidedAt = decidedAt; }

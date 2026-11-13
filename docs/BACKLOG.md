@@ -109,3 +109,7 @@ These were named up front as out of scope for every layer until explicitly start
   `BOOKING_CHECKOUT_TIMEOUT_MINUTES`, and refuse to start if it fails. `TimerOrdering.checkBookingWindow`
   exists in transaction-service but is not wired into booking-service. Deferred from 013 phase 2 on
   owner instruction; the values in use satisfy the rule today (design.md, Timer rules).
+
+## Spec 014 phase 2 deferrals
+
+- **Unresolved VOID retry**: when a VOID and its status lookup are both unresolved, the hold stays and `RELEASE_REJECTED` (`VOID_UNKNOWN`) is recorded with no retry. Needs a retry path (deterministic VOID ID makes it safe to repeat).

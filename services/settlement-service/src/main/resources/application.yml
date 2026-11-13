@@ -63,3 +63,16 @@ settlement:
 
 logging:
   config: classpath:logback-spring.xml
+
+# Payment processor (spec 014). Same setting and env names as authorization-service.
+# The simulator captures nothing (default). Mastercard captures authorized transactions before they settle.
+payment:
+  processor: ${PAYMENT_PROCESSOR:simulated}
+
+mastercard:
+  api-version: ${MASTERCARD_API_VERSION:100}
+  base-url: ${MASTERCARD_BASE_URL:}
+  merchant-id: ${MASTERCARD_MERCHANT_ID:}
+  api-password: ${MASTERCARD_API_PASSWORD:}
+  connect-timeout-seconds: 5
+  read-timeout-seconds: ${MASTERCARD_READ_TIMEOUT_SECONDS:10}

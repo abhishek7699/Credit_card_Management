@@ -2,13 +2,14 @@ package com.creditcard.authorization.service;
 
 import com.creditcard.authorization.domain.AuthorizationOutcome;
 import com.creditcard.authorization.domain.AuthorizationRecord;
-import com.creditcard.authorization.domain.CardAccount;
 import com.creditcard.authorization.domain.ReasonCode;
 import com.creditcard.authorization.kafka.event.AuthorizationResultEvent;
 import com.creditcard.authorization.kafka.event.TransactionInitiatedEvent;
+import com.creditcard.authorization.processor.AuthorizeRequest;
+import com.creditcard.authorization.processor.PaymentProcessor;
+import com.creditcard.authorization.processor.ProcessorDecision;
+import com.creditcard.authorization.processor.ProcessorOutcome;
 import com.creditcard.authorization.repository.AuthorizationRecordRepository;
-import com.creditcard.authorization.repository.CardAccountRepository;
-import com.creditcard.authorization.repository.TimeoutMarkerRepository;
 import org.springframework.retry.annotation.Backoff;
 import org.springframework.retry.annotation.Retryable;
 import org.springframework.stereotype.Service;
@@ -20,26 +21,26 @@ import java.util.Optional;
 @Service
 public class AuthorizationService {
 
-    private final CardAccountRepository cardAccountRepository;
+    private final PaymentProcessor paymentProcessor;
     private final AuthorizationRecordRepository authorizationRecordRepository;
-    private final TimeoutMarkerRepository timeoutMarkerRepository;
 
     public AuthorizationService(
-            CardAccountRepository cardAccountRepository,
-            AuthorizationRecordRepository authorizationRecordRepository,
-            TimeoutMarkerRepository timeoutMarkerRepository) {
-        this.cardAccountRepository = cardAccountRepository;
+            PaymentProcessor paymentProcessor,
+            AuthorizationRecordRepository authorizationRecordRepository) {
+        this.paymentProcessor = paymentProcessor;
         this.authorizationRecordRepository = authorizationRecordRepository;
-        this.timeoutMarkerRepository = timeoutMarkerRepository;
     }
 
     /**
-     * Decides one transaction. Returns empty when the transaction already timed out (013): no credit is
-     * held and no result is published, because transaction-service has already recorded FAILED.
+     * Decides one transaction. Returns empty when no result should be published:
+     * <ul>
+     *   <li>the transaction already timed out (013). transaction-service has recorded FAILED.</li>
+     *   <li>the processor could not decide (UNKNOWN). The transaction stays PENDING, and the 013 sweep
+     *       fails it later.</li>
+     * </ul>
      *
-     * <p>The card row is locked before the timeout marker is checked. The timeout release takes the same
-     * lock, so the two cannot interleave: either the release runs first and this call sees its marker, or
-     * this call runs first and the release sees its deduction.
+     * <p>The processor serializes this with the timeout release, and checks the timeout marker itself
+     * (see {@link PaymentProcessor}). This service writes the authorization record for decisions only.
      */
     @Transactional
     @Retryable(
@@ -52,40 +53,33 @@ public class AuthorizationService {
     )
     public Optional<AuthorizationResultEvent> authorize(TransactionInitiatedEvent event) {
         TransactionInitiatedEvent.Payload payload = event.getPayload();
-        Optional<CardAccount> accountOpt = cardAccountRepository.findByCardTokenForUpdate(payload.getCardToken());
+        AuthorizeRequest request = new AuthorizeRequest(
+                payload.getTransactionId(), payload.getAmount(), payload.getCurrencyCode(),
+                payload.getMerchantId(), payload.getCardToken());
+        ProcessorDecision decision = paymentProcessor.authorize(request);
 
-        if (timeoutMarkerRepository.existsById(payload.getTransactionId())) {
-            return Optional.empty();
+        if (decision.getOutcome() == ProcessorOutcome.APPROVED) {
+            return Optional.of(persistAndReturn(payload, AuthorizationOutcome.AUTHORIZED, null));
         }
-        return Optional.of(decide(payload, accountOpt));
-    }
-
-    private AuthorizationResultEvent decide(TransactionInitiatedEvent.Payload payload,
-                                            Optional<CardAccount> accountOpt) {
-        if (accountOpt.isEmpty()) {
-            return persistAndReturn(payload, AuthorizationOutcome.DECLINED, ReasonCode.INVALID_CARD);
+        if (decision.getOutcome() == ProcessorOutcome.DECLINED) {
+            return Optional.of(persistAndReturn(payload, AuthorizationOutcome.DECLINED,
+                    ReasonCode.valueOf(decision.getReasonCode()), decision.getProcessorCode()));
         }
-
-        CardAccount account = accountOpt.get();
-
-        if (!account.getStatus().isActive()) {
-            return persistAndReturn(payload, AuthorizationOutcome.DECLINED, ReasonCode.CARD_NOT_ACTIVE);
-        }
-
-        if (account.getAvailableCredit().compareTo(payload.getAmount()) < 0) {
-            return persistAndReturn(payload, AuthorizationOutcome.DECLINED, ReasonCode.INSUFFICIENT_CREDIT);
-        }
-
-        account.setAvailableCredit(account.getAvailableCredit().subtract(payload.getAmount()));
-        cardAccountRepository.save(account);
-
-        return persistAndReturn(payload, AuthorizationOutcome.AUTHORIZED, null);
+        return Optional.empty();
     }
 
     AuthorizationResultEvent persistAndReturn(
             TransactionInitiatedEvent.Payload payload,
             AuthorizationOutcome outcome,
             ReasonCode reasonCode) {
+        return persistAndReturn(payload, outcome, reasonCode, null);
+    }
+
+    AuthorizationResultEvent persistAndReturn(
+            TransactionInitiatedEvent.Payload payload,
+            AuthorizationOutcome outcome,
+            ReasonCode reasonCode,
+            String processorCode) {
 
         if (outcome == AuthorizationOutcome.RELEASED) {
             throw new IllegalStateException(
@@ -99,6 +93,7 @@ public class AuthorizationService {
         record.setCurrencyCode(payload.getCurrencyCode());
         record.setOutcome(outcome);
         record.setReasonCode(reasonCode);
+        record.setProcessorReasonCode(processorCode);
         record.setDecidedAt(Instant.now());
         authorizationRecordRepository.save(record);
 

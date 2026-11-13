@@ -75,6 +75,6 @@ transaction:
     sweep-interval-ms: ${TRANSACTION_SWEEP_INTERVAL_MS:30000}            # I (owner: 30 s)
     sweep-enabled: ${TRANSACTION_SWEEP_ENABLED:true}
     max-delivery-lag-seconds: 60                                          # K (owner: 60 s)
-    mastercard-read-timeout-seconds: 10                                   # M
+    mastercard-read-timeout-seconds: ${MASTERCARD_READ_TIMEOUT_SECONDS:10}                                   # M
     status-retrieve-buffer-seconds: 2                                     # b (R = 2M + b = 22 s)
     margin-seconds: 60                                                    # m (owner: 60 s)
