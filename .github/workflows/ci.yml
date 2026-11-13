@@ -22,6 +22,18 @@ env:
   VAULT_DEV_ROOT_TOKEN: dev-root-token
 
 jobs:
+  migration-lint:
+    # Fails any Flyway migration that declares a bare INT or INTEGER column. CockroachDB
+    # treats both as 64-bit; use INT4. No Docker or Gradle needed, so it finishes in seconds.
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Check Flyway migrations for bare INT / INTEGER
+        run: scripts/check-flyway-int-columns.sh
+
   frontend-build-test:
     # Independent of the backend job below — needs nothing from it (no
     # backend running), so it runs in parallel instead of waiting behind the
