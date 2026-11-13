@@ -18,5 +18,6 @@ public enum ProcessorOutcome {
     NO_AUTHORIZATION,
     NO_OP,
     CAPTURED,
-    CAPTURE_REJECTED
+    CAPTURE_REJECTED,
+    TIMED_OUT_SKIPPED
 }

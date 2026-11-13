@@ -52,8 +52,8 @@ class AuthorizationCharacterizationTest {
     private AuthorizationService service() {
         return new AuthorizationService(
                 new com.creditcard.authorization.processor.SimulatedProcessor(
-                        cardAccountRepository, authorizationRecordRepository),
-                cardAccountRepository, authorizationRecordRepository, timeoutMarkerRepository);
+                        cardAccountRepository, authorizationRecordRepository, timeoutMarkerRepository),
+                authorizationRecordRepository);
     }
 
     @Test

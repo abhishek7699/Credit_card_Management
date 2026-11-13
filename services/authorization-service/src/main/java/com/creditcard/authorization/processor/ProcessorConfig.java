@@ -2,6 +2,7 @@ package com.creditcard.authorization.processor;
 
 import com.creditcard.authorization.repository.AuthorizationRecordRepository;
 import com.creditcard.authorization.repository.CardAccountRepository;
+import com.creditcard.authorization.repository.TimeoutMarkerRepository;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -14,7 +15,8 @@ public class ProcessorConfig {
 
     @Bean
     public PaymentProcessor paymentProcessor(CardAccountRepository cardAccountRepository,
-                                             AuthorizationRecordRepository authorizationRecordRepository) {
-        return new SimulatedProcessor(cardAccountRepository, authorizationRecordRepository);
+                                             AuthorizationRecordRepository authorizationRecordRepository,
+                                             TimeoutMarkerRepository timeoutMarkerRepository) {
+        return new SimulatedProcessor(cardAccountRepository, authorizationRecordRepository, timeoutMarkerRepository);
     }
 }

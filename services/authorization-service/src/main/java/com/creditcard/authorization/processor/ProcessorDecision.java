@@ -40,6 +40,10 @@ public final class ProcessorDecision {
         return new ProcessorDecision(ProcessorOutcome.NO_OP, null, null);
     }
 
+    public static ProcessorDecision timedOutSkipped() {
+        return new ProcessorDecision(ProcessorOutcome.TIMED_OUT_SKIPPED, null, null);
+    }
+
     public static ProcessorDecision captureRejected(String reasonCode) {
         return new ProcessorDecision(ProcessorOutcome.CAPTURE_REJECTED, reasonCode, null);
     }

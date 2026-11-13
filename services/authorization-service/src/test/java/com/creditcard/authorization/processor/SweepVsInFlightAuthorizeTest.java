@@ -40,6 +40,12 @@ class SweepVsInFlightAuthorizeTest {
     @Mock
     private TimeoutMarkerRepository timeoutMarkerRepository;
 
+    private AuthorizationService service() {
+        return new AuthorizationService(
+                new SimulatedProcessor(cardAccountRepository, authorizationRecordRepository, timeoutMarkerRepository),
+                authorizationRecordRepository);
+    }
+
     @Test
     void aLaterAuthorizeAfterTheMarkerDoesNotDebitAndPublishesNothing() {
         TransactionInitiatedEvent event = event();
@@ -48,11 +54,7 @@ class SweepVsInFlightAuthorizeTest {
         when(cardAccountRepository.findByCardTokenForUpdate("vault:v1:tok")).thenReturn(Optional.of(account));
         when(timeoutMarkerRepository.existsById(txId)).thenReturn(true);
 
-        AuthorizationService service = new AuthorizationService(
-                new SimulatedProcessor(cardAccountRepository, authorizationRecordRepository),
-                cardAccountRepository, authorizationRecordRepository, timeoutMarkerRepository);
-
-        assertThat(service.authorize(event)).isEmpty();
+        assertThat(service().authorize(event)).isEmpty();
         assertThat(account.getAvailableCredit()).isEqualByComparingTo("500.00");
         verify(cardAccountRepository, never()).save(any());
         verify(authorizationRecordRepository, never()).save(any());
@@ -63,10 +65,7 @@ class SweepVsInFlightAuthorizeTest {
         TransactionInitiatedEvent event = event();
         when(cardAccountRepository.findByCardTokenForUpdate("vault:v1:tok")).thenReturn(Optional.empty());
 
-        AuthorizationService service = new AuthorizationService(
-                new SimulatedProcessor(cardAccountRepository, authorizationRecordRepository),
-                cardAccountRepository, authorizationRecordRepository, timeoutMarkerRepository);
-        service.authorize(event);
+        service().authorize(event);
 
         InOrder order = inOrder(cardAccountRepository, timeoutMarkerRepository);
         order.verify(cardAccountRepository).findByCardTokenForUpdate("vault:v1:tok");

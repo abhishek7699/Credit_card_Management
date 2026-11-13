@@ -1,15 +1,14 @@
 package com.creditcard.authorization.processor;
 
-import com.creditcard.authorization.domain.CardAccount;
-
 import java.math.BigDecimal;
 import java.util.UUID;
 
 /**
- * Input to {@link PaymentProcessor#authorize}. Phase 1 covers the simulator path only.
+ * Input to {@link PaymentProcessor#authorize}. Processor-neutral: it carries no card row.
  *
- * <p>{@code lockedAccount} is the card row, locked by {@code AuthorizationService} before the timeout
- * marker check (013). It is null when no card row exists. {@link #toString()} never includes the card token.
+ * <p>{@code paymentToken} is the payment's reference as the service received it: the Vault card token for
+ * the simulator, or a payment session ID for Mastercard (phase 3). It is never a card number.
+ * {@link #toString()} omits it.
  */
 public final class AuthorizeRequest {
 
@@ -17,15 +16,15 @@ public final class AuthorizeRequest {
     private final BigDecimal amount;
     private final String currencyCode;
     private final String merchantId;
-    private final CardAccount lockedAccount;
+    private final String paymentToken;
 
     public AuthorizeRequest(UUID transactionId, BigDecimal amount, String currencyCode,
-                            String merchantId, CardAccount lockedAccount) {
+                            String merchantId, String paymentToken) {
         this.transactionId = transactionId;
         this.amount = amount;
         this.currencyCode = currencyCode;
         this.merchantId = merchantId;
-        this.lockedAccount = lockedAccount;
+        this.paymentToken = paymentToken;
     }
 
     public UUID getTransactionId() {
@@ -44,8 +43,8 @@ public final class AuthorizeRequest {
         return merchantId;
     }
 
-    public CardAccount getLockedAccount() {
-        return lockedAccount;
+    public String getPaymentToken() {
+        return paymentToken;
     }
 
     @Override

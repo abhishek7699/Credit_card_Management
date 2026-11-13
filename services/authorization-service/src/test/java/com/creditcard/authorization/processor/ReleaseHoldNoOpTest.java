@@ -4,6 +4,7 @@ import com.creditcard.authorization.domain.CardAccount;
 import com.creditcard.authorization.domain.CardAccountStatus;
 import com.creditcard.authorization.repository.AuthorizationRecordRepository;
 import com.creditcard.authorization.repository.CardAccountRepository;
+import com.creditcard.authorization.repository.TimeoutMarkerRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -11,6 +12,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -29,14 +31,19 @@ class ReleaseHoldNoOpTest {
     @Mock
     private AuthorizationRecordRepository authorizationRecordRepository;
 
+    @Mock
+    private TimeoutMarkerRepository timeoutMarkerRepository;
+
     @Test
     void noRecordReturnsNoAuthorizationAndChangesNoCredit() {
         UUID txId = UUID.randomUUID();
         CardAccount account = account("400.00");
+        when(cardAccountRepository.findByCardTokenForUpdate("vault:v1:tok")).thenReturn(Optional.of(account));
         when(authorizationRecordRepository.findByTransactionId(txId)).thenReturn(List.of());
 
-        ProcessorDecision decision = new SimulatedProcessor(cardAccountRepository, authorizationRecordRepository)
-                .releaseHold(txId, account);
+        ProcessorDecision decision = new SimulatedProcessor(
+                cardAccountRepository, authorizationRecordRepository, timeoutMarkerRepository)
+                .releaseHold(txId, "vault:v1:tok");
 
         assertThat(decision.getOutcome()).isEqualTo(ProcessorOutcome.NO_AUTHORIZATION);
         assertThat(account.getAvailableCredit()).isEqualByComparingTo("400.00");

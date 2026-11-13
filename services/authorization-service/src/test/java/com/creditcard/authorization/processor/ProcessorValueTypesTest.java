@@ -1,6 +1,8 @@
 package com.creditcard.authorization.processor;
 
-import com.creditcard.authorization.domain.CardAccount;
+import com.creditcard.authorization.repository.AuthorizationRecordRepository;
+import com.creditcard.authorization.repository.CardAccountRepository;
+import com.creditcard.authorization.repository.TimeoutMarkerRepository;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
@@ -20,6 +22,7 @@ class ProcessorValueTypesTest {
         assertThat(ProcessorDecision.released().getOutcome()).isEqualTo(ProcessorOutcome.RELEASED);
         assertThat(ProcessorDecision.noAuthorization().getOutcome()).isEqualTo(ProcessorOutcome.NO_AUTHORIZATION);
         assertThat(ProcessorDecision.noOp().getOutcome()).isEqualTo(ProcessorOutcome.NO_OP);
+        assertThat(ProcessorDecision.timedOutSkipped().getOutcome()).isEqualTo(ProcessorOutcome.TIMED_OUT_SKIPPED);
         assertThat(ProcessorDecision.captureRejected("X").getReasonCode()).isEqualTo("X");
     }
 
@@ -30,23 +33,25 @@ class ProcessorValueTypesTest {
     }
 
     @Test
-    void requestExposesItsFieldsAndToStringOmitsTheCardToken() {
+    void requestExposesItsFieldsAndToStringOmitsThePaymentToken() {
         UUID txId = UUID.randomUUID();
-        CardAccount locked = new CardAccount();
-        locked.setCardToken("vault:v1:secret-token");
-        AuthorizeRequest request = new AuthorizeRequest(txId, new BigDecimal("12.50"), "USD", "merchant-1", locked);
+        AuthorizeRequest request = new AuthorizeRequest(
+                txId, new BigDecimal("12.50"), "USD", "merchant-1", "vault:v1:secret-token");
 
         assertThat(request.getTransactionId()).isEqualTo(txId);
         assertThat(request.getAmount()).isEqualByComparingTo("12.50");
         assertThat(request.getCurrencyCode()).isEqualTo("USD");
         assertThat(request.getMerchantId()).isEqualTo("merchant-1");
-        assertThat(request.getLockedAccount()).isSameAs(locked);
+        assertThat(request.getPaymentToken()).isEqualTo("vault:v1:secret-token");
         assertThat(request.toString()).doesNotContain("vault:v1:secret-token");
     }
 
     @Test
     void configBeanIsTheSimulator() {
-        PaymentProcessor bean = new ProcessorConfig().paymentProcessor(null, null);
+        PaymentProcessor bean = new ProcessorConfig().paymentProcessor(
+                org.mockito.Mockito.mock(CardAccountRepository.class),
+                org.mockito.Mockito.mock(AuthorizationRecordRepository.class),
+                org.mockito.Mockito.mock(TimeoutMarkerRepository.class));
         assertThat(bean).isInstanceOf(SimulatedProcessor.class);
     }
 }

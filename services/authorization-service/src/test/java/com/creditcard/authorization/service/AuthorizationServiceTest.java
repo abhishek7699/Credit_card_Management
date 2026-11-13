@@ -50,8 +50,8 @@ class AuthorizationServiceTest {
     @BeforeEach
     void wireService() {
         authorizationService = new AuthorizationService(
-                new SimulatedProcessor(cardAccountRepository, authorizationRecordRepository),
-                cardAccountRepository, authorizationRecordRepository, timeoutMarkerRepository);
+                new SimulatedProcessor(cardAccountRepository, authorizationRecordRepository, timeoutMarkerRepository),
+                authorizationRecordRepository);
     }
 
     @Test
