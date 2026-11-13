@@ -144,6 +144,13 @@ step1_start_services() {
   fi
   info "Step 1 — Starting all services via Docker Compose"
   cd "${REPO_ROOT}"
+  # Dockerfiles copy services/*/build/libs/*.jar, so the jars must be current before
+  # the images are built. --build alone would reuse a stale jar left by an older gradle run.
+  info "Step 1 — Assembling jars (./gradlew assemble) so the images package current code"
+  if ! ./gradlew --console=plain assemble > /dev/null; then
+    fail "Step 1 — ./gradlew assemble failed; not building images from stale jars"
+    return 1
+  fi
   docker compose -f "${COMPOSE_FILE}" up -d --build 2>&1 | tail -5
   pass "Step 1 — Docker Compose services started"
 }
