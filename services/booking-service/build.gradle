@@ -17,6 +17,8 @@ ext {
 }
 
 dependencies {
+    // OpenAPI docs: Swagger UI and /v3/api-docs (enabled only in local/dev profiles)
+    implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:2.5.0'
     // Exposes /actuator/prometheus for k8s/monitoring to scrape
     implementation 'io.micrometer:micrometer-registry-prometheus'
 

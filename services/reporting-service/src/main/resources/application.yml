@@ -34,3 +34,12 @@ management:
 
 logging:
   config: classpath:logback-spring.xml
+
+# Swagger UI (/swagger-ui.html) and OpenAPI spec (/v3/api-docs) are OFF by default, so
+# GKE and any run without a profile expose no API docs. Enabled by application-local.yml
+# and application-dev.yml only.
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false
