@@ -5,6 +5,9 @@ import com.creditcard.transaction.repository.OutboxRepository;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.micrometer.tracing.Span;
+import io.micrometer.tracing.TraceContext;
+import io.micrometer.tracing.Tracer;
 import org.apache.kafka.common.errors.RecordTooLargeException;
 import org.apache.kafka.common.errors.SerializationException;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -38,21 +41,47 @@ public class OutboxPublisher {
     private final OutboxRepository outboxRepository;
     private final ObjectMapper objectMapper;
     private final KafkaTemplate<String, Object> kafkaTemplate;
+    private final Tracer tracer;
 
     public OutboxPublisher(OutboxRepository outboxRepository,
                            ObjectMapper objectMapper,
-                           @Qualifier("outboxKafkaTemplate") KafkaTemplate<String, Object> kafkaTemplate) {
+                           @Qualifier("outboxKafkaTemplate") KafkaTemplate<String, Object> kafkaTemplate,
+                           Tracer tracer) {
         this.outboxRepository = outboxRepository;
         this.objectMapper = objectMapper;
         this.kafkaTemplate = kafkaTemplate;
+        this.tracer = tracer;
     }
 
     /** Publishes one row and marks it sent. Throws on failure; the row stays unsent. */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void publish(OutboxEvent row) {
         JsonNode body = readBody(row);
-        send(row, body);
+        Span span = startRelaySpan(row);
+        try (Tracer.SpanInScope ignored = span == null ? null : tracer.withSpan(span)) {
+            send(row, body);
+        } finally {
+            if (span != null) {
+                span.end();
+            }
+        }
         outboxRepository.markSent(row.getEventId(), Instant.now());
+    }
+
+    /**
+     * A span inside the trace the row was written under, so the Kafka record this relay sends carries
+     * that trace. Null for rows written before tracing: the producer then starts its own trace.
+     */
+    private Span startRelaySpan(OutboxEvent row) {
+        if (row.getTraceId() == null) {
+            return null;
+        }
+        TraceContext parent = tracer.traceContextBuilder()
+                .traceId(row.getTraceId())
+                .spanId(row.getSpanId())
+                .sampled(row.getTraceSampled())
+                .build();
+        return tracer.spanBuilder().setParent(parent).name("outbox publish").start();
     }
 
     /**

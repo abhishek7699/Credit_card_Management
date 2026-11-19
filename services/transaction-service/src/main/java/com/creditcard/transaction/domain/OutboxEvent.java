@@ -51,6 +51,16 @@ public class OutboxEvent {
     @Column(name = "failed_at")
     private Instant failedAt;
 
+    /** Trace the row was written under (V6). Null for rows written before tracing. */
+    @Column(name = "trace_id", length = 32)
+    private String traceId;
+
+    @Column(name = "span_id", length = 16)
+    private String spanId;
+
+    @Column(name = "trace_sampled")
+    private Boolean traceSampled;
+
     protected OutboxEvent() {}
 
     public OutboxEvent(UUID eventId, String topic, String messageKey, String eventType, String payload) {
@@ -77,4 +87,15 @@ public class OutboxEvent {
     public int getAttempts() { return attempts; }
     public String getLastError() { return lastError; }
     public Instant getFailedAt() { return failedAt; }
+
+    /** Records the trace that was current when the row was written. */
+    public void attachTrace(String traceId, String spanId, Boolean sampled) {
+        this.traceId = traceId;
+        this.spanId = spanId;
+        this.traceSampled = sampled;
+    }
+
+    public String getTraceId() { return traceId; }
+    public String getSpanId() { return spanId; }
+    public Boolean getTraceSampled() { return traceSampled; }
 }

@@ -4,6 +4,9 @@ import com.creditcard.transaction.domain.OutboxEvent;
 import com.creditcard.transaction.repository.OutboxRepository;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.micrometer.tracing.Span;
+import io.micrometer.tracing.TraceContext;
+import io.micrometer.tracing.Tracer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -30,13 +33,16 @@ public class OutboxService {
     private final OutboxRepository outboxRepository;
     private final ObjectMapper objectMapper;
     private final OutboxPublisher outboxPublisher;
+    private final Tracer tracer;
 
     public OutboxService(OutboxRepository outboxRepository,
                          ObjectMapper objectMapper,
-                         OutboxPublisher outboxPublisher) {
+                         OutboxPublisher outboxPublisher,
+                         Tracer tracer) {
         this.outboxRepository = outboxRepository;
         this.objectMapper = objectMapper;
         this.outboxPublisher = outboxPublisher;
+        this.tracer = tracer;
     }
 
     @Transactional(propagation = Propagation.MANDATORY)
@@ -48,6 +54,12 @@ public class OutboxService {
             throw new IllegalStateException("could not serialize outbox event " + eventId, e);
         }
         OutboxEvent row = new OutboxEvent(eventId, topic, messageKey, eventType, json);
+        Span current = tracer.currentSpan();
+        if (current != null) {
+            // Keep the trace this change belongs to, so the relayed event continues it.
+            TraceContext context = current.context();
+            row.attachTrace(context.traceId(), context.spanId(), context.sampled());
+        }
         outboxRepository.save(row);
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override

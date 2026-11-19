@@ -44,7 +44,7 @@ public class KafkaConfig {
 
     @Bean
     public KafkaTemplate<String, TransactionInitiatedEvent> kafkaTemplate() {
-        return new KafkaTemplate<>(producerFactory());
+        return observed(new KafkaTemplate<>(producerFactory()));
     }
 
     @Bean
@@ -62,7 +62,7 @@ public class KafkaConfig {
 
     @Bean
     public KafkaTemplate<String, StatusUpdateEvent> statusKafkaTemplate() {
-        return new KafkaTemplate<>(statusEventProducerFactory());
+        return observed(new KafkaTemplate<>(statusEventProducerFactory()));
     }
 
     /**
@@ -86,7 +86,16 @@ public class KafkaConfig {
 
     @Bean
     public KafkaTemplate<String, Object> outboxKafkaTemplate() {
-        return new KafkaTemplate<>(outboxProducerFactory());
+        return observed(new KafkaTemplate<>(outboxProducerFactory()));
+    }
+
+    /**
+     * Turns on Micrometer observation for a hand-built template, so each record carries the
+     * current trace in its headers. Spring Boot only does this for its own auto-configured template.
+     */
+    private static <K, V> KafkaTemplate<K, V> observed(KafkaTemplate<K, V> template) {
+        template.setObservationEnabled(true);
+        return template;
     }
 
     @Bean
@@ -120,6 +129,8 @@ public class KafkaConfig {
                 new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(consumerFactory);
         factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.MANUAL_IMMEDIATE);
+        // Each consumed record runs inside a span that continues the trace in its headers.
+        factory.getContainerProperties().setObservationEnabled(true);
         return factory;
     }
 }
