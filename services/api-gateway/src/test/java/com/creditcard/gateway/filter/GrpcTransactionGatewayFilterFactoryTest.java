@@ -111,6 +111,45 @@ class GrpcTransactionGatewayFilterFactoryTest {
         verify(stub, never()).initiateTransaction(any());
     }
 
+    @Test
+    void initiate_withIdempotencyKey_forwardsItAsGrpcMetadata() {
+        when(stub.withInterceptors(any())).thenReturn(stub);
+        when(stub.initiateTransaction(any())).thenReturn(Futures.immediateFuture(
+                InitiateTransactionResponse.newBuilder().setTransactionId("txn-001").setStatus("PENDING").build()));
+
+        MockServerWebExchange exchange = MockServerWebExchange.from(
+                MockServerHttpRequest.post("/api/v1/transactions")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("X-User-Role", "MERCHANT")
+                        .header("Idempotency-Key", " key-123 ")
+                        .body(VALID_INITIATE_BODY));
+
+        StepVerifier.create(initiateFilter().filter(exchange, chain)).verifyComplete();
+
+        assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        // The call goes through a stub carrying a header-attaching interceptor
+        verify(stub).withInterceptors(any());
+        verify(stub).initiateTransaction(any());
+    }
+
+    @Test
+    void initiate_blankIdempotencyKey_callsStubWithoutInterceptor() {
+        when(stub.initiateTransaction(any())).thenReturn(Futures.immediateFuture(
+                InitiateTransactionResponse.newBuilder().setTransactionId("txn-002").setStatus("PENDING").build()));
+
+        MockServerWebExchange exchange = MockServerWebExchange.from(
+                MockServerHttpRequest.post("/api/v1/transactions")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("X-User-Role", "MERCHANT")
+                        .header("Idempotency-Key", "   ")
+                        .body(VALID_INITIATE_BODY));
+
+        StepVerifier.create(initiateFilter().filter(exchange, chain)).verifyComplete();
+
+        verify(stub, never()).withInterceptors(any());
+        verify(stub).initiateTransaction(any());
+    }
+
     // ── GET ───────────────────────────────────────────────────────────────────
 
     @Test

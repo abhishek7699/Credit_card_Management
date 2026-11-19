@@ -59,9 +59,13 @@ public class OpenApiConfig {
 
         return new Operation()
                 .summary("Submit a payment")
-                .description("Starts a payment for transaction-service. Returns PENDING; the outcome arrives asynchronously.")
+                .description("Starts a payment for transaction-service. Returns PENDING; the outcome arrives asynchronously. "
+                        + "Send the same Idempotency-Key to retry safely: a replay returns the original transactionId and creates no second payment.")
                 .addTagsItem("transactions")
                 .addSecurityItem(new SecurityRequirement().addList("bearerAuth"))
+                .addParametersItem(new Parameter().name("Idempotency-Key").in("header").required(false)
+                        .description("Optional. Unique per payment attempt, e.g. a UUID. Replays with the same key return the original result.")
+                        .schema(new Schema<String>().type("string").maxLength(255)))
                 .requestBody(new RequestBody().required(true)
                         .content(new Content().addMediaType("application/json", new MediaType().schema(body))))
                 .responses(new ApiResponses()
