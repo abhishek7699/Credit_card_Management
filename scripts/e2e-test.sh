@@ -540,6 +540,58 @@ step5_poll_status() {
   fail "Step 5 — Transaction did not reach terminal status within ${max}s (last status=${status})"
 }
 
+# ── Step 5b: Idempotent replay through the gateway ───────────────────────────
+# Regression guard for the api-gateway dropping the Idempotency-Key header. The same
+# POST sent twice with one key must return the same transactionId and create exactly
+# one transaction. Goes through api-gateway, never directly to transaction-service.
+step5b_idempotent_replay() {
+  info "Step 5b — Replaying POST /api/v1/transactions with the same Idempotency-Key"
+
+  local key holder body resp1 resp2 code1 code2 id1 id2 count
+  key="e2e-idem-$(date +%s)-${RANDOM}"
+  holder="E2E Idem ${key}"
+  body="{\"cardNumber\":\"4111111111111111\",\"cardExpiry\":\"12/27\",\"cvv\":\"123\",\"cardholderName\":\"${holder}\",\"amount\":\"12.34\",\"currencyCode\":\"USD\"}"
+
+  post_once() {
+    curl -s -w '\n%{http_code}' \
+      -X POST "http://localhost:${GW_PORT}/api/v1/transactions" \
+      -H "Authorization: Bearer ${MERCHANT_JWT}" \
+      -H "Content-Type: application/json" \
+      -H "Idempotency-Key: ${key}" \
+      -d "${body}" 2>/dev/null
+  }
+
+  resp1=$(post_once)
+  resp2=$(post_once)
+  code1=$(echo "$resp1" | tail -1)
+  code2=$(echo "$resp2" | tail -1)
+  id1=$(echo "$resp1" | sed '$d' | python3 -c "import sys,json; print(json.load(sys.stdin).get('transactionId',''))" 2>/dev/null || echo "")
+  id2=$(echo "$resp2" | sed '$d' | python3 -c "import sys,json; print(json.load(sys.stdin).get('transactionId',''))" 2>/dev/null || echo "")
+
+  if [[ "$code1" != "201" || -z "$id1" ]]; then
+    fail "Step 5b — First request expected 201 with a transactionId, got ${code1}: $(echo "$resp1" | sed '$d')"
+    return 1
+  fi
+  if [[ "$code2" != "200" && "$code2" != "201" ]]; then
+    fail "Step 5b — Replay expected 200 or 201, got ${code2}"
+    return 1
+  fi
+  if [[ "$id1" != "$id2" ]]; then
+    fail "Step 5b — Replay returned a different transactionId (${id1} vs ${id2}); key was not forwarded to transaction-service"
+    return 1
+  fi
+
+  count=$(run_cockroach_sql \
+    "SELECT count(*) FROM transaction_service.transactions WHERE cardholder_name = '${holder}';" \
+    2>/dev/null | tail -1 | tr -d '[:space:]')
+  if [[ "${count:-x}" != "1" ]]; then
+    fail "Step 5b — Expected exactly 1 transaction for key ${key}, found ${count:-none}"
+    return 1
+  fi
+
+  pass "Step 5b — Replay returned the same transactionId (${id1}) and created one transaction"
+}
+
 # ── Step 6: PAN scan ──────────────────────────────────────────────────────────
 step6_pan_scan() {
   info "Step 6 — Scanning all service logs for raw PAN"
@@ -1466,6 +1518,7 @@ main() {
   step3_obtain_jwt
   step4_submit_payment
   step5_poll_status
+  step5b_idempotent_replay
   step6_pan_scan
   step7_rate_limit
   step8_circuit_breaker

@@ -24,6 +24,11 @@ class OpenApiConfigTest {
         assertThat(submit.getPost().getRequestBody().getContent().get("application/json").getSchema().getRequired())
                 .containsExactlyInAnyOrder("cardNumber", "cardholderName", "amount", "currencyCode");
         assertThat(submit.getPost().getResponses()).containsKeys("201", "400", "401");
+        assertThat(submit.getPost().getParameters()).singleElement().satisfies(p -> {
+            assertThat(p.getName()).isEqualTo("Idempotency-Key");
+            assertThat(p.getIn()).isEqualTo("header");
+            assertThat(p.getRequired()).isFalse();
+        });
 
         PathItem get = api.getPaths().get("/api/v1/transactions/{id}");
         assertThat(get.getGet().getResponses()).containsKeys("200", "401", "403", "404");

@@ -10,8 +10,10 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.MoreExecutors;
+import io.grpc.Metadata;
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
+import io.grpc.stub.MetadataUtils;
 import org.springframework.cloud.gateway.filter.GatewayFilter;
 import org.springframework.cloud.gateway.filter.factory.AbstractGatewayFilterFactory;
 import org.springframework.core.io.buffer.DataBuffer;
@@ -29,6 +31,10 @@ import java.util.concurrent.ExecutionException;
 @Component
 public class GrpcTransactionGatewayFilterFactory
         extends AbstractGatewayFilterFactory<GrpcTransactionGatewayFilterFactory.Config> {
+
+    static final String IDEMPOTENCY_KEY_HEADER = "Idempotency-Key";
+    static final Metadata.Key<String> IDEMPOTENCY_KEY_METADATA =
+            Metadata.Key.of("idempotency-key", Metadata.ASCII_STRING_MARSHALLER);
 
     private final TransactionServiceGrpc.TransactionServiceFutureStub stub;
     private final ObjectMapper objectMapper;
@@ -68,7 +74,7 @@ public class GrpcTransactionGatewayFilterFactory
                                 .setCurrencyCode(dto.currencyCode != null ? dto.currencyCode : "")
                                 .setMerchantId(merchantId != null ? merchantId : "")
                                 .build();
-                        return fromFuture(stub.initiateTransaction(req))
+                        return fromFuture(withIdempotencyKey(exchange).initiateTransaction(req))
                                 .flatMap(resp -> {
                                     Map<String, String> body = new LinkedHashMap<>();
                                     body.put("transactionId", resp.getTransactionId());
@@ -154,6 +160,21 @@ public class GrpcTransactionGatewayFilterFactory
 
     private String header(ServerWebExchange exchange, String name) {
         return exchange.getRequest().getHeaders().getFirst(name);
+    }
+
+    /**
+     * Forwards the client's Idempotency-Key to transaction-service as the gRPC metadata
+     * header "idempotency-key" (what IdempotencyKeyInterceptor reads). Without this, the
+     * key is dropped at the gateway and replays create duplicate payments.
+     */
+    private TransactionServiceGrpc.TransactionServiceFutureStub withIdempotencyKey(ServerWebExchange exchange) {
+        String key = header(exchange, IDEMPOTENCY_KEY_HEADER);
+        if (key == null || key.isBlank()) {
+            return stub;
+        }
+        Metadata metadata = new Metadata();
+        metadata.put(IDEMPOTENCY_KEY_METADATA, key.trim());
+        return stub.withInterceptors(MetadataUtils.newAttachHeadersInterceptor(metadata));
     }
 
     private <T> Mono<T> fromFuture(ListenableFuture<T> future) {
