@@ -10,6 +10,8 @@ import com.creditcard.notification.repository.ProcessedEventRepository;
 import com.creditcard.notification.service.channel.NotificationChannelGateway;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -38,6 +40,18 @@ public class NotificationService {
         this.recordRepo = recordRepo;
         this.processedEventRepo = processedEventRepo;
         this.gateways = gateways;
+    }
+
+    /** Attempts per record, including the first send. Overridable via notification.delivery.* */
+    private int maxAttempts = 3;
+    /** Base backoff; doubles after each failed attempt (1s, 2s). */
+    private long backoffMillis = 1000L;
+
+    @Autowired
+    void setDeliveryPolicy(@Value("${notification.delivery.max-attempts:3}") int maxAttempts,
+                           @Value("${notification.delivery.backoff-millis:1000}") long backoffMillis) {
+        this.maxAttempts = maxAttempts;
+        this.backoffMillis = backoffMillis;
     }
 
     @Transactional
@@ -173,19 +187,44 @@ public class NotificationService {
         }
     }
 
+    /**
+     * Sends one record with bounded retry and exponential backoff. The record ends as SENT
+     * (real send), LOGGED (log-only channel), or FAILED after the last attempt. Only the
+     * exception class name is stored, never its message, which can carry the recipient.
+     */
     private void dispatchSingle(NotificationRecord record, String recipient, String subject, String body) {
         NotificationChannelGateway.NotificationChannel ch =
                 NotificationChannelGateway.NotificationChannel.valueOf(record.getChannel());
+        // Records are built from this same gateway list, so a matching gateway always exists.
+        NotificationChannelGateway gateway = gateways.stream()
+                .filter(g -> g.channel() == ch)
+                .findFirst()
+                .orElseThrow();
+
+        String lastError = null;
+        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+            try {
+                updateRecordStatus(record, gateway.send(recipient, subject, body).name(), null);
+                return;
+            } catch (Exception e) {
+                lastError = e.getClass().getSimpleName();
+                log.warn("Channel {} send attempt {}/{} failed: {}", ch, attempt, maxAttempts, lastError);
+                if (attempt < maxAttempts && !backoff(attempt)) {
+                    break;
+                }
+            }
+        }
+        updateRecordStatus(record, "FAILED", "failed after " + maxAttempts + " attempt(s): " + lastError);
+    }
+
+    /** Sleeps before the next attempt. Returns false if the thread was interrupted. */
+    private boolean backoff(int attempt) {
         try {
-            NotificationChannelGateway gateway = gateways.stream()
-                    .filter(g -> g.channel() == ch)
-                    .findFirst()
-                    .orElseThrow();
-            gateway.send(recipient, subject, body);
-            updateRecordStatus(record, "SENT", null);
-        } catch (Exception e) {
-            log.warn("Channel send failed for channel {}: {}", ch, e.getMessage());
-            updateRecordStatus(record, "FAILED", e.getMessage());
+            Thread.sleep(backoffMillis * (1L << (attempt - 1)));
+            return true;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
         }
     }
 

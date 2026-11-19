@@ -3,7 +3,6 @@ package com.creditcard.notification.service.channel;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatNoException;
 
 class EmailGatewayTest {
 
@@ -15,8 +14,8 @@ class EmailGatewayTest {
     }
 
     @Test
-    void sendDoesNotThrow() {
-        assertThatNoException().isThrownBy(() ->
-                gateway.send("j***@example.com", "Payment Approved", "Your payment was approved."));
+    void logOnlySendReturnsLoggedNeverSent() {
+        assertThat(gateway.send("j***@example.com", "Payment Approved", "Your payment was approved."))
+                .isEqualTo(NotificationChannelGateway.DeliveryOutcome.LOGGED);
     }
 }

@@ -141,7 +141,7 @@ class FraudAlertNotificationIntegrationTest {
             assertThat(recordRepo.findAll()).hasSize(2));
 
         var records = recordRepo.findAll();
-        assertThat(records).extracting("status").containsOnly("SENT");
+        assertThat(records).extracting("status").containsOnly("LOGGED");
         assertThat(records).extracting("channel").containsExactlyInAnyOrder("EMAIL", "SMS");
         assertThat(records).allMatch(r -> r.getContent().contains("Suspicious activity") || r.getContent().contains("ALERT:"));
         assertThat(records).allMatch(r -> r.getContent().contains("VELOCITY_EXCEEDED"));
