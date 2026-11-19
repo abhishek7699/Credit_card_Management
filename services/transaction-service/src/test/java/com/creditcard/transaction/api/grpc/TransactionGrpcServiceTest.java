@@ -6,7 +6,9 @@ import com.creditcard.transaction.grpc.v1.GetTransactionRequest;
 import com.creditcard.transaction.grpc.v1.GetTransactionResponse;
 import com.creditcard.transaction.grpc.v1.InitiateTransactionRequest;
 import com.creditcard.transaction.grpc.v1.InitiateTransactionResponse;
+import com.creditcard.transaction.service.IdempotencyKeyService;
 import com.creditcard.transaction.service.TransactionService;
+import io.grpc.Context;
 import io.grpc.StatusRuntimeException;
 import io.grpc.stub.StreamObserver;
 import org.junit.jupiter.api.BeforeEach;
@@ -45,9 +47,59 @@ class TransactionGrpcServiceTest {
     }
 
     @Test
+    void passesIdempotencyKeyFromCallContextToTransactionService() {
+        when(transactionService.initiateTransaction(any(), any(), any(), any(), any(), any()))
+                .thenReturn(new IdempotencyKeyService.StoredResult(UUID.randomUUID(), "PENDING"));
+
+        runWithIdempotencyKey("order-42", () -> transactionGrpcService.initiateTransaction(validRequest(), responseObserver));
+
+        verify(transactionService).initiateTransaction(eq("order-42"), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void blankIdempotencyKeyIsTreatedAsAbsent() {
+        when(transactionService.initiateTransaction(any(), any(), any(), any(), any(), any()))
+                .thenReturn(new IdempotencyKeyService.StoredResult(UUID.randomUUID(), "PENDING"));
+
+        runWithIdempotencyKey("   ", () -> transactionGrpcService.initiateTransaction(validRequest(), responseObserver));
+
+        verify(transactionService).initiateTransaction(isNull(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void rejectsIdempotencyKeyLongerThanTheColumnWithoutCreatingTransaction() {
+        runWithIdempotencyKey("k".repeat(256), () -> transactionGrpcService.initiateTransaction(validRequest(), responseObserver));
+
+        verify(responseObserver).onError(any(StatusRuntimeException.class));
+        verify(transactionService, never()).initiateTransaction(any(), any(), any(), any(), any(), any());
+    }
+
+    private static InitiateTransactionRequest validRequest() {
+        return InitiateTransactionRequest.newBuilder()
+                .setCardNumber("4111111111111111")
+                .setCardExpiry("12/27")
+                .setCvv("123")
+                .setCardholderName("Jane Doe")
+                .setAmount("99.99")
+                .setCurrencyCode("USD")
+                .build();
+    }
+
+    /** Runs {@code call} with the gRPC idempotency-key value set in the call Context. */
+    private static void runWithIdempotencyKey(String key, Runnable call) {
+        Context withKey = Context.current().withValue(IdempotencyKeyInterceptor.CONTEXT_KEY, key);
+        Context previous = withKey.attach();
+        try {
+            call.run();
+        } finally {
+            withKey.detach(previous);
+        }
+    }
+
+    @Test
     void shouldReturnTransactionIdAndPendingStatusForValidRequest() {
         UUID txId = UUID.randomUUID();
-        when(transactionService.initiateTransaction(any(), any(), any(), any(), any())).thenReturn(txId);
+        when(transactionService.initiateTransaction(any(), any(), any(), any(), any(), any())).thenReturn(new IdempotencyKeyService.StoredResult(txId, "PENDING"));
 
         InitiateTransactionRequest request = InitiateTransactionRequest.newBuilder()
                 .setCardNumber("4111111111111111")
@@ -71,8 +123,8 @@ class TransactionGrpcServiceTest {
 
     @Test
     void shouldCallTransactionServiceWithCardNumberAndFields() {
-        when(transactionService.initiateTransaction(any(), any(), any(), any(), any()))
-                .thenReturn(UUID.randomUUID());
+        when(transactionService.initiateTransaction(any(), any(), any(), any(), any(), any()))
+                .thenReturn(new IdempotencyKeyService.StoredResult(UUID.randomUUID(), "PENDING"));
 
         InitiateTransactionRequest request = InitiateTransactionRequest.newBuilder()
                 .setCardNumber("4111111111111111")
@@ -86,6 +138,7 @@ class TransactionGrpcServiceTest {
         transactionGrpcService.initiateTransaction(request, responseObserver);
 
         verify(transactionService).initiateTransaction(
+                any(),
                 eq("4111111111111111"),
                 eq("John Smith"),
                 any(),
@@ -106,7 +159,7 @@ class TransactionGrpcServiceTest {
 
         ArgumentCaptor<Throwable> errorCaptor = ArgumentCaptor.forClass(Throwable.class);
         verify(responseObserver).onError(errorCaptor.capture());
-        verify(transactionService, never()).initiateTransaction(any(), any(), any(), any(), any());
+        verify(transactionService, never()).initiateTransaction(any(), any(), any(), any(), any(), any());
         assertThat(errorCaptor.getValue()).isInstanceOf(StatusRuntimeException.class);
     }
 
@@ -121,7 +174,7 @@ class TransactionGrpcServiceTest {
         transactionGrpcService.initiateTransaction(request, responseObserver);
 
         verify(responseObserver).onError(any(StatusRuntimeException.class));
-        verify(transactionService, never()).initiateTransaction(any(), any(), any(), any(), any());
+        verify(transactionService, never()).initiateTransaction(any(), any(), any(), any(), any(), any());
     }
 
     @Test
@@ -135,7 +188,7 @@ class TransactionGrpcServiceTest {
         transactionGrpcService.initiateTransaction(request, responseObserver);
 
         verify(responseObserver).onError(any(StatusRuntimeException.class));
-        verify(transactionService, never()).initiateTransaction(any(), any(), any(), any(), any());
+        verify(transactionService, never()).initiateTransaction(any(), any(), any(), any(), any(), any());
     }
 
     // ── getTransaction ─────────────────────────────────────────────────────────
@@ -244,7 +297,7 @@ class TransactionGrpcServiceTest {
         transactionGrpcService.initiateTransaction(request, responseObserver);
 
         verify(responseObserver).onError(any(StatusRuntimeException.class));
-        verify(transactionService, never()).initiateTransaction(any(), any(), any(), any(), any());
+        verify(transactionService, never()).initiateTransaction(any(), any(), any(), any(), any(), any());
     }
 
     @Test
@@ -314,7 +367,7 @@ class TransactionGrpcServiceTest {
 
     @Test
     void shouldReturnInternalErrorWhenServiceThrows() {
-        when(transactionService.initiateTransaction(any(), any(), any(), any(), any()))
+        when(transactionService.initiateTransaction(any(), any(), any(), any(), any(), any()))
                 .thenThrow(new RuntimeException("Vault down"));
 
         InitiateTransactionRequest request = InitiateTransactionRequest.newBuilder()

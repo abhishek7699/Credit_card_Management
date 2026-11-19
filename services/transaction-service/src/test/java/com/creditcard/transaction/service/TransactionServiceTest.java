@@ -37,11 +37,14 @@ class TransactionServiceTest {
     @Mock
     private OutboxService outboxService;
 
+    @Mock
+    private IdempotencyKeyService idempotencyKeyService;
+
     private TransactionService transactionService;
 
     @BeforeEach
     void setUp() {
-        transactionService = new TransactionService(tokenizationService, transactionRepository, kafkaTemplate, outboxService);
+        transactionService = new TransactionService(tokenizationService, transactionRepository, kafkaTemplate, outboxService, idempotencyKeyService);
     }
 
     @Test

@@ -8,6 +8,7 @@ import com.creditcard.booking.controller.dto.ChargeResponse;
 import com.creditcard.booking.controller.dto.CheckOutRequest;
 import com.creditcard.booking.domain.Booking;
 import com.creditcard.booking.domain.Charge;
+import com.creditcard.booking.exception.InvalidIdempotencyKeyException;
 import com.creditcard.booking.service.BookingService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -15,6 +16,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
@@ -25,6 +27,11 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/api/v1/bookings")
 public class BookingController {
+
+    /** Optional. Same key + same creation = the first request's stored booking, never a duplicate. */
+    static final String IDEMPOTENCY_KEY_HEADER = "Idempotency-Key";
+    /** Matches the idempotency_keys.idempotency_key column width. */
+    static final int MAX_IDEMPOTENCY_KEY_LENGTH = 255;
 
     private final BookingService bookingService;
 
@@ -37,9 +44,22 @@ public class BookingController {
      *  to poll for. */
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    public BookingDetailResponse create(@Valid @RequestBody BookingRequest request) {
-        Booking booking = bookingService.createConfirmedBooking(request);
+    public BookingDetailResponse create(
+            @RequestHeader(value = IDEMPOTENCY_KEY_HEADER, required = false) String idempotencyKey,
+            @Valid @RequestBody BookingRequest request) {
+        Booking booking = bookingService.createConfirmedBooking(normalize(idempotencyKey), request);
         return toDetailResponse(booking);
+    }
+
+    /** A blank header counts as absent, so it behaves exactly like no header at all. */
+    private static String normalize(String idempotencyKey) {
+        if (idempotencyKey == null || idempotencyKey.isBlank()) {
+            return null;
+        }
+        if (idempotencyKey.length() > MAX_IDEMPOTENCY_KEY_LENGTH) {
+            throw new InvalidIdempotencyKeyException(MAX_IDEMPOTENCY_KEY_LENGTH);
+        }
+        return idempotencyKey;
     }
 
     @GetMapping("/{id}")
