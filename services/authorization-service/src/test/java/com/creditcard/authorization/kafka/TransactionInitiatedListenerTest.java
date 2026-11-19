@@ -7,6 +7,7 @@ import com.creditcard.authorization.kafka.event.TransactionInitiatedEvent;
 import com.creditcard.authorization.service.AuthorizationService;
 import com.creditcard.authorization.service.IdempotencyService;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
+import com.creditcard.authorization.tracing.CurrentTraceId;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -45,6 +46,9 @@ class TransactionInitiatedListenerTest {
 
     @Mock
     private Acknowledgment acknowledgment;
+
+    @Mock
+    private CurrentTraceId currentTraceId;
 
     @InjectMocks
     private TransactionInitiatedListener listener;
@@ -192,6 +196,41 @@ class TransactionInitiatedListenerTest {
         verify(kafkaTemplate).send(eq(RESULT_TOPIC), anyString(), captor.capture());
         assertThat(((AuthorizationResultEvent) captor.getValue()).getEventType()).isEqualTo("TransactionFailed");
         verify(acknowledgment).acknowledge();
+    }
+
+    @Test
+    void liveSpanTraceIdStampsEveryOutgoingEvent() {
+        UUID txId = UUID.randomUUID();
+        TransactionInitiatedEvent event = buildEvent("evt-trace-1", txId, "vault:v1:tok", "10.00", "m");
+        event.setTraceId("producer-trace");
+        when(currentTraceId.get()).thenReturn("live-trace");
+        when(idempotencyService.isDuplicate(any())).thenReturn(false);
+        when(authorizationService.authorize(event)).thenReturn(AuthorizationResultEvent.authorized(txId, "vault:v1:tok"));
+
+        listener.onMessage(record(event, txId.toString(), 0L), acknowledgment);
+
+        ArgumentCaptor<Object> result = ArgumentCaptor.forClass(Object.class);
+        verify(kafkaTemplate).send(eq(RESULT_TOPIC), eq(txId.toString()), result.capture());
+        ArgumentCaptor<Object> authorized = ArgumentCaptor.forClass(Object.class);
+        verify(kafkaTemplate).send(eq(AUTHORIZED_TOPIC), eq(txId.toString()), authorized.capture());
+        assertThat(((AuthorizationResultEvent) result.getValue()).getTraceId()).isEqualTo("live-trace");
+        assertThat(((TransactionAuthorizedEvent) authorized.getValue()).getTraceId()).isEqualTo("live-trace");
+    }
+
+    @Test
+    void withoutLiveSpanTheEnvelopeTraceIdIsCarriedForward() {
+        UUID txId = UUID.randomUUID();
+        TransactionInitiatedEvent event = buildEvent("evt-trace-2", txId, "vault:v1:tok", "10.00", "m");
+        event.setTraceId("producer-trace");
+        when(currentTraceId.get()).thenReturn(null);
+        when(idempotencyService.isDuplicate(any())).thenReturn(false);
+        when(authorizationService.authorize(event)).thenReturn(AuthorizationResultEvent.declined(txId, "vault:v1:tok", null));
+
+        listener.onMessage(record(event, txId.toString(), 0L), acknowledgment);
+
+        ArgumentCaptor<Object> result = ArgumentCaptor.forClass(Object.class);
+        verify(kafkaTemplate).send(eq(RESULT_TOPIC), eq(txId.toString()), result.capture());
+        assertThat(((AuthorizationResultEvent) result.getValue()).getTraceId()).isEqualTo("producer-trace");
     }
 
     private ConsumerRecord<String, TransactionInitiatedEvent> record(TransactionInitiatedEvent event, String key, long offset) {

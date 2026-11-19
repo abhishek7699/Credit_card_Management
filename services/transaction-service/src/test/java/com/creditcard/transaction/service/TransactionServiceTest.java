@@ -4,6 +4,7 @@ import com.creditcard.transaction.domain.Transaction;
 import com.creditcard.transaction.domain.TransactionStatus;
 import com.creditcard.transaction.event.TransactionInitiatedEvent;
 import com.creditcard.transaction.repository.TransactionRepository;
+import com.creditcard.transaction.tracing.CurrentTraceId;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -34,11 +35,18 @@ class TransactionServiceTest {
     @Mock
     private KafkaTemplate<String, TransactionInitiatedEvent> kafkaTemplate;
 
+    @Mock
+    private IdempotencyKeyService idempotencyKeyService;
+
+    @Mock
+    private CurrentTraceId currentTraceId;
+
     private TransactionService transactionService;
 
     @BeforeEach
     void setUp() {
-        transactionService = new TransactionService(tokenizationService, transactionRepository, kafkaTemplate);
+        transactionService = new TransactionService(tokenizationService, transactionRepository, kafkaTemplate,
+                idempotencyKeyService, currentTraceId);
     }
 
     @Test
@@ -302,5 +310,36 @@ class TransactionServiceTest {
         tx.setMerchantId("merchant-001");
         tx.setStatus(TransactionStatus.PENDING);
         return tx;
+    }
+
+    @Test
+    void keyedInitiateRunsCreationThroughIdempotencyServiceAndReturnsPendingResult() {
+        when(idempotencyKeyService.executeOnce(eq("k1"), any()))
+                .thenAnswer(inv -> ((java.util.function.Supplier<?>) inv.getArgument(1)).get());
+        when(tokenizationService.tokenize("4111111111111111"))
+                .thenReturn(new TokenResult("vault:v1:t", "****-****-****-1111"));
+        Transaction savedTx = buildSavedTransaction();
+        when(transactionRepository.save(any())).thenReturn(savedTx);
+
+        IdempotencyKeyService.StoredResult result = transactionService.initiateTransaction(
+                "k1", "4111111111111111", "Jane Doe", new BigDecimal("50.00"), "USD", "merchant-001");
+
+        assertThat(result.resourceId()).isEqualTo(savedTx.getId());
+        assertThat(result.status()).isEqualTo("PENDING");
+        verify(tokenizationService).tokenize("4111111111111111");
+    }
+
+    @Test
+    void initiatedEventEnvelopeCarriesTheActiveTraceId() {
+        when(tokenizationService.tokenize(any()))
+                .thenReturn(new TokenResult("vault:v1:t", "****-****-****-1111"));
+        when(transactionRepository.save(any())).thenReturn(buildSavedTransaction());
+        when(currentTraceId.get()).thenReturn("4bf92f3577b34da6a3ce929d0e0e4736");
+
+        transactionService.initiateTransaction("4111111111111111", "Jane Doe", new BigDecimal("10.00"), "USD", "m");
+
+        ArgumentCaptor<TransactionInitiatedEvent> captor = ArgumentCaptor.forClass(TransactionInitiatedEvent.class);
+        verify(kafkaTemplate).send(any(String.class), any(String.class), captor.capture());
+        assertThat(captor.getValue().getTraceId()).isEqualTo("4bf92f3577b34da6a3ce929d0e0e4736");
     }
 }

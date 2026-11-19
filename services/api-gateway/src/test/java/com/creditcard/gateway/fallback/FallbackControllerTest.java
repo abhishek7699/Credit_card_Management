@@ -25,6 +25,10 @@ import static org.assertj.core.api.Assertions.assertThat;
          AuditLoggingFilter.class, IdentityPropagationFilter.class,
          MerchantScopeEnforcementFilter.class})
 class FallbackControllerTest {
+    // TraceIdResponseFilter (a WebFilter scanned by the slice) needs a Tracer.
+    @org.springframework.boot.test.mock.mockito.MockBean
+    private io.micrometer.tracing.Tracer tracer;
+
 
     @Autowired
     private WebTestClient webClient;

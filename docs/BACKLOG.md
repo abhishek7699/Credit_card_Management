@@ -82,3 +82,24 @@ These were named up front as out of scope for every layer until explicitly start
   deployed environment (see SECURITY.md). Replacing this with the project's real
   auth server (already named as a "later pass" in CLAUDE.md's Roadmap) is required
   before this frontend could ever be exposed to anyone but a developer or CI.
+
+## Carried from the distributed tracing (local) work
+
+- **Settlement batch events don't carry a `traceId`**: `transaction.authorized`
+  is populated by authorization-service, but settlement-service's own batch-produced
+  events are emitted without a trace id, so spans for that batch step start a new
+  trace instead of continuing the booking's. Fix when settlement's outbound events
+  are next touched (not in this layer's spec).
+- **Zipkin is optional and dev-only**: the `zipkin` compose service is gated behind
+  `profiles: ["dev"]`. Without it, services log span-export failures for each batch
+  of spans; requests are unaffected. Decide whether to gate the export endpoint
+  itself (e.g. disable export when `ZIPKIN_ENDPOINT` is unset) before any shared
+  environment uses this.
+- **Sampling is 100% by default**: `TRACING_SAMPLING_PROBABILITY` defaults to `1.0`.
+  Appropriate for local demos; lower it before any load-tested or production-style run.
+- **No tracing in CI or GKE**: services are wired for local compose only. The k8s
+  manifests and the CI pipeline do not set `ZIPKIN_ENDPOINT` or run a Zipkin.
+- **Booking doesn't forward an idempotency key to transaction-service**: the
+  `Idempotency-Key` accepted by booking-service's `POST /api/v1/bookings` is not sent
+  as gRPC metadata on the `InitiateTransaction` call. Whether that matters for
+  double-charging on retries needs an explicit decision; out of scope here.

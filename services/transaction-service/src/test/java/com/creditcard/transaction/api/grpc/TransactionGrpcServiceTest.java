@@ -6,7 +6,9 @@ import com.creditcard.transaction.grpc.v1.GetTransactionRequest;
 import com.creditcard.transaction.grpc.v1.GetTransactionResponse;
 import com.creditcard.transaction.grpc.v1.InitiateTransactionRequest;
 import com.creditcard.transaction.grpc.v1.InitiateTransactionResponse;
+import com.creditcard.transaction.service.IdempotencyKeyService;
 import com.creditcard.transaction.service.TransactionService;
+import io.grpc.Context;
 import io.grpc.StatusRuntimeException;
 import io.grpc.stub.StreamObserver;
 import org.junit.jupiter.api.BeforeEach;
@@ -23,6 +25,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -47,7 +50,8 @@ class TransactionGrpcServiceTest {
     @Test
     void shouldReturnTransactionIdAndPendingStatusForValidRequest() {
         UUID txId = UUID.randomUUID();
-        when(transactionService.initiateTransaction(any(), any(), any(), any(), any())).thenReturn(txId);
+        when(transactionService.initiateTransaction(any(), any(), any(), any(), any(), any()))
+                .thenReturn(new IdempotencyKeyService.StoredResult(txId, "PENDING"));
 
         InitiateTransactionRequest request = InitiateTransactionRequest.newBuilder()
                 .setCardNumber("4111111111111111")
@@ -71,8 +75,8 @@ class TransactionGrpcServiceTest {
 
     @Test
     void shouldCallTransactionServiceWithCardNumberAndFields() {
-        when(transactionService.initiateTransaction(any(), any(), any(), any(), any()))
-                .thenReturn(UUID.randomUUID());
+        when(transactionService.initiateTransaction(any(), any(), any(), any(), any(), any()))
+                .thenReturn(new IdempotencyKeyService.StoredResult(UUID.randomUUID(), "PENDING"));
 
         InitiateTransactionRequest request = InitiateTransactionRequest.newBuilder()
                 .setCardNumber("4111111111111111")
@@ -86,6 +90,7 @@ class TransactionGrpcServiceTest {
         transactionGrpcService.initiateTransaction(request, responseObserver);
 
         verify(transactionService).initiateTransaction(
+                isNull(),
                 eq("4111111111111111"),
                 eq("John Smith"),
                 any(),
@@ -106,7 +111,7 @@ class TransactionGrpcServiceTest {
 
         ArgumentCaptor<Throwable> errorCaptor = ArgumentCaptor.forClass(Throwable.class);
         verify(responseObserver).onError(errorCaptor.capture());
-        verify(transactionService, never()).initiateTransaction(any(), any(), any(), any(), any());
+        verify(transactionService, never()).initiateTransaction(any(), any(), any(), any(), any(), any());
         assertThat(errorCaptor.getValue()).isInstanceOf(StatusRuntimeException.class);
     }
 
@@ -121,7 +126,7 @@ class TransactionGrpcServiceTest {
         transactionGrpcService.initiateTransaction(request, responseObserver);
 
         verify(responseObserver).onError(any(StatusRuntimeException.class));
-        verify(transactionService, never()).initiateTransaction(any(), any(), any(), any(), any());
+        verify(transactionService, never()).initiateTransaction(any(), any(), any(), any(), any(), any());
     }
 
     @Test
@@ -135,7 +140,7 @@ class TransactionGrpcServiceTest {
         transactionGrpcService.initiateTransaction(request, responseObserver);
 
         verify(responseObserver).onError(any(StatusRuntimeException.class));
-        verify(transactionService, never()).initiateTransaction(any(), any(), any(), any(), any());
+        verify(transactionService, never()).initiateTransaction(any(), any(), any(), any(), any(), any());
     }
 
     // ── getTransaction ─────────────────────────────────────────────────────────
@@ -244,7 +249,7 @@ class TransactionGrpcServiceTest {
         transactionGrpcService.initiateTransaction(request, responseObserver);
 
         verify(responseObserver).onError(any(StatusRuntimeException.class));
-        verify(transactionService, never()).initiateTransaction(any(), any(), any(), any(), any());
+        verify(transactionService, never()).initiateTransaction(any(), any(), any(), any(), any(), any());
     }
 
     @Test
@@ -314,7 +319,7 @@ class TransactionGrpcServiceTest {
 
     @Test
     void shouldReturnInternalErrorWhenServiceThrows() {
-        when(transactionService.initiateTransaction(any(), any(), any(), any(), any()))
+        when(transactionService.initiateTransaction(any(), any(), any(), any(), any(), any()))
                 .thenThrow(new RuntimeException("Vault down"));
 
         InitiateTransactionRequest request = InitiateTransactionRequest.newBuilder()
@@ -330,5 +335,90 @@ class TransactionGrpcServiceTest {
 
         verify(responseObserver).onError(any(StatusRuntimeException.class));
         verify(responseObserver, never()).onNext(any());
+    }
+
+    // ── Idempotency-Key (gRPC metadata, read from the call Context) ───────────
+
+    private static InitiateTransactionRequest validInitiateRequest() {
+        return InitiateTransactionRequest.newBuilder()
+                .setCardNumber("4111111111111111")
+                .setCardExpiry("12/27")
+                .setCvv("123")
+                .setCardholderName("Jane Doe")
+                .setAmount("99.99")
+                .setCurrencyCode("USD")
+                .build();
+    }
+
+    /** Runs {@code body} with the idempotency-key context value set, as the interceptor does. */
+    private static void withIdempotencyKey(String key, Runnable body) {
+        Context context = Context.current().withValue(IdempotencyKeyInterceptor.CONTEXT_KEY, key);
+        Context previous = context.attach();
+        try {
+            body.run();
+        } finally {
+            context.detach(previous);
+        }
+    }
+
+    @Test
+    void shouldPassIdempotencyKeyFromContextToService() {
+        UUID txId = UUID.randomUUID();
+        when(transactionService.initiateTransaction(any(), any(), any(), any(), any(), any()))
+                .thenReturn(new IdempotencyKeyService.StoredResult(txId, "PENDING"));
+
+        withIdempotencyKey("order-42", () -> transactionGrpcService.initiateTransaction(validInitiateRequest(), responseObserver));
+
+        verify(transactionService).initiateTransaction(eq("order-42"), any(), any(), any(), any(), any());
+        verify(responseObserver).onCompleted();
+    }
+
+    @Test
+    void shouldTreatBlankIdempotencyKeyAsAbsent() {
+        when(transactionService.initiateTransaction(any(), any(), any(), any(), any(), any()))
+                .thenReturn(new IdempotencyKeyService.StoredResult(UUID.randomUUID(), "PENDING"));
+
+        withIdempotencyKey("   ", () -> transactionGrpcService.initiateTransaction(validInitiateRequest(), responseObserver));
+
+        verify(transactionService).initiateTransaction(isNull(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void shouldRejectIdempotencyKeyLongerThanColumnWithoutCallingService() {
+        String tooLong = "k".repeat(TransactionGrpcService.MAX_IDEMPOTENCY_KEY_LENGTH + 1);
+
+        withIdempotencyKey(tooLong, () -> transactionGrpcService.initiateTransaction(validInitiateRequest(), responseObserver));
+
+        ArgumentCaptor<Throwable> errorCaptor = ArgumentCaptor.forClass(Throwable.class);
+        verify(responseObserver).onError(errorCaptor.capture());
+        assertThat(((StatusRuntimeException) errorCaptor.getValue()).getStatus().getCode().name())
+                .isEqualTo("INVALID_ARGUMENT");
+        verify(transactionService, never()).initiateTransaction(any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void shouldAcceptIdempotencyKeyAtExactMaximumLength() {
+        String atLimit = "k".repeat(TransactionGrpcService.MAX_IDEMPOTENCY_KEY_LENGTH);
+        when(transactionService.initiateTransaction(any(), any(), any(), any(), any(), any()))
+                .thenReturn(new IdempotencyKeyService.StoredResult(UUID.randomUUID(), "PENDING"));
+
+        withIdempotencyKey(atLimit, () -> transactionGrpcService.initiateTransaction(validInitiateRequest(), responseObserver));
+
+        verify(transactionService).initiateTransaction(eq(atLimit), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void shouldReturnServiceResultIdAndStatusUnchanged() {
+        UUID original = UUID.randomUUID();
+        // On replay the service returns the stored id/status; this layer must echo them as-is.
+        when(transactionService.initiateTransaction(eq("order-42"), any(), any(), any(), any(), any()))
+                .thenReturn(new IdempotencyKeyService.StoredResult(original, "PENDING"));
+
+        withIdempotencyKey("order-42", () -> transactionGrpcService.initiateTransaction(validInitiateRequest(), responseObserver));
+
+        ArgumentCaptor<InitiateTransactionResponse> captor = ArgumentCaptor.forClass(InitiateTransactionResponse.class);
+        verify(responseObserver).onNext(captor.capture());
+        assertThat(captor.getValue().getTransactionId()).isEqualTo(original.toString());
+        assertThat(captor.getValue().getStatus()).isEqualTo("PENDING");
     }
 }

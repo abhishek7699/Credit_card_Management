@@ -29,6 +29,12 @@ public class GlobalExceptionHandler {
         return Map.of("error", ex.getMessage());
     }
 
+    @ExceptionHandler(InvalidIdempotencyKeyException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public Map<String, String> handleInvalidIdempotencyKey(InvalidIdempotencyKeyException ex) {
+        return Map.of("error", ex.getMessage());
+    }
+
     @ExceptionHandler(RoomNotFoundException.class)
     @ResponseStatus(HttpStatus.NOT_FOUND)
     public Map<String, String> handleRoomNotFound(RoomNotFoundException ex) {

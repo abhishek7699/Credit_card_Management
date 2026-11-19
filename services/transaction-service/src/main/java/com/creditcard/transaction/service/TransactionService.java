@@ -4,6 +4,7 @@ import com.creditcard.transaction.domain.Transaction;
 import com.creditcard.transaction.domain.TransactionStatus;
 import com.creditcard.transaction.event.TransactionInitiatedEvent;
 import com.creditcard.transaction.repository.TransactionRepository;
+import com.creditcard.transaction.tracing.CurrentTraceId;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -20,14 +21,33 @@ public class TransactionService {
     private final TokenizationService tokenizationService;
     private final TransactionRepository transactionRepository;
     private final KafkaTemplate<String, TransactionInitiatedEvent> kafkaTemplate;
+    private final IdempotencyKeyService idempotencyKeyService;
+    private final CurrentTraceId currentTraceId;
 
     public TransactionService(
             TokenizationService tokenizationService,
             TransactionRepository transactionRepository,
-            KafkaTemplate<String, TransactionInitiatedEvent> kafkaTemplate) {
+            KafkaTemplate<String, TransactionInitiatedEvent> kafkaTemplate,
+            IdempotencyKeyService idempotencyKeyService,
+            CurrentTraceId currentTraceId) {
         this.tokenizationService = tokenizationService;
         this.transactionRepository = transactionRepository;
         this.kafkaTemplate = kafkaTemplate;
+        this.idempotencyKeyService = idempotencyKeyService;
+        this.currentTraceId = currentTraceId;
+    }
+
+    /**
+     * InitiateTransaction with optional request idempotency. A null key behaves exactly
+     * like the un-keyed method. On replay, tokenization and the Kafka event are skipped.
+     */
+    @Transactional
+    public IdempotencyKeyService.StoredResult initiateTransaction(
+            String idempotencyKey, String rawCardNumber, String cardholderName,
+            BigDecimal amount, String currencyCode, String merchantId) {
+        return idempotencyKeyService.executeOnce(idempotencyKey, () -> new IdempotencyKeyService.StoredResult(
+                initiateTransaction(rawCardNumber, cardholderName, amount, currencyCode, merchantId),
+                TransactionStatus.PENDING.name()));
     }
 
     @Transactional
@@ -98,6 +118,6 @@ public class TransactionService {
         payload.setCurrencyCode(tx.getCurrencyCode());
         payload.setMerchantId(tx.getMerchantId());
 
-        return new TransactionInitiatedEvent(null, payload);
+        return new TransactionInitiatedEvent(currentTraceId.get(), payload);
     }
 }

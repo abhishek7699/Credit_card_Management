@@ -1,5 +1,6 @@
 package com.creditcard.booking.controller;
 
+import com.creditcard.booking.controller.dto.BookingCreatedResponse;
 import com.creditcard.booking.domain.Booking;
 import com.creditcard.booking.domain.BookingStatus;
 import com.creditcard.booking.exception.BookingNotFoundException;
@@ -18,6 +19,11 @@ import java.time.LocalDate;
 import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -59,7 +65,9 @@ class BookingControllerTest {
     void validRequest_returns201Held() throws Exception {
         UUID roomId = UUID.randomUUID();
         Booking booking = heldBooking(roomId);
-        when(bookingService.createHeldBooking(any())).thenReturn(booking);
+        when(bookingService.holdBooking(isNull(), any()))
+                .thenReturn(new BookingService.CreateOutcome(
+                        new BookingCreatedResponse(booking.getId(), booking.getStatus()), booking));
 
         mockMvc.perform(post("/api/v1/bookings")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -71,7 +79,7 @@ class BookingControllerTest {
     @Test
     void nonexistentRoom_returns404() throws Exception {
         UUID roomId = UUID.randomUUID();
-        when(bookingService.createHeldBooking(any())).thenThrow(new RoomNotFoundException(roomId));
+        when(bookingService.holdBooking(isNull(), any())).thenThrow(new RoomNotFoundException(roomId));
 
         mockMvc.perform(post("/api/v1/bookings")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -83,7 +91,7 @@ class BookingControllerTest {
     @Test
     void roomUnavailable_returns409() throws Exception {
         UUID roomId = UUID.randomUUID();
-        when(bookingService.createHeldBooking(any())).thenThrow(
+        when(bookingService.holdBooking(isNull(), any())).thenThrow(
                 new RoomUnavailableException(roomId, LocalDate.of(2026, 11, 1), LocalDate.of(2026, 11, 3)));
 
         mockMvc.perform(post("/api/v1/bookings")
@@ -188,5 +196,87 @@ class BookingControllerTest {
         mockMvc.perform(post("/api/v1/bookings/" + bookingId + "/check-out"))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.error").exists());
+    }
+
+    // ── Idempotency-Key header ────────────────────────────────────────────────
+
+    private static BookingService.CreateOutcome newlyHeld(Booking booking) {
+        return new BookingService.CreateOutcome(
+                new BookingCreatedResponse(booking.getId(), booking.getStatus()), booking);
+    }
+
+    @Test
+    void idempotencyKeyHeader_isPassedToService() throws Exception {
+        UUID roomId = UUID.randomUUID();
+        when(bookingService.holdBooking(anyString(), any())).thenReturn(newlyHeld(heldBooking(roomId)));
+
+        mockMvc.perform(post("/api/v1/bookings")
+                        .header("Idempotency-Key", "front-desk-42")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(bookingRequestJson(roomId)))
+                .andExpect(status().isCreated());
+
+        verify(bookingService).holdBooking(eq("front-desk-42"), any());
+        verify(bookingService).initiatePayment(any(), any());
+    }
+
+    @Test
+    void blankIdempotencyKeyHeader_behavesAsNoHeader() throws Exception {
+        UUID roomId = UUID.randomUUID();
+        when(bookingService.holdBooking(isNull(), any())).thenReturn(newlyHeld(heldBooking(roomId)));
+
+        mockMvc.perform(post("/api/v1/bookings")
+                        .header("Idempotency-Key", "   ")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(bookingRequestJson(roomId)))
+                .andExpect(status().isCreated());
+
+        verify(bookingService).holdBooking(isNull(), any());
+    }
+
+    @Test
+    void replayedKey_returnsStoredResultAndDoesNotInitiatePaymentAgain() throws Exception {
+        UUID roomId = UUID.randomUUID();
+        UUID storedId = UUID.randomUUID();
+        when(bookingService.holdBooking(eq("front-desk-42"), any())).thenReturn(
+                new BookingService.CreateOutcome(new BookingCreatedResponse(storedId, BookingStatus.HELD), null));
+
+        mockMvc.perform(post("/api/v1/bookings")
+                        .header("Idempotency-Key", "front-desk-42")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(bookingRequestJson(roomId)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.bookingId").value(storedId.toString()))
+                .andExpect(jsonPath("$.status").value("HELD"));
+
+        verify(bookingService, never()).initiatePayment(any(), any());
+    }
+
+    @Test
+    void idempotencyKeyLongerThan255Characters_returns400WithoutCallingService() throws Exception {
+        UUID roomId = UUID.randomUUID();
+        String tooLong = "k".repeat(256);
+
+        mockMvc.perform(post("/api/v1/bookings")
+                        .header("Idempotency-Key", tooLong)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(bookingRequestJson(roomId)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").exists());
+
+        verify(bookingService, never()).holdBooking(any(), any());
+    }
+
+    @Test
+    void idempotencyKeyOfExactly255Characters_isAccepted() throws Exception {
+        UUID roomId = UUID.randomUUID();
+        String atLimit = "k".repeat(255);
+        when(bookingService.holdBooking(eq(atLimit), any())).thenReturn(newlyHeld(heldBooking(roomId)));
+
+        mockMvc.perform(post("/api/v1/bookings")
+                        .header("Idempotency-Key", atLimit)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(bookingRequestJson(roomId)))
+                .andExpect(status().isCreated());
     }
 }

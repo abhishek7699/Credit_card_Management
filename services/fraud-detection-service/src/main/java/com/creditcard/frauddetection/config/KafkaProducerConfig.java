@@ -35,6 +35,8 @@ public class KafkaProducerConfig {
 
     @Bean
     public KafkaTemplate<String, FraudAlertRaisedEvent> kafkaTemplate() {
-        return new KafkaTemplate<>(producerFactory());
+        var template = new KafkaTemplate<>(producerFactory());
+        template.setObservationEnabled(true);
+        return template;
     }
 }

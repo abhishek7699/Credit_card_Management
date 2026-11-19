@@ -40,6 +40,10 @@ class SecurityConfigTest {
     @MockBean
     private PanMaskingFilter panMaskingFilter;
 
+    // TraceIdResponseFilter (a WebFilter scanned by the slice) needs a Tracer.
+    @MockBean
+    private io.micrometer.tracing.Tracer tracer;
+
     @Test
     void noToken_returns401() {
         webClient.post().uri("/api/v1/transactions")

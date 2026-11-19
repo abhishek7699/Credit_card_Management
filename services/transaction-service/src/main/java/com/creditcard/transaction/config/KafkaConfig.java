@@ -44,7 +44,9 @@ public class KafkaConfig {
 
     @Bean
     public KafkaTemplate<String, TransactionInitiatedEvent> kafkaTemplate() {
-        return new KafkaTemplate<>(producerFactory());
+        var template = new KafkaTemplate<>(producerFactory());
+        template.setObservationEnabled(true);
+        return template;
     }
 
     @Bean
@@ -62,7 +64,9 @@ public class KafkaConfig {
 
     @Bean
     public KafkaTemplate<String, StatusUpdateEvent> statusKafkaTemplate() {
-        return new KafkaTemplate<>(statusEventProducerFactory());
+        var template = new KafkaTemplate<>(statusEventProducerFactory());
+        template.setObservationEnabled(true);
+        return template;
     }
 
     @Bean
@@ -96,6 +100,7 @@ public class KafkaConfig {
                 new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(consumerFactory);
         factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.MANUAL_IMMEDIATE);
+        factory.getContainerProperties().setObservationEnabled(true);
         return factory;
     }
 }

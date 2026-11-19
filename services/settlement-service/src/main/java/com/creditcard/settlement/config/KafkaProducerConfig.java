@@ -30,6 +30,8 @@ public class KafkaProducerConfig {
         props.put(ProducerConfig.RETRIES_CONFIG, 3);
         props.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, true);
         ProducerFactory<String, TransactionSettledEvent> pf = new DefaultKafkaProducerFactory<>(props);
-        return new KafkaTemplate<>(pf);
+        var template = new KafkaTemplate<>(pf);
+        template.setObservationEnabled(true);
+        return template;
     }
 }

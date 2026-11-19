@@ -58,6 +58,7 @@ public class KafkaConsumerConfig {
         factory.setConsumerFactory(txStatusConsumerFactory);
         factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.MANUAL_IMMEDIATE);
         factory.setCommonErrorHandler(new DefaultErrorHandler(this::recordGivingUp, new FixedBackOff(2000L, 5)));
+        factory.getContainerProperties().setObservationEnabled(true);
         return factory;
     }
 

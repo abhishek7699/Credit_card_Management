@@ -37,6 +37,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -53,13 +54,15 @@ class BookingServiceTest {
     private ProcessedEventRepository processedEventRepository;
     @Mock
     private TransactionServiceGrpc.TransactionServiceBlockingStub transactionServiceBlockingStub;
+    @Mock
+    private IdempotencyKeyService idempotencyKeyService;
 
     private BookingService service;
 
     @BeforeEach
     void setUp() {
         service = new BookingService(bookingRepository, roomRepository, bookingRoomNightRepository,
-                processedEventRepository, transactionServiceBlockingStub, "HOTEL-001");
+                processedEventRepository, transactionServiceBlockingStub, idempotencyKeyService, "HOTEL-001");
     }
 
     private static Room room(UUID id) {
@@ -435,5 +438,64 @@ class BookingServiceTest {
 
         assertThat(booking.getStatus()).isEqualTo(BookingStatus.HELD);
         verify(bookingRepository, never()).save(booking);
+    }
+
+    // ── holdBooking (Idempotency-Key) ───────────────────────────────────────────
+
+    private static BookingRequest holdRequest(UUID roomId) {
+        return new BookingRequest(roomId, LocalDate.of(2026, 11, 1), LocalDate.of(2026, 11, 3),
+                "Jane", new BookingRequest.CardDetails("4111111111111111", "12/28", "123", "Jane"));
+    }
+
+    @Test
+    void holdBooking_nullKey_createsBookingAndNeverTouchesKeyTable() {
+        UUID roomId = UUID.randomUUID();
+        when(roomRepository.findById(roomId)).thenReturn(Optional.of(room(roomId)));
+        when(bookingRepository.save(any())).thenAnswer(inv -> {
+            Booking b = inv.getArgument(0);
+            ReflectionTestUtils.setField(b, "id", UUID.randomUUID());
+            return b;
+        });
+
+        BookingService.CreateOutcome outcome = service.holdBooking(null, holdRequest(roomId));
+
+        assertThat(outcome.newBooking()).isNotNull();
+        assertThat(outcome.response().status()).isEqualTo(BookingStatus.HELD);
+        verify(bookingRepository).save(any());
+        verifyNoInteractions(idempotencyKeyService);
+    }
+
+    @Test
+    void holdBooking_newKey_claimsCreatesAndRecordsResult() {
+        UUID roomId = UUID.randomUUID();
+        UUID bookingId = UUID.randomUUID();
+        when(idempotencyKeyService.claimOrReplay("k1")).thenReturn(Optional.empty());
+        when(roomRepository.findById(roomId)).thenReturn(Optional.of(room(roomId)));
+        when(bookingRepository.save(any())).thenAnswer(inv -> {
+            Booking b = inv.getArgument(0);
+            ReflectionTestUtils.setField(b, "id", bookingId);
+            return b;
+        });
+
+        BookingService.CreateOutcome outcome = service.holdBooking("k1", holdRequest(roomId));
+
+        assertThat(outcome.newBooking().getId()).isEqualTo(bookingId);
+        assertThat(outcome.response().bookingId()).isEqualTo(bookingId);
+        verify(idempotencyKeyService).recordResult("k1", bookingId, "HELD");
+    }
+
+    @Test
+    void holdBooking_replay_returnsStoredResultWithoutCreatingOrPaying() {
+        UUID storedId = UUID.randomUUID();
+        when(idempotencyKeyService.claimOrReplay("k1"))
+                .thenReturn(Optional.of(new IdempotencyKeyService.StoredResult(storedId, "HELD")));
+
+        BookingService.CreateOutcome outcome = service.holdBooking("k1", holdRequest(UUID.randomUUID()));
+
+        assertThat(outcome.response().bookingId()).isEqualTo(storedId);
+        assertThat(outcome.response().status()).isEqualTo(BookingStatus.HELD);
+        assertThat(outcome.newBooking()).isNull();
+        verify(bookingRepository, never()).save(any());
+        verify(idempotencyKeyService, never()).recordResult(any(), any(), any());
     }
 }

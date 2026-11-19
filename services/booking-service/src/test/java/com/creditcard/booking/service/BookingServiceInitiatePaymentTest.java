@@ -76,7 +76,7 @@ class BookingServiceInitiatePaymentTest {
         channel = InProcessChannelBuilder.forName(name).directExecutor().build();
         var stub = TransactionServiceGrpc.newBlockingStub(channel);
         return new BookingService(bookingRepository, roomRepository, bookingRoomNightRepository,
-                processedEventRepository, stub, "HOTEL-001");
+                processedEventRepository, stub, null, "HOTEL-001");
     }
 
     private static Room room(UUID id, String rate) {

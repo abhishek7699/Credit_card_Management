@@ -108,6 +108,16 @@ services:
     ports:
       - "9000:9000"
 
+  # ── Local tracing (dev profile only) ──────────────────────────────────────
+  # Started only with `docker compose --profile dev up`. Services export spans here
+  # via ZIPKIN_ENDPOINT. Without this container the exports fail and are logged; the
+  # requests themselves are unaffected. Pinned to an exact version per CLAUDE.md.
+  zipkin:
+    image: openzipkin/zipkin:3.4.1
+    profiles: ["dev"]
+    ports:
+      - "9411:9411"
+
   # ── Microservices ─────────────────────────────────────────────────────────
 
   transaction-service:
@@ -126,6 +136,7 @@ services:
       - "8081:8081"
     environment:
       JAVA_TOOL_OPTIONS: "-Xmx256m -XX:MaxMetaspaceSize=128m"
+      ZIPKIN_ENDPOINT: "http://zipkin:9411/api/v2/spans"
       SPRING_DATASOURCE_URL: jdbc:postgresql://cockroachdb:26257/defaultdb?sslmode=disable&currentSchema=transaction_service
       SPRING_DATASOURCE_USERNAME: ${DB_USERNAME}
       SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD}
@@ -150,6 +161,7 @@ services:
       - "8082:8082"
     environment:
       JAVA_TOOL_OPTIONS: "-Xmx256m -XX:MaxMetaspaceSize=128m"
+      ZIPKIN_ENDPOINT: "http://zipkin:9411/api/v2/spans"
       SPRING_DATASOURCE_URL: jdbc:postgresql://cockroachdb:26257/defaultdb?sslmode=disable&currentSchema=authorization_service
       SPRING_DATASOURCE_USERNAME: ${DB_USERNAME}
       SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD}
@@ -168,6 +180,7 @@ services:
       - "8083:8083"
     environment:
       JAVA_TOOL_OPTIONS: "-Xmx256m -XX:MaxMetaspaceSize=128m"
+      ZIPKIN_ENDPOINT: "http://zipkin:9411/api/v2/spans"
       SPRING_DATASOURCE_URL: jdbc:postgresql://cockroachdb:26257/defaultdb?sslmode=disable&currentSchema=fraud_detection_service
       SPRING_DATASOURCE_USERNAME: ${DB_USERNAME}
       SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD}
@@ -187,6 +200,7 @@ services:
       - "8085:8085"
     environment:
       JAVA_TOOL_OPTIONS: "-Xmx256m -XX:MaxMetaspaceSize=128m"
+      ZIPKIN_ENDPOINT: "http://zipkin:9411/api/v2/spans"
       SPRING_DATASOURCE_URL: jdbc:postgresql://cockroachdb:26257/defaultdb?sslmode=disable&currentSchema=settlement_service
       SPRING_DATASOURCE_USERNAME: ${DB_USERNAME}
       SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD}
@@ -207,6 +221,7 @@ services:
       - "8084:8084"
     environment:
       JAVA_TOOL_OPTIONS: "-Xmx256m -XX:MaxMetaspaceSize=128m"
+      ZIPKIN_ENDPOINT: "http://zipkin:9411/api/v2/spans"
       SPRING_DATASOURCE_URL: jdbc:postgresql://cockroachdb:26257/defaultdb?sslmode=disable&currentSchema=notification_service
       SPRING_DATASOURCE_USERNAME: ${DB_USERNAME}
       SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD}
@@ -226,6 +241,7 @@ services:
       - "8091:8091"
     environment:
       JAVA_TOOL_OPTIONS: "-Xmx256m -XX:MaxMetaspaceSize=128m"
+      ZIPKIN_ENDPOINT: "http://zipkin:9411/api/v2/spans"
       SPRING_DATASOURCE_URL: jdbc:postgresql://cockroachdb:26257/defaultdb?sslmode=disable&currentSchema=settlement_service
       SPRING_DATASOURCE_USERNAME: ${DB_USERNAME}
       SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD}
@@ -246,6 +262,7 @@ services:
       - "8092:8092"
     environment:
       JAVA_TOOL_OPTIONS: "-Xmx256m -XX:MaxMetaspaceSize=128m"
+      ZIPKIN_ENDPOINT: "http://zipkin:9411/api/v2/spans"
       SPRING_DATASOURCE_URL: jdbc:postgresql://cockroachdb:26257/defaultdb?sslmode=disable&currentSchema=booking_service
       SPRING_DATASOURCE_USERNAME: ${DB_USERNAME}
       SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD}
@@ -270,6 +287,7 @@ services:
       - "8088:8090"
     environment:
       JAVA_TOOL_OPTIONS: "-Xmx256m -XX:MaxMetaspaceSize=128m"
+      ZIPKIN_ENDPOINT: "http://zipkin:9411/api/v2/spans"
       REDIS_HOST: redis
       REDIS_PORT: 6379
       AUTH_SERVICE_JWKS_URI: http://auth-service:9000/.well-known/jwks.json

@@ -1,5 +1,6 @@
 package com.creditcard.booking.service;
 
+import com.creditcard.booking.controller.dto.BookingCreatedResponse;
 import com.creditcard.booking.controller.dto.BookingRequest;
 import com.creditcard.booking.domain.Booking;
 import com.creditcard.booking.domain.BookingRoomNight;
@@ -32,6 +33,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
@@ -53,6 +55,7 @@ public class BookingService {
     private final BookingRoomNightRepository bookingRoomNightRepository;
     private final ProcessedEventRepository processedEventRepository;
     private final TransactionServiceGrpc.TransactionServiceBlockingStub transactionServiceBlockingStub;
+    private final IdempotencyKeyService idempotencyKeyService;
     private final String merchantId;
 
     public BookingService(BookingRepository bookingRepository,
@@ -60,12 +63,14 @@ public class BookingService {
                            BookingRoomNightRepository bookingRoomNightRepository,
                            ProcessedEventRepository processedEventRepository,
                            TransactionServiceGrpc.TransactionServiceBlockingStub transactionServiceBlockingStub,
+                           IdempotencyKeyService idempotencyKeyService,
                            @Value("${booking.merchant-id}") String merchantId) {
         this.bookingRepository = bookingRepository;
         this.roomRepository = roomRepository;
         this.bookingRoomNightRepository = bookingRoomNightRepository;
         this.processedEventRepository = processedEventRepository;
         this.transactionServiceBlockingStub = transactionServiceBlockingStub;
+        this.idempotencyKeyService = idempotencyKeyService;
         this.merchantId = merchantId;
     }
 
@@ -100,6 +105,40 @@ public class BookingService {
             throw new RoomUnavailableException(room.getId(), request.checkIn(), request.checkOut());
         }
         return savedBooking;
+    }
+
+    /**
+     * What POST /api/v1/bookings returns. {@code newBooking} is the HELD booking that still
+     * needs its payment initiated; it is null when the request replayed a stored result,
+     * because the first request already initiated payment.
+     */
+    public record CreateOutcome(BookingCreatedResponse response, Booking newBooking) {
+    }
+
+    /**
+     * Holds a booking, honoring an optional Idempotency-Key. A null key behaves exactly as
+     * {@link #createHeldBooking} alone. With a key, a replay returns the first request's
+     * stored id and status without creating a booking or initiating payment again.
+     */
+    @Transactional
+    public CreateOutcome holdBooking(String idempotencyKey, BookingRequest request) {
+        if (idempotencyKey == null) {
+            Booking booking = createHeldBooking(request);
+            return new CreateOutcome(toCreatedResponse(booking), booking);
+        }
+        Optional<IdempotencyKeyService.StoredResult> replay = idempotencyKeyService.claimOrReplay(idempotencyKey);
+        if (replay.isPresent()) {
+            IdempotencyKeyService.StoredResult stored = replay.get();
+            return new CreateOutcome(
+                    new BookingCreatedResponse(stored.resourceId(), BookingStatus.valueOf(stored.status())), null);
+        }
+        Booking booking = createHeldBooking(request);
+        idempotencyKeyService.recordResult(idempotencyKey, booking.getId(), booking.getStatus().name());
+        return new CreateOutcome(toCreatedResponse(booking), booking);
+    }
+
+    private static BookingCreatedResponse toCreatedResponse(Booking booking) {
+        return new BookingCreatedResponse(booking.getId(), booking.getStatus());
     }
 
     /**
