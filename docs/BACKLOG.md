@@ -117,3 +117,7 @@ These were named up front as out of scope for every layer until explicitly start
 ## Gateway (from PR #21)
 
 - **Validate Idempotency-Key at the gateway**: reject keys that are non-ASCII or longer than 255 characters, instead of forwarding them to transaction-service.
+
+## Distributed tracing
+
+- **fraud.alert.raised does not use the shared event envelope yet**: its payload is published in its own shape, not the envelope the other topics use. Left as is so the event format does not change in the tracing work. Move it onto the envelope in a separate change with a consumer migration (notification-service reads it).

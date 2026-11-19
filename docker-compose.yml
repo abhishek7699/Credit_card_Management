@@ -136,6 +136,8 @@ services:
       SPRING_VAULT_PORT: 8200
       SPRING_VAULT_SCHEME: http
       SPRING_VAULT_TOKEN: ${VAULT_DEV_ROOT_TOKEN}
+      TRACING_SAMPLING_PROBABILITY: "1.0"
+      ZIPKIN_ENDPOINT: "http://zipkin:9411/api/v2/spans"
 
   authorization-service:
     build:
@@ -154,6 +156,8 @@ services:
       SPRING_DATASOURCE_USERNAME: ${DB_USERNAME}
       SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD}
       SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      TRACING_SAMPLING_PROBABILITY: "1.0"
+      ZIPKIN_ENDPOINT: "http://zipkin:9411/api/v2/spans"
 
   fraud-detection-service:
     build:
@@ -172,6 +176,8 @@ services:
       SPRING_DATASOURCE_USERNAME: ${DB_USERNAME}
       SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD}
       SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      TRACING_SAMPLING_PROBABILITY: "1.0"
+      ZIPKIN_ENDPOINT: "http://zipkin:9411/api/v2/spans"
 
   settlement-service:
     build:
@@ -194,6 +200,8 @@ services:
       SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       SETTLEMENT_INTERCHANGE_FEE_RATE: "0.02"
       SETTLEMENT_BATCH_CRON: "0 59 23 * * *"
+      TRACING_SAMPLING_PROBABILITY: "1.0"
+      ZIPKIN_ENDPOINT: "http://zipkin:9411/api/v2/spans"
 
   notification-service:
     build:
@@ -221,12 +229,25 @@ services:
       NOTIFICATION_CHANNELS_EMAIL_ENABLED: "true"
       SPRING_MAIL_HOST: mailpit
       SPRING_MAIL_PORT: 1025
+      TRACING_SAMPLING_PROBABILITY: "1.0"
+      ZIPKIN_ENDPOINT: "http://zipkin:9411/api/v2/spans"
 
   # Dev-only mail catcher. Nothing leaves the machine. Inbox UI at http://localhost:8025
   mailpit:
     image: axllent/mailpit:v1.20.2
     ports:
       - "8025:8025"
+
+  # ── Local tracing (dev profile only) ──────────────────────────────────────
+  # Started only with `docker compose --profile dev up` (or COMPOSE_PROFILES=dev). Services
+  # export sampled spans here (TRACING_SAMPLING_PROBABILITY=1.0 in the service env blocks).
+  # Without this container the exports fail and are logged; requests are unaffected.
+  # Pinned to an exact version per CLAUDE.md. UI at http://localhost:9411
+  zipkin:
+    image: openzipkin/zipkin:3.4.1
+    profiles: ["dev"]
+    ports:
+      - "9411:9411"
 
   reporting-service:
     build:
@@ -269,6 +290,8 @@ services:
       SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD}
       SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       TRANSACTION_SERVICE_GRPC_ADDRESS: static://transaction-service:9090
+      TRACING_SAMPLING_PROBABILITY: "1.0"
+      ZIPKIN_ENDPOINT: "http://zipkin:9411/api/v2/spans"
 
   api-gateway:
     build:
@@ -295,6 +318,8 @@ services:
       TRANSACTION_SERVICE_GRPC_ADDRESS: static://transaction-service:9090
       REPORTING_SERVICE_URL: http://reporting-service:8086
       BOOKING_SERVICE_URL: http://booking-service:8080
+      TRACING_SAMPLING_PROBABILITY: "1.0"
+      ZIPKIN_ENDPOINT: "http://zipkin:9411/api/v2/spans"
 
   # Dev-only convenience seed (layer 2c): an ACTIVE authorization_service.card_accounts
   # row for 4111111111111111, so checkout can be exercised by hand (frontend, curl,
