@@ -6,6 +6,7 @@ import com.creditcard.transaction.grpc.v1.GetTransactionResponse;
 import com.creditcard.transaction.grpc.v1.InitiateTransactionRequest;
 import com.creditcard.transaction.grpc.v1.InitiateTransactionResponse;
 import com.creditcard.transaction.grpc.v1.TransactionServiceGrpc;
+import com.creditcard.transaction.service.IdempotencyKeyService;
 import com.creditcard.transaction.service.TransactionService;
 import io.grpc.Status;
 import io.grpc.stub.StreamObserver;
@@ -13,10 +14,12 @@ import net.devh.boot.grpc.server.service.GrpcService;
 
 import java.math.BigDecimal;
 import java.util.Optional;
-import java.util.UUID;
 
 @GrpcService
 public class TransactionGrpcService extends TransactionServiceGrpc.TransactionServiceImplBase {
+
+    /** Matches the idempotency_keys.idempotency_key column width. */
+    static final int MAX_IDEMPOTENCY_KEY_LENGTH = 255;
 
     private final TransactionService transactionService;
 
@@ -54,9 +57,21 @@ public class TransactionGrpcService extends TransactionServiceGrpc.TransactionSe
             return;
         }
 
+        String idempotencyKey = IdempotencyKeyInterceptor.CONTEXT_KEY.get();
+        if (idempotencyKey != null && idempotencyKey.isBlank()) {
+            idempotencyKey = null;
+        }
+        if (idempotencyKey != null && idempotencyKey.length() > MAX_IDEMPOTENCY_KEY_LENGTH) {
+            responseObserver.onError(Status.INVALID_ARGUMENT
+                    .withDescription("idempotency-key must be at most " + MAX_IDEMPOTENCY_KEY_LENGTH + " characters")
+                    .asRuntimeException());
+            return;
+        }
+
         try {
             BigDecimal amount = new BigDecimal(request.getAmount());
-            UUID transactionId = transactionService.initiateTransaction(
+            IdempotencyKeyService.StoredResult result = transactionService.initiateTransaction(
+                    idempotencyKey,
                     request.getCardNumber(),
                     request.getCardholderName(),
                     amount,
@@ -65,8 +80,8 @@ public class TransactionGrpcService extends TransactionServiceGrpc.TransactionSe
             );
 
             responseObserver.onNext(InitiateTransactionResponse.newBuilder()
-                    .setTransactionId(transactionId.toString())
-                    .setStatus("PENDING")
+                    .setTransactionId(result.resourceId().toString())
+                    .setStatus(result.status())
                     .build());
             responseObserver.onCompleted();
 

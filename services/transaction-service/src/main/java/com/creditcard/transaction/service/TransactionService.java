@@ -36,16 +36,32 @@ public class TransactionService {
     private final TransactionRepository transactionRepository;
     private final KafkaTemplate<String, TransactionInitiatedEvent> kafkaTemplate;
     private final OutboxService outboxService;
+    private final IdempotencyKeyService idempotencyKeyService;
 
     public TransactionService(
             TokenizationService tokenizationService,
             TransactionRepository transactionRepository,
             KafkaTemplate<String, TransactionInitiatedEvent> kafkaTemplate,
-            OutboxService outboxService) {
+            OutboxService outboxService,
+            IdempotencyKeyService idempotencyKeyService) {
         this.tokenizationService = tokenizationService;
         this.transactionRepository = transactionRepository;
         this.kafkaTemplate = kafkaTemplate;
         this.outboxService = outboxService;
+        this.idempotencyKeyService = idempotencyKeyService;
+    }
+
+    /**
+     * InitiateTransaction with optional request idempotency. A null key behaves exactly like
+     * the un-keyed method. On replay, tokenization and the Kafka event are skipped.
+     */
+    @Transactional
+    public IdempotencyKeyService.StoredResult initiateTransaction(
+            String idempotencyKey, String rawCardNumber, String cardholderName,
+            BigDecimal amount, String currencyCode, String merchantId) {
+        return idempotencyKeyService.executeOnce(idempotencyKey, () -> new IdempotencyKeyService.StoredResult(
+                initiateTransaction(rawCardNumber, cardholderName, amount, currencyCode, merchantId),
+                TransactionStatus.PENDING.name()));
     }
 
     @Transactional

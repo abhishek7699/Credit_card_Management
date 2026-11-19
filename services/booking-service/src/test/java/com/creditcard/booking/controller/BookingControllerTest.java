@@ -28,6 +28,8 @@ import java.util.UUID;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -71,7 +73,7 @@ class BookingControllerTest {
     void validRequest_returns201Confirmed() throws Exception {
         UUID roomId = UUID.randomUUID();
         Booking booking = confirmedBooking(roomId);
-        when(bookingService.createConfirmedBooking(any())).thenReturn(booking);
+        when(bookingService.createConfirmedBooking(any(), any())).thenReturn(booking);
 
         mockMvc.perform(post("/api/v1/bookings")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -81,9 +83,48 @@ class BookingControllerTest {
     }
 
     @Test
+    void idempotencyKeyHeaderIsPassedToService() throws Exception {
+        UUID roomId = UUID.randomUUID();
+        when(bookingService.createConfirmedBooking(any(), any())).thenReturn(confirmedBooking(roomId));
+
+        mockMvc.perform(post("/api/v1/bookings")
+                        .header("Idempotency-Key", "front-desk-42")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(bookingRequestJson(roomId)))
+                .andExpect(status().isCreated());
+
+        verify(bookingService).createConfirmedBooking(eq("front-desk-42"), any());
+    }
+
+    @Test
+    void blankIdempotencyKeyIsTreatedAsAbsent() throws Exception {
+        UUID roomId = UUID.randomUUID();
+        when(bookingService.createConfirmedBooking(any(), any())).thenReturn(confirmedBooking(roomId));
+
+        mockMvc.perform(post("/api/v1/bookings")
+                        .header("Idempotency-Key", "   ")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(bookingRequestJson(roomId)))
+                .andExpect(status().isCreated());
+
+        verify(bookingService).createConfirmedBooking(isNull(), any());
+    }
+
+    @Test
+    void overlongIdempotencyKey_returns400AndCreatesNothing() throws Exception {
+        mockMvc.perform(post("/api/v1/bookings")
+                        .header("Idempotency-Key", "k".repeat(256))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(bookingRequestJson(UUID.randomUUID())))
+                .andExpect(status().isBadRequest());
+
+        verify(bookingService, never()).createConfirmedBooking(any(), any());
+    }
+
+    @Test
     void nonexistentRoom_returns404() throws Exception {
         UUID roomId = UUID.randomUUID();
-        when(bookingService.createConfirmedBooking(any())).thenThrow(new RoomNotFoundException(roomId));
+        when(bookingService.createConfirmedBooking(any(), any())).thenThrow(new RoomNotFoundException(roomId));
 
         mockMvc.perform(post("/api/v1/bookings")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -95,7 +136,7 @@ class BookingControllerTest {
     @Test
     void roomUnavailable_returns409() throws Exception {
         UUID roomId = UUID.randomUUID();
-        when(bookingService.createConfirmedBooking(any())).thenThrow(
+        when(bookingService.createConfirmedBooking(any(), any())).thenThrow(
                 new RoomUnavailableException(roomId, LocalDate.of(2026, 11, 1), LocalDate.of(2026, 11, 3)));
 
         mockMvc.perform(post("/api/v1/bookings")

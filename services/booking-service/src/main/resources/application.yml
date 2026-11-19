@@ -58,6 +58,10 @@ grpc:
       keep-alive-time: 30s
       keep-alive-timeout: 5s
 
+# Request idempotency (POST /api/v1/bookings Idempotency-Key): how long a key is honored.
+idempotency:
+  ttl: PT24H
+
 booking:
   merchant-id: ${BOOKING_MERCHANT_ID:HOTEL-001}
   checkout-timeout-minutes: ${BOOKING_CHECKOUT_TIMEOUT_MINUTES:10}

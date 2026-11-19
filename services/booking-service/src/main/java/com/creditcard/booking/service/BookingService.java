@@ -39,6 +39,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
@@ -71,6 +72,7 @@ public class BookingService {
     private final ChargeRepository chargeRepository;
     private final CheckoutPaymentAttemptRepository checkoutPaymentAttemptRepository;
     private final TransactionServiceGrpc.TransactionServiceBlockingStub transactionServiceBlockingStub;
+    private final IdempotencyKeyService idempotencyKeyService;
     private final String merchantId;
 
     public BookingService(BookingRepository bookingRepository,
@@ -80,6 +82,7 @@ public class BookingService {
                            ChargeRepository chargeRepository,
                            CheckoutPaymentAttemptRepository checkoutPaymentAttemptRepository,
                            TransactionServiceGrpc.TransactionServiceBlockingStub transactionServiceBlockingStub,
+                           IdempotencyKeyService idempotencyKeyService,
                            @Value("${booking.merchant-id}") String merchantId) {
         this.bookingRepository = bookingRepository;
         this.roomRepository = roomRepository;
@@ -88,7 +91,27 @@ public class BookingService {
         this.chargeRepository = chargeRepository;
         this.checkoutPaymentAttemptRepository = checkoutPaymentAttemptRepository;
         this.transactionServiceBlockingStub = transactionServiceBlockingStub;
+        this.idempotencyKeyService = idempotencyKeyService;
         this.merchantId = merchantId;
+    }
+
+    /**
+     * Confirms a booking, honoring an optional Idempotency-Key. A null key behaves exactly
+     * like {@link #createConfirmedBooking(BookingRequest)}. With a key, a replay returns the
+     * first request's stored booking without creating another one or re-checking the room.
+     */
+    @Transactional
+    public Booking createConfirmedBooking(String idempotencyKey, BookingRequest request) {
+        if (idempotencyKey == null) {
+            return createConfirmedBooking(request);
+        }
+        Optional<IdempotencyKeyService.StoredResult> replay = idempotencyKeyService.claimOrReplay(idempotencyKey);
+        if (replay.isPresent()) {
+            return getById(replay.get().resourceId());
+        }
+        Booking booking = createConfirmedBooking(request);
+        idempotencyKeyService.recordResult(idempotencyKey, booking.getId(), booking.getStatus().name());
+        return booking;
     }
 
     /**

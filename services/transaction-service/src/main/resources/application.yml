@@ -49,6 +49,10 @@ management:
     health:
       show-details: always
 
+# Request idempotency (InitiateTransaction Idempotency-Key): how long a key is honored.
+idempotency:
+  ttl: PT24H
+
 # HashiCorp Vault connection (spring-vault-core — NOT spring-cloud-vault)
 vault:
   host: ${VAULT_HOST:localhost}

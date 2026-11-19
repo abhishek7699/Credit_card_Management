@@ -62,6 +62,8 @@ class BookingServiceCheckOutTest {
     private ChargeRepository chargeRepository;
     @Mock
     private CheckoutPaymentAttemptRepository checkoutPaymentAttemptRepository;
+    @Mock
+    private IdempotencyKeyService idempotencyKeyService;
 
     private Server fakeServer;
     private ManagedChannel channel;
@@ -82,7 +84,7 @@ class BookingServiceCheckOutTest {
         channel = InProcessChannelBuilder.forName(name).directExecutor().build();
         var stub = TransactionServiceGrpc.newBlockingStub(channel);
         return new BookingService(bookingRepository, roomRepository, bookingRoomNightRepository,
-                processedEventRepository, chargeRepository, checkoutPaymentAttemptRepository, stub, "HOTEL-001");
+                processedEventRepository, chargeRepository, checkoutPaymentAttemptRepository, stub, idempotencyKeyService, "HOTEL-001");
     }
 
     /** {@code legacyRoomPaymentTransactionId} is set so the room cost cancels back out

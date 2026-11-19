@@ -67,6 +67,8 @@ class BookingServiceTest {
     private CheckoutPaymentAttemptRepository checkoutPaymentAttemptRepository;
     @Mock
     private TransactionServiceGrpc.TransactionServiceBlockingStub transactionServiceBlockingStub;
+    @Mock
+    private IdempotencyKeyService idempotencyKeyService;
 
     private BookingService service;
 
@@ -74,7 +76,7 @@ class BookingServiceTest {
     void setUp() {
         service = new BookingService(bookingRepository, roomRepository, bookingRoomNightRepository,
                 processedEventRepository, chargeRepository, checkoutPaymentAttemptRepository,
-                transactionServiceBlockingStub, "HOTEL-001");
+                transactionServiceBlockingStub, idempotencyKeyService, "HOTEL-001");
     }
 
     private static Room room(UUID id) {
