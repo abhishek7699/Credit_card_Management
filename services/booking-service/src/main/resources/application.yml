@@ -65,3 +65,12 @@ idempotency:
 booking:
   merchant-id: ${BOOKING_MERCHANT_ID:HOTEL-001}
   checkout-timeout-minutes: ${BOOKING_CHECKOUT_TIMEOUT_MINUTES:10}
+
+# Swagger UI (/swagger-ui.html) and OpenAPI spec (/v3/api-docs) are OFF by default, so
+# GKE and any run without a profile expose no API docs. Enabled by application-local.yml
+# and application-dev.yml only.
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false

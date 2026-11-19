@@ -1,6 +1,7 @@
 package com.creditcard.gateway.config;
 
 import com.creditcard.gateway.exception.GatewayAuthExceptionHandler;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -11,6 +12,8 @@ import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.security.oauth2.server.resource.authentication.ReactiveJwtAuthenticationConverter;
 import org.springframework.security.web.server.SecurityWebFilterChain;
+import org.springframework.security.web.server.util.matcher.ServerWebExchangeMatcher;
+import org.springframework.security.web.server.util.matcher.ServerWebExchangeMatchers;
 import reactor.core.publisher.Flux;
 
 import java.util.Collection;
@@ -24,8 +27,23 @@ public class SecurityConfig {
 
     private final GatewayAuthExceptionHandler authExceptionHandler;
 
-    public SecurityConfig(GatewayAuthExceptionHandler authExceptionHandler) {
+    private final ServerWebExchangeMatcher docsMatcher;
+
+    public SecurityConfig(GatewayAuthExceptionHandler authExceptionHandler,
+                          @Value("${springdoc.api-docs.enabled:false}") boolean docsEnabled) {
         this.authExceptionHandler = authExceptionHandler;
+        this.docsMatcher = docsMatcher(docsEnabled);
+    }
+
+    /**
+     * Swagger UI and the OpenAPI spec need no token, but only when the docs are enabled
+     * (local/dev profiles). Disabled, this matches nothing, so the paths stay protected.
+     */
+    static ServerWebExchangeMatcher docsMatcher(boolean enabled) {
+        return enabled
+                ? ServerWebExchangeMatchers.pathMatchers("/swagger-ui.html", "/swagger-ui/**",
+                        "/webjars/swagger-ui/**", "/v3/api-docs/**")
+                : exchange -> ServerWebExchangeMatcher.MatchResult.notMatch();
     }
 
     @Bean
@@ -33,6 +51,8 @@ public class SecurityConfig {
         return http
                 .csrf(ServerHttpSecurity.CsrfSpec::disable)
                 .authorizeExchange(auth -> auth
+                        // API docs (local/dev only; see docsMatcher)
+                        .matchers(docsMatcher).permitAll()
                         // Public endpoints
                         .pathMatchers("/actuator/**").permitAll()
                         .pathMatchers("/fallback/**").permitAll()

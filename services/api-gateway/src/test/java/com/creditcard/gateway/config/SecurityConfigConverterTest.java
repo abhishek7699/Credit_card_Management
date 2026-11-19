@@ -20,7 +20,7 @@ class SecurityConfigConverterTest {
     @BeforeEach
     void setUp() {
         SecurityConfig config = new SecurityConfig(
-                new GatewayAuthExceptionHandler(new ObjectMapper()));
+                new GatewayAuthExceptionHandler(new ObjectMapper()), false);
         converter = config.jwtAuthenticationConverter();
     }
 

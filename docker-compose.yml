@@ -186,6 +186,7 @@ services:
       - "8089:8080"
       - "8085:8085"
     environment:
+      SPRING_PROFILES_ACTIVE: local
       JAVA_TOOL_OPTIONS: "-Xmx256m -XX:MaxMetaspaceSize=128m"
       SPRING_DATASOURCE_URL: jdbc:postgresql://cockroachdb:26257/defaultdb?sslmode=disable&currentSchema=settlement_service
       SPRING_DATASOURCE_USERNAME: ${DB_USERNAME}
@@ -205,7 +206,10 @@ services:
         condition: service_healthy
     ports:
       - "8084:8084"
+      # Notification API (and /v3/api-docs) listens on 8080 inside the container; 8084 is management only
+      - "8094:8080"
     environment:
+      SPRING_PROFILES_ACTIVE: local
       JAVA_TOOL_OPTIONS: "-Xmx256m -XX:MaxMetaspaceSize=128m"
       SPRING_DATASOURCE_URL: jdbc:postgresql://cockroachdb:26257/defaultdb?sslmode=disable&currentSchema=notification_service
       SPRING_DATASOURCE_USERNAME: ${DB_USERNAME}
@@ -225,6 +229,7 @@ services:
       - "8086:8086"
       - "8091:8091"
     environment:
+      SPRING_PROFILES_ACTIVE: local
       JAVA_TOOL_OPTIONS: "-Xmx256m -XX:MaxMetaspaceSize=128m"
       SPRING_DATASOURCE_URL: jdbc:postgresql://cockroachdb:26257/defaultdb?sslmode=disable&currentSchema=settlement_service
       SPRING_DATASOURCE_USERNAME: ${DB_USERNAME}
@@ -245,6 +250,7 @@ services:
       - "8093:8080"
       - "8092:8092"
     environment:
+      SPRING_PROFILES_ACTIVE: local
       JAVA_TOOL_OPTIONS: "-Xmx256m -XX:MaxMetaspaceSize=128m"
       SPRING_DATASOURCE_URL: jdbc:postgresql://cockroachdb:26257/defaultdb?sslmode=disable&currentSchema=booking_service
       SPRING_DATASOURCE_USERNAME: ${DB_USERNAME}
@@ -269,6 +275,7 @@ services:
       - "8087:8080"
       - "8088:8090"
     environment:
+      SPRING_PROFILES_ACTIVE: local
       JAVA_TOOL_OPTIONS: "-Xmx256m -XX:MaxMetaspaceSize=128m"
       REDIS_HOST: redis
       REDIS_PORT: 6379
