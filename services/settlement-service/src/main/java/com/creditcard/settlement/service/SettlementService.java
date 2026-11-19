@@ -12,6 +12,7 @@ import org.springframework.batch.core.Job;
 import org.springframework.batch.core.JobParameters;
 import org.springframework.batch.core.JobParametersBuilder;
 import org.springframework.batch.core.launch.JobLauncher;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
@@ -27,15 +28,18 @@ public class SettlementService {
     private final Job settlementJob;
     private final SettlementBatchRepository settlementBatchRepository;
     private final MerchantSettlementRepository merchantSettlementRepository;
+    private final String acquirerName;
 
     public SettlementService(JobLauncher jobLauncher,
                               Job settlementJob,
                               SettlementBatchRepository settlementBatchRepository,
-                              MerchantSettlementRepository merchantSettlementRepository) {
+                              MerchantSettlementRepository merchantSettlementRepository,
+                              @Value("${settlement.acquirer.name}") String acquirerName) {
         this.jobLauncher = jobLauncher;
         this.settlementJob = settlementJob;
         this.settlementBatchRepository = settlementBatchRepository;
         this.merchantSettlementRepository = merchantSettlementRepository;
+        this.acquirerName = acquirerName;
     }
 
     public SettlementBatch launchJob(String triggeredBy) {
@@ -48,6 +52,7 @@ public class SettlementService {
         SettlementBatch batch = new SettlementBatch();
         batch.setBatchId(batchId);
         batch.setTriggeredBy(triggeredBy);
+        batch.setAcquirerName(acquirerName);
         batch = settlementBatchRepository.save(batch);
 
         JobParameters params = new JobParametersBuilder()

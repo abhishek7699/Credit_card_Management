@@ -42,6 +42,9 @@ public class SettlementBatch {
     @Column(name = "failure_reason", columnDefinition = "TEXT")
     private String failureReason;
 
+    @Column(name = "acquirer_name", length = 100)
+    private String acquirerName;
+
     public String getBatchId() { return batchId; }
     public void setBatchId(String batchId) { this.batchId = batchId; }
 
@@ -73,4 +76,7 @@ public class SettlementBatch {
 
     public String getFailureReason() { return failureReason; }
     public void setFailureReason(String failureReason) { this.failureReason = failureReason; }
+
+    public String getAcquirerName() { return acquirerName; }
+    public void setAcquirerName(String acquirerName) { this.acquirerName = acquirerName; }
 }

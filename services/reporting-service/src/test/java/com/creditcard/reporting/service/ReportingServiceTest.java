@@ -223,6 +223,22 @@ class ReportingServiceTest {
         assertThat(response.getTransactionCount()).isEqualTo(5);
     }
 
+    @Test
+    void getMerchantSettlement_includesAcquirerNameFromItsBatch() {
+        MerchantSettlement ms = buildMerchantSettlement("batch-1", "merchant-001",
+                5, "500.00", "10.00", "490.00");
+        SettlementBatch batch = new SettlementBatch();
+        batch.setBatchId("batch-1");
+        batch.setAcquirerName("Chase");
+
+        when(merchantSettlementRepository.findByBatchIdAndMerchantId("batch-1", "merchant-001"))
+                .thenReturn(Optional.of(ms));
+        when(batchRepository.findById("batch-1")).thenReturn(Optional.of(batch));
+
+        var response = reportingService.getMerchantSettlement("batch-1", "merchant-001");
+        assertThat(response.getAcquirerName()).isEqualTo("Chase");
+    }
+
     // ── getBatch ──────────────────────────────────────────────────────────────
 
     @Test
@@ -246,12 +262,14 @@ class ReportingServiceTest {
         batch.setTotalNetAmount(new BigDecimal("9800.00"));
         batch.setStartedAt(Instant.parse("2026-06-13T23:59:00Z"));
         batch.setCompletedAt(Instant.parse("2026-06-13T23:59:47Z"));
+        batch.setAcquirerName("Chase");
 
         when(batchRepository.findById("batch-001")).thenReturn(Optional.of(batch));
 
         SettlementBatchResponse response = reportingService.getBatch("batch-001");
         assertThat(response.getBatchId()).isEqualTo("batch-001");
         assertThat(response.getStatus()).isEqualTo("COMPLETED");
+        assertThat(response.getAcquirerName()).isEqualTo("Chase");
         assertThat(response.getTotalTransactionsProcessed()).isEqualTo(100);
     }
 

@@ -287,6 +287,7 @@ class ReportingIntegrationTest {
         batch.setTotalNetAmount(new BigDecimal("9800.00"));
         batch.setStartedAt(Instant.parse("2026-06-13T23:59:00Z"));
         batch.setCompletedAt(Instant.parse("2026-06-13T23:59:47Z"));
+        batch.setAcquirerName("Chase");
         batchRepository.save(batch);
 
         String url = base() + "/settlements/batch-complete-001";
@@ -297,6 +298,7 @@ class ReportingIntegrationTest {
         SettlementBatchResponse body = response.getBody();
         assertThat(body.getBatchId()).isEqualTo("batch-complete-001");
         assertThat(body.getStatus()).isEqualTo("COMPLETED");
+        assertThat(body.getAcquirerName()).isEqualTo("Chase");
         assertThat(body.getTriggeredBy()).isEqualTo("SCHEDULER");
         assertThat(body.getTotalTransactionsProcessed()).isEqualTo(100);
         assertThat(body.getTotalGrossAmount()).isEqualByComparingTo("10000.00");
@@ -308,6 +310,17 @@ class ReportingIntegrationTest {
 
     @Test
     void scenario_3_2_getMerchantSettlementInBatch_returnsCorrectRecord() {
+        SettlementBatch batch = new SettlementBatch();
+        batch.setBatchId("batch-xyz");
+        batch.setStatus("COMPLETED");
+        batch.setTriggeredBy("SCHEDULER");
+        batch.setTotalTransactionsProcessed(10);
+        batch.setTotalGrossAmount(new BigDecimal("1000.00"));
+        batch.setTotalInterchangeFees(new BigDecimal("20.00"));
+        batch.setTotalNetAmount(new BigDecimal("980.00"));
+        batch.setStartedAt(Instant.parse("2026-06-13T23:59:00Z"));
+        batch.setAcquirerName("Chase");
+        batchRepository.save(batch);
         saveMerchantSettlement("ms-batch-m", "batch-xyz", "merchant-001", 10,
                 "1000.00", "20.00", "980.00", LocalDate.of(2026, 6, 13));
 
@@ -318,6 +331,7 @@ class ReportingIntegrationTest {
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         MerchantSettlementResponse body = response.getBody();
         assertThat(body.getMerchantId()).isEqualTo("merchant-001");
+        assertThat(body.getAcquirerName()).isEqualTo("Chase");
         assertThat(body.getBatchId()).isEqualTo("batch-xyz");
         assertThat(body.getTransactionCount()).isEqualTo(10);
         assertThat(body.getGrossAmount()).isEqualByComparingTo("1000.00");

@@ -166,4 +166,30 @@ class SettlementServiceTest {
         assertThatThrownBy(() -> settlementService.findMerchantSettlement("ghost", "batch-001"))
                 .isInstanceOf(MerchantSettlementNotFoundException.class);
     }
+
+    @Test
+    void launchJob_storesConfiguredAcquirerNameOnNewBatch() throws Exception {
+        SettlementService service = new SettlementService(jobLauncher, settlementJob,
+                settlementBatchRepository, merchantSettlementRepository, "Chase");
+        JobExecution execution = mock(JobExecution.class);
+        when(execution.getExitStatus()).thenReturn(ExitStatus.COMPLETED);
+        when(jobLauncher.run(eq(settlementJob), any(JobParameters.class))).thenReturn(execution);
+
+        SettlementBatch result = service.launchJob("SCHEDULER");
+
+        assertThat(result.getAcquirerName()).isEqualTo("Chase");
+    }
+
+    @Test
+    void launchJob_changedConfig_storesNewAcquirerName() throws Exception {
+        SettlementService service = new SettlementService(jobLauncher, settlementJob,
+                settlementBatchRepository, merchantSettlementRepository, "Citi");
+        JobExecution execution = mock(JobExecution.class);
+        when(execution.getExitStatus()).thenReturn(ExitStatus.COMPLETED);
+        when(jobLauncher.run(eq(settlementJob), any(JobParameters.class))).thenReturn(execution);
+
+        SettlementBatch result = service.launchJob("SCHEDULER");
+
+        assertThat(result.getAcquirerName()).isEqualTo("Citi");
+    }
 }

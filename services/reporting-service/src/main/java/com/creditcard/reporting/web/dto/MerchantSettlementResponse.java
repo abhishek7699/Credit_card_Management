@@ -14,6 +14,10 @@ public class MerchantSettlementResponse {
     private BigDecimal netSettlementAmount;
     private String currencyCode;
     private LocalDate settlementDate;
+    private String acquirerName;
+
+    public String getAcquirerName() { return acquirerName; }
+    public void setAcquirerName(String acquirerName) { this.acquirerName = acquirerName; }
 
     public String getId() { return id; }
     public void setId(String id) { this.id = id; }

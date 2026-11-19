@@ -39,6 +39,9 @@ public class SettlementBatch {
     @Column(name = "failure_reason")
     private String failureReason;
 
+    @Column(name = "acquirer_name", length = 100)
+    private String acquirerName;
+
     @PrePersist
     protected void onCreate() {
         startedAt = Instant.now();
@@ -73,4 +76,7 @@ public class SettlementBatch {
 
     public String getFailureReason() { return failureReason; }
     public void setFailureReason(String failureReason) { this.failureReason = failureReason; }
+
+    public String getAcquirerName() { return acquirerName; }
+    public void setAcquirerName(String acquirerName) { this.acquirerName = acquirerName; }
 }
