@@ -41,6 +41,10 @@ dependencies {
 
     // gRPC — client-side only, to call transaction-service (same versions as api-gateway)
     implementation "net.devh:grpc-client-spring-boot-starter:${lognetGrpcVersion}"
+    // Micrometer distributed tracing: Kafka headers, and the Brave gRPC client interceptor (booking -> transaction-service)
+    implementation 'io.micrometer:micrometer-tracing-bridge-brave'
+    implementation 'io.zipkin.reporter2:zipkin-reporter-brave'
+    implementation 'io.zipkin.brave:brave-instrumentation-grpc'
     implementation "io.grpc:grpc-protobuf:${grpcVersion}"
     implementation "io.grpc:grpc-stub:${grpcVersion}"
     implementation "io.grpc:grpc-netty:${grpcVersion}"
