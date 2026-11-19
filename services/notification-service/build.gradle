@@ -27,6 +27,9 @@ dependencies {
     // Spring Kafka
     implementation 'org.springframework.kafka:spring-kafka'
 
+    // Email channel (JavaMailSender). Only used when notification.channels.email.enabled=true
+    implementation 'org.springframework.boot:spring-boot-starter-mail'
+
     // Database — CockroachDB uses PostgreSQL wire protocol
     runtimeOnly 'org.postgresql:postgresql'
 

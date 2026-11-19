@@ -29,6 +29,9 @@ spring:
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+  mail:
+    host: ${SPRING_MAIL_HOST:localhost}
+    port: ${SPRING_MAIL_PORT:1025}
   flyway:
     enabled: true
     locations: classpath:db/migration
@@ -58,3 +61,14 @@ springdoc:
     enabled: false
   swagger-ui:
     enabled: false
+
+# Email is log-only unless notification.channels.email.enabled=true (compose sets it for
+# local runs and sends to Mailpit). Retry: max-attempts includes the first send.
+notification:
+  channels:
+    email:
+      enabled: false
+      from: notifications@creditcard.local
+  delivery:
+    max-attempts: 3
+    backoff-millis: 1000

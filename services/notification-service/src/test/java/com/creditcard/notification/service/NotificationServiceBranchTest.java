@@ -48,8 +48,15 @@ class NotificationServiceBranchTest {
     private NotificationService service() {
         when(emailGateway.channel()).thenReturn(NotificationChannelGateway.NotificationChannel.EMAIL);
         when(smsGateway.channel()).thenReturn(NotificationChannelGateway.NotificationChannel.SMS);
-        return new NotificationService(contactRepo, recordRepo, processedEventRepo,
+        // Default outcomes: email really sends, SMS is log-only. Tests override as needed.
+        lenient().when(emailGateway.send(anyString(), anyString(), anyString()))
+                .thenReturn(NotificationChannelGateway.DeliveryOutcome.SENT);
+        lenient().when(smsGateway.send(anyString(), anyString(), anyString()))
+                .thenReturn(NotificationChannelGateway.DeliveryOutcome.LOGGED);
+        NotificationService svc = new NotificationService(contactRepo, recordRepo, processedEventRepo,
                 List.of(emailGateway, smsGateway));
+        svc.setDeliveryPolicy(3, 0L); // no real sleeping in tests
+        return svc;
     }
 
     // ── Null guard branches in processTransactionEvent ──────────────────────────
@@ -237,5 +244,81 @@ class NotificationServiceBranchTest {
         ArgumentCaptor<NotificationRecord> captor = ArgumentCaptor.forClass(NotificationRecord.class);
         verify(recordRepo, atLeastOnce()).save(captor.capture());
         assertThat(captor.getAllValues()).anyMatch(r -> "SENT".equals(r.getStatus()) && r.getSentAt() != null);
+    }
+
+    // ── retry: transient failure then success; exhausted → FAILED; interrupted backoff ──
+
+    private TransactionStatusEvent authorizedEvent(String id) {
+        TransactionStatusEvent event = new TransactionStatusEvent();
+        event.setEventId("e-" + id);
+        event.setEventType("TransactionAuthorized");
+        TransactionStatusEvent.Payload payload = new TransactionStatusEvent.Payload();
+        payload.setTransactionId("tx-" + id);
+        payload.setCardToken("vault:v1:tok");
+        event.setPayload(payload);
+        return event;
+    }
+
+    private void stubHappyPath() {
+        when(processedEventRepo.insertIfAbsent(anyString())).thenReturn(1);
+        when(contactRepo.findById(anyString())).thenReturn(Optional.of(contactWithBoth()));
+        when(recordRepo.saveAll(anyList())).thenAnswer(inv -> inv.getArgument(0));
+        when(recordRepo.save(any(NotificationRecord.class))).thenAnswer(inv -> inv.getArgument(0));
+    }
+
+    @Test
+    void emailFailsOnceThenSucceeds_retriedAndRecordedSent() {
+        NotificationService svc = service();
+        stubHappyPath();
+        when(emailGateway.send(anyString(), anyString(), anyString()))
+                .thenThrow(new RuntimeException("timeout"))
+                .thenReturn(NotificationChannelGateway.DeliveryOutcome.SENT);
+
+        svc.processTransactionEvent(authorizedEvent("retry-ok"));
+
+        verify(emailGateway, times(2)).send(anyString(), anyString(), anyString());
+        ArgumentCaptor<NotificationRecord> captor = ArgumentCaptor.forClass(NotificationRecord.class);
+        verify(recordRepo, atLeastOnce()).save(captor.capture());
+        assertThat(captor.getAllValues()).anyMatch(r -> "SENT".equals(r.getStatus()) && r.getSentAt() != null);
+        assertThat(captor.getAllValues()).noneMatch(r -> "FAILED".equals(r.getStatus()));
+    }
+
+    @Test
+    void emailAlwaysFails_threeAttemptsThenFailedWithoutRecipientInReason() {
+        NotificationService svc = service();
+        stubHappyPath();
+        when(emailGateway.send(anyString(), anyString(), anyString()))
+                .thenThrow(new RuntimeException("550 no such user j***@example.com"));
+
+        svc.processTransactionEvent(authorizedEvent("retry-exhausted"));
+
+        verify(emailGateway, times(3)).send(anyString(), anyString(), anyString());
+        ArgumentCaptor<NotificationRecord> captor = ArgumentCaptor.forClass(NotificationRecord.class);
+        verify(recordRepo, atLeastOnce()).save(captor.capture());
+        assertThat(captor.getAllValues()).anyMatch(r -> "FAILED".equals(r.getStatus())
+                && "failed after 3 attempt(s): RuntimeException".equals(r.getFailureReason()));
+        assertThat(captor.getAllValues()).noneMatch(r -> r.getFailureReason() != null
+                && r.getFailureReason().contains("example.com"));
+    }
+
+    @Test
+    void interruptedDuringBackoff_stopsRetryingAndRecordsFailed() {
+        NotificationService svc = service();
+        svc.setDeliveryPolicy(3, 1L);
+        stubHappyPath();
+        when(emailGateway.send(anyString(), anyString(), anyString()))
+                .thenThrow(new RuntimeException("boom"));
+
+        Thread.currentThread().interrupt();
+        try {
+            svc.processTransactionEvent(authorizedEvent("interrupted"));
+        } finally {
+            Thread.interrupted(); // clear the flag so later tests are unaffected
+        }
+
+        verify(emailGateway, times(1)).send(anyString(), anyString(), anyString());
+        ArgumentCaptor<NotificationRecord> captor = ArgumentCaptor.forClass(NotificationRecord.class);
+        verify(recordRepo, atLeastOnce()).save(captor.capture());
+        assertThat(captor.getAllValues()).anyMatch(r -> "FAILED".equals(r.getStatus()));
     }
 }

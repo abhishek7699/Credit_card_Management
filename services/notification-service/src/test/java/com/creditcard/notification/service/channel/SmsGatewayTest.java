@@ -3,7 +3,6 @@ package com.creditcard.notification.service.channel;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatNoException;
 
 class SmsGatewayTest {
 
@@ -15,8 +14,8 @@ class SmsGatewayTest {
     }
 
     @Test
-    void sendDoesNotThrow() {
-        assertThatNoException().isThrownBy(() ->
-                gateway.send("***-***-5678", null, "ALERT: Suspicious activity on your card."));
+    void sendIsRecordOnlyAndReturnsLogged() {
+        assertThat(gateway.send("***-***-0000", "ALERT", "body"))
+                .isEqualTo(NotificationChannelGateway.DeliveryOutcome.LOGGED);
     }
 }

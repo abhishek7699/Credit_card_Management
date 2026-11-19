@@ -241,6 +241,6 @@ class ContactManagementIntegrationTest {
         await().atMost(10, TimeUnit.SECONDS).untilAsserted(() ->
             assertThat(recordRepo.findAll()).hasSize(2));
 
-        assertThat(recordRepo.findAll()).extracting("status").containsOnly("SENT");
+        assertThat(recordRepo.findAll()).extracting("status").containsOnly("LOGGED");
     }
 }
