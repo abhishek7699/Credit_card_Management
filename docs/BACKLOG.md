@@ -113,3 +113,7 @@ These were named up front as out of scope for every layer until explicitly start
 ## Spec 014 phase 2 deferrals
 
 - **Unresolved VOID retry**: when a VOID and its status lookup are both unresolved, the hold stays and `RELEASE_REJECTED` (`VOID_UNKNOWN`) is recorded with no retry. Needs a retry path (deterministic VOID ID makes it safe to repeat).
+
+## Gateway (from PR #21)
+
+- **Validate Idempotency-Key at the gateway**: reject keys that are non-ASCII or longer than 255 characters, instead of forwarding them to transaction-service.

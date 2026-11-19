@@ -57,6 +57,9 @@ management:
 
 settlement:
   interchange-fee-rate: 0.02
+  # Display label only: stored on each settlement batch and returned by reporting. No bank connection.
+  acquirer:
+    name: ${SETTLEMENT_ACQUIRER_NAME:Chase}
   batch:
     chunk-size: 100
     cron: "0 59 23 * * *"

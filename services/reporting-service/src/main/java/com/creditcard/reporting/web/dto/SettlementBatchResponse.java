@@ -22,6 +22,12 @@ public class SettlementBatchResponse {
     @JsonInclude(JsonInclude.Include.NON_NULL)
     private String failureReason;
 
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private String acquirerName;
+
+    public String getAcquirerName() { return acquirerName; }
+    public void setAcquirerName(String acquirerName) { this.acquirerName = acquirerName; }
+
     public String getBatchId() { return batchId; }
     public void setBatchId(String batchId) { this.batchId = batchId; }
 

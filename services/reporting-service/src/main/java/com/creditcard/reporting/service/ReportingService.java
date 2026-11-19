@@ -189,11 +189,15 @@ public class ReportingService {
                 .findByBatchIdAndMerchantId(batchId, merchantId)
                 .orElseThrow(() -> new ResourceNotFoundException(
                         "No settlement found for merchantId=" + merchantId + " in batchId=" + batchId));
-        return mapToMerchantSettlementResponse(ms);
+        String acquirerName = batchRepository.findById(batchId)
+                .map(SettlementBatch::getAcquirerName)
+                .orElse(null);
+        return mapToMerchantSettlementResponse(ms, acquirerName);
     }
 
-    private MerchantSettlementResponse mapToMerchantSettlementResponse(MerchantSettlement ms) {
+    private MerchantSettlementResponse mapToMerchantSettlementResponse(MerchantSettlement ms, String acquirerName) {
         MerchantSettlementResponse r = new MerchantSettlementResponse();
+        r.setAcquirerName(acquirerName);
         r.setId(ms.getId());
         r.setBatchId(ms.getBatchId());
         r.setMerchantId(ms.getMerchantId());
@@ -219,6 +223,7 @@ public class ReportingService {
         r.setBatchId(batch.getBatchId());
         r.setStatus(batch.getStatus());
         r.setTriggeredBy(batch.getTriggeredBy());
+        r.setAcquirerName(batch.getAcquirerName());
         r.setTotalTransactionsProcessed(batch.getTotalTransactionsProcessed());
         r.setTotalGrossAmount(batch.getTotalGrossAmount());
         r.setTotalInterchangeFees(batch.getTotalInterchangeFees());
