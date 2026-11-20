@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useUpdateRoomStatusMutation } from './roomStatusApi';
+import { alertError, alertSuccess, btnSecondary } from '../../components/ui';
 import type { RoomStatus } from '../../types/staff';
 
 /** Only DIRTY and MAINTENANCE — the two statuses this component is ever actually
@@ -31,7 +32,7 @@ export function StatusChangeAction({ roomId, status }: StatusChangeActionProps) 
   const [appliedTo, setAppliedTo] = useState<RoomStatus | null>(null);
 
   if (appliedTo) {
-    return <p className="text-sm text-green-700">Status updated.</p>;
+    return <p className={alertSuccess}>Status updated.</p>;
   }
 
   async function handleClick(target: RoomStatus) {
@@ -47,19 +48,15 @@ export function StatusChangeAction({ roomId, status }: StatusChangeActionProps) 
   const targets = TARGETS[status];
 
   return (
-    <div className="space-y-2">
-      {isError && (
-        <div role="alert" className="mb-1 rounded border border-red-300 bg-red-50 p-3 text-sm text-red-700">
-          Status update failed. Please try again.
-        </div>
-      )}
+    <div className="space-y-3">
+      {isError && <div role="alert" className={alertError}>Status didn&apos;t change. Tap the button to try again.</div>}
       {targets.map((t) => (
         <button
           key={t.target}
           type="button"
           onClick={() => handleClick(t.target)}
           disabled={isLoading}
-          className="w-full rounded border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+          className={btnSecondary}
         >
           {t.label}
         </button>

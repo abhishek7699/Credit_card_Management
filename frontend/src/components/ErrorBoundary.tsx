@@ -24,15 +24,19 @@ export class ErrorBoundary extends Component<Props, State> {
   render(): ReactNode {
     if (this.state.hasError) {
       return (
-        <div className="flex min-h-screen flex-col items-center justify-center gap-4 p-8 text-center">
-          <h1 className="text-2xl font-semibold text-red-600">Something went wrong</h1>
-          <p className="max-w-md text-gray-600">{this.state.message}</p>
+        <div className="flex min-h-screen flex-col items-center justify-center gap-5 bg-gray-50 p-8 text-center">
+          <h1 className="text-2xl font-bold text-gray-900">This screen ran into a problem</h1>
+          <p className="max-w-md text-base text-gray-700">
+            Tap Reload to start again. If it keeps happening, tell your manager and note the time.
+          </p>
           <button
-            className="rounded bg-blue-600 px-4 py-2 text-white hover:bg-blue-700"
+            type="button"
+            className="min-h-12 rounded-lg bg-indigo-600 px-6 text-base font-semibold text-white hover:bg-indigo-700"
             onClick={() => window.location.reload()}
           >
             Reload
           </button>
+          {import.meta.env.DEV && <p className="max-w-md text-sm text-gray-500">{this.state.message}</p>}
         </div>
       );
     }

@@ -112,7 +112,7 @@ test('a missing description is rejected client-side without calling the mutation
   await userEvent.type(screen.getByLabelText(/amount/i), '6');
   await userEvent.click(screen.getByRole('button', { name: /add charge/i }));
 
-  expect(screen.getByText(/description is required/i)).toBeInTheDocument();
+  expect(screen.getByText(/enter a description/i)).toBeInTheDocument();
   expect(called).toBe(false);
 });
 

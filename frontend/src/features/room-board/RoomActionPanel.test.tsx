@@ -87,7 +87,7 @@ test('a room with an arriving-today booking offers nothing for Housekeeping', ()
     'HOUSEKEEPING',
   );
   expect(screen.queryByText(/arriving today/i)).not.toBeInTheDocument();
-  expect(screen.getByText(/no action available/i)).toBeInTheDocument();
+  expect(screen.getByText(/nothing to do for this room/i)).toBeInTheDocument();
 });
 
 test('an OCCUPIED room offers check-out for Front Desk, once the booking detail loads', async () => {
@@ -144,7 +144,7 @@ test('an OCCUPIED room offers nothing for Housekeeping', () => {
     'HOUSEKEEPING',
   );
   expect(screen.queryByText(/currently occupying/i)).not.toBeInTheDocument();
-  expect(screen.getByText(/no action available/i)).toBeInTheDocument();
+  expect(screen.getByText(/nothing to do for this room/i)).toBeInTheDocument();
 });
 
 test('an OCCUPIED room with a same-day arrival still offers check-out, not check-in (check-in cannot succeed yet)', async () => {

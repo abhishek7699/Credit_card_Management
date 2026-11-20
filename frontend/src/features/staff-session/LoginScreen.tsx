@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useAppDispatch } from '../../store';
 import { useStaffLoginMutation } from './staffAuthApi';
 import { login } from './staffSessionSlice';
+import { alertError, btnPrimary, fieldLabel } from '../../components/ui';
 import type { StaffRole } from '../../types/staff';
 
 const ROLES: { value: StaffRole; label: string }[] = [
@@ -25,40 +26,40 @@ export function LoginScreen() {
   }
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-sm flex-col justify-center px-4">
-      <p className="mb-1 text-sm font-medium text-gray-500">Hotel Payment App</p>
-      <h1 className="mb-6 text-2xl font-bold text-gray-900">Staff Sign In</h1>
+    <main className="mx-auto flex min-h-screen w-full max-w-md flex-col justify-center gap-6 bg-gray-50 px-6">
+      <div>
+        <p className="text-sm font-medium text-gray-500">Hotel Payment App</p>
+        <h1 className="mt-1 text-3xl font-bold text-gray-900">Staff Sign In</h1>
+      </div>
 
       {isError && (
-        <div role="alert" className="mb-4 rounded border border-red-300 bg-red-50 p-3 text-sm text-red-700">
-          Sign-in failed. Please try again.
+        <div role="alert" className={alertError}>
+          Sign-in didn&apos;t work. Check your connection and tap Sign In again.
         </div>
       )}
 
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <fieldset>
-          <legend className="block text-sm font-medium text-gray-700">Role</legend>
-          <div className="mt-2 space-y-2">
-            {ROLES.map((r) => (
-              <label key={r.value} className="flex items-center gap-2 text-sm text-gray-900">
-                <input
-                  type="radio"
-                  name="role"
-                  value={r.value}
-                  checked={role === r.value}
-                  onChange={() => setRole(r.value)}
-                />
-                {r.label}
-              </label>
-            ))}
-          </div>
+      <form onSubmit={handleSubmit} className="space-y-5">
+        <fieldset className="space-y-3">
+          <legend className={fieldLabel}>Choose your role</legend>
+          {ROLES.map((r) => (
+            <label
+              key={r.value}
+              className="flex min-h-12 cursor-pointer items-center gap-3 rounded-lg border border-gray-300 bg-white px-4 text-base text-gray-900 has-[:checked]:border-indigo-600 has-[:checked]:bg-indigo-50"
+            >
+              <input
+                type="radio"
+                name="role"
+                value={r.value}
+                checked={role === r.value}
+                onChange={() => setRole(r.value)}
+                className="h-5 w-5 accent-indigo-600"
+              />
+              {r.label}
+            </label>
+          ))}
         </fieldset>
 
-        <button
-          type="submit"
-          disabled={isLoading}
-          className="w-full rounded bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-        >
+        <button type="submit" disabled={isLoading} className={btnPrimary}>
           {isLoading ? 'Signing in…' : 'Sign In'}
         </button>
       </form>

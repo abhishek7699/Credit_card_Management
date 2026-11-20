@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useAddChargeMutation } from './bookingApi';
+import { alertError, btnPrimary, fieldError, input, sectionTitle, stateText } from '../../components/ui';
 import type { Booking, ChargeType } from '../../types/staff';
 
 const CHARGE_TYPES: ChargeType[] = ['ROOM_SERVICE', 'MINIBAR', 'LAUNDRY', 'OTHER'];
@@ -16,20 +17,20 @@ export function ChargesPanel({ booking }: ChargesPanelProps) {
   const [type, setType] = useState<ChargeType>('ROOM_SERVICE');
   const [description, setDescription] = useState('');
   const [amount, setAmount] = useState('');
-  const [fieldError, setFieldError] = useState<string | null>(null);
+  const [fieldErrorText, setFieldErrorText] = useState<string | null>(null);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!description.trim()) {
-      setFieldError('Description is required');
+      setFieldErrorText('Enter a description, for example "Club sandwich".');
       return;
     }
     const parsedAmount = Number(amount);
     if (!amount || Number.isNaN(parsedAmount) || parsedAmount <= 0) {
-      setFieldError('Enter an amount greater than 0');
+      setFieldErrorText('Enter an amount greater than 0.');
       return;
     }
-    setFieldError(null);
+    setFieldErrorText(null);
     try {
       await addCharge({ bookingId: booking.bookingId, type, description, amount: parsedAmount }).unwrap();
       setDescription('');
@@ -40,15 +41,15 @@ export function ChargesPanel({ booking }: ChargesPanelProps) {
   }
 
   return (
-    <div className="mt-4 border-t border-gray-200 pt-4">
-      <h3 className="mb-2 text-sm font-semibold text-gray-900">Charges</h3>
+    <section className="mt-6 space-y-3 border-t border-gray-200 pt-5">
+      <h3 className={sectionTitle}>Charges</h3>
 
       {booking.charges.length === 0 ? (
-        <p className="mb-3 text-sm text-gray-500">No charges yet.</p>
+        <p className={stateText}>No charges yet.</p>
       ) : (
-        <ul className="mb-3 space-y-1">
+        <ul className="space-y-1">
           {booking.charges.map((charge) => (
-            <li key={charge.chargeId} className="flex justify-between text-sm text-gray-700">
+            <li key={charge.chargeId} className="flex justify-between text-base text-gray-800">
               <span>{charge.description}</span>
               <span>${charge.amount.toFixed(2)}</span>
             </li>
@@ -56,21 +57,17 @@ export function ChargesPanel({ booking }: ChargesPanelProps) {
         </ul>
       )}
 
-      <p className="mb-3 text-sm font-semibold text-gray-900">Balance due: ${booking.balanceDue.toFixed(2)}</p>
+      <p className="text-base font-semibold text-gray-900">Balance due: ${booking.balanceDue.toFixed(2)}</p>
 
-      {isError && (
-        <div role="alert" className="mb-3 rounded border border-red-300 bg-red-50 p-3 text-sm text-red-700">
-          Failed to add charge. Please try again.
-        </div>
-      )}
+      {isError && <div role="alert" className={alertError}>The charge wasn&apos;t added. Check it and tap Add Charge again.</div>}
 
-      <form onSubmit={handleSubmit} noValidate className="space-y-2">
-        <div className="grid grid-cols-2 gap-2">
+      <form onSubmit={handleSubmit} noValidate className="space-y-3">
+        <div className="grid grid-cols-2 gap-3">
           <select
             aria-label="Charge type"
             value={type}
             onChange={(e) => setType(e.target.value as ChargeType)}
-            className="rounded border border-gray-300 px-2 py-1 text-sm"
+            className={input}
           >
             {CHARGE_TYPES.map((t) => (
               <option key={t} value={t}>
@@ -85,7 +82,7 @@ export function ChargesPanel({ booking }: ChargesPanelProps) {
             placeholder="Amount"
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
-            className="rounded border border-gray-300 px-2 py-1 text-sm"
+            className={input}
           />
         </div>
         <input
@@ -94,17 +91,13 @@ export function ChargesPanel({ booking }: ChargesPanelProps) {
           placeholder="Description"
           value={description}
           onChange={(e) => setDescription(e.target.value)}
-          className="w-full rounded border border-gray-300 px-2 py-1 text-sm"
+          className={input}
         />
-        {fieldError && <p className="text-sm text-red-600">{fieldError}</p>}
-        <button
-          type="submit"
-          disabled={isLoading}
-          className="w-full rounded bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-        >
+        {fieldErrorText && <p className={fieldError}>{fieldErrorText}</p>}
+        <button type="submit" disabled={isLoading} className={btnPrimary}>
           {isLoading ? 'Adding…' : 'Add Charge'}
         </button>
       </form>
-    </div>
+    </section>
   );
 }

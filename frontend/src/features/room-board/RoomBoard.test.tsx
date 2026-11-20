@@ -156,7 +156,7 @@ test('clicking a VACANT_CLEAN room offers no booking action for a HOUSEKEEPING s
 
   expect(screen.getByRole('dialog', { name: /room 102 actions/i })).toBeInTheDocument();
   expect(screen.queryByLabelText(/guest name/i)).not.toBeInTheDocument();
-  expect(screen.getByText(/no action available/i)).toBeInTheDocument();
+  expect(screen.getByText(/nothing to do for this room/i)).toBeInTheDocument();
 });
 
 test('closing the action panel (backdrop or close button) hides it', async () => {

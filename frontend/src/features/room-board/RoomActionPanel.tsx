@@ -1,11 +1,13 @@
+import type { ReactNode } from 'react';
 import { useGetBookingQuery } from '../booking/bookingApi';
 import { BookingForm } from '../booking/BookingForm';
 import { ChargesPanel } from '../booking/ChargesPanel';
 import { GuestDetails } from '../booking/GuestDetails';
+import { alertError, stateText } from '../../components/ui';
 import { CheckInAction } from './CheckInAction';
 import { CheckOutAction } from './CheckOutAction';
 import { StatusChangeAction } from './StatusChangeAction';
-import type { RoomBoardEntry, StaffRole } from '../../types/staff';
+import type { Booking, RoomBoardEntry, StaffRole } from '../../types/staff';
 
 interface RoomActionPanelProps {
   room: RoomBoardEntry;
@@ -13,55 +15,70 @@ interface RoomActionPanelProps {
   onClose: () => void;
 }
 
-interface OccupiedRoomPanelProps {
+/** Loads one booking and handles its loading and failure states, so the panels below
+ *  only ever see a real booking. */
+function BookingLoader({
+  bookingId,
+  children,
+}: {
   bookingId: string;
-  guestName: string | null;
-}
+  children: (booking: Booking) => ReactNode;
+}) {
+  const { data: booking, isLoading, isError, refetch } = useGetBookingQuery(bookingId);
 
-/** US1/US3/FR-023: fetches the booking's own detail (guest record, charges,
- *  balance, status) so CheckOutAction, ChargesPanel, and the guest-detail block
- *  all reflect it live — the same useGetBookingQuery polling hook, which keeps
- *  polling while CHECKOUT_PENDING and stops once resolved. */
-function OccupiedRoomPanel({ bookingId, guestName }: OccupiedRoomPanelProps) {
-  const { data: booking, isLoading } = useGetBookingQuery(bookingId);
-
-  if (isLoading || !booking) {
-    return <p className="text-sm text-gray-500">Loading…</p>;
+  if (isError && !booking) {
+    return (
+      <div role="alert" className={alertError}>
+        <p>We couldn&apos;t load this booking.</p>
+        <button
+          type="button"
+          onClick={refetch}
+          className="mt-3 min-h-12 w-full rounded-lg border border-red-400 bg-white px-4 font-semibold text-red-900 hover:bg-red-100"
+        >
+          Try again
+        </button>
+      </div>
+    );
   }
 
+  if (isLoading || !booking) {
+    return <p className={stateText}>Loading guest details…</p>;
+  }
+
+  return <>{children(booking)}</>;
+}
+
+/** US1/US3/FR-023: the occupied room's booking drives check-out, charges and the guest block. */
+function OccupiedRoomPanel({ bookingId, guestName }: { bookingId: string; guestName: string | null }) {
   return (
-    <>
-      <GuestDetails guest={booking} />
-      <CheckOutAction
-        bookingId={bookingId}
-        guestName={guestName}
-        status={booking.status}
-        balanceDue={booking.balanceDue}
-      />
-      <ChargesPanel booking={booking} />
-    </>
+    <BookingLoader bookingId={bookingId}>
+      {(booking) => (
+        <>
+          <GuestDetails guest={booking} />
+          <CheckOutAction
+            bookingId={bookingId}
+            guestName={guestName}
+            status={booking.status}
+            balanceDue={booking.balanceDue}
+          />
+          <ChargesPanel booking={booking} />
+        </>
+      )}
+    </BookingLoader>
   );
 }
 
-interface ArrivingRoomPanelProps {
-  bookingId: string;
-}
-
-/** FR-023 (Clarifications): the arriving-booking panel, shown before check-in,
- *  carries the same full guest record staff see once the guest is checked in —
- *  not just the thin name the board itself carries. */
-function ArrivingRoomPanel({ bookingId }: ArrivingRoomPanelProps) {
-  const { data: booking, isLoading } = useGetBookingQuery(bookingId);
-
-  if (isLoading || !booking) {
-    return <p className="text-sm text-gray-500">Loading…</p>;
-  }
-
+/** FR-023 (Clarifications): the arriving panel shows the full guest record before check-in. */
+function ArrivingRoomPanel({ bookingId }: { bookingId: string }) {
   return (
-    <>
-      <GuestDetails guest={booking} />
-      <CheckInAction bookingId={bookingId} guestName={booking.guestName} />
-    </>
+    <BookingLoader bookingId={bookingId}>
+      {(booking) => (
+        <>
+          <GuestDetails guest={booking} />
+          <CheckInAction bookingId={bookingId} guestName={booking.guestName} />
+        </>
+      )}
+    </BookingLoader>
   );
 }
 
@@ -75,9 +92,7 @@ function renderAction(room: RoomBoardEntry, role: StaffRole) {
     return <OccupiedRoomPanel bookingId={room.currentBookingId} guestName={room.guestName} />;
   }
   // A room awaiting arrival takes priority over "book a new reservation" even
-  // if it's still VACANT_CLEAN (which it is, until check-in happens) — check-in
-  // is the action staff actually need for a room that already has a booking
-  // arriving today.
+  // if it's still VACANT_CLEAN (which it is, until check-in happens).
   if (room.arrivingBookingId && role === 'FRONT_DESK') {
     return <ArrivingRoomPanel bookingId={room.arrivingBookingId} />;
   }
@@ -89,21 +104,27 @@ function renderAction(room: RoomBoardEntry, role: StaffRole) {
   if (room.status === 'DIRTY' || room.status === 'MAINTENANCE') {
     return <StatusChangeAction roomId={room.roomId} status={room.status} />;
   }
-  return <p className="text-sm text-gray-500">No action available for this room.</p>;
+  return <p className={stateText}>Nothing to do for this room right now.</p>;
 }
 
+/** Side panel for one room. Full screen on a phone, a 384px column on a tablet. */
 export function RoomActionPanel({ room, role, onClose }: RoomActionPanelProps) {
   return (
     <>
-      <div className="fixed inset-0 z-30 bg-black/20" onClick={onClose} aria-hidden="true" />
+      <div className="fixed inset-0 z-30 bg-black/30" onClick={onClose} aria-hidden="true" />
       <div
         role="dialog"
         aria-label={`Room ${room.roomNumber} actions`}
-        className="fixed inset-y-0 right-0 z-40 w-96 overflow-y-auto border-l border-gray-200 bg-white p-5 shadow-xl"
+        className="fixed inset-y-0 right-0 z-40 w-full overflow-y-auto border-l border-gray-200 bg-white p-5 shadow-xl sm:w-96"
       >
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="font-semibold text-gray-900">Room {room.roomNumber}</h2>
-          <button type="button" onClick={onClose} aria-label="Close panel" className="text-gray-400 hover:text-gray-600">
+          <h2 className="text-xl font-bold text-gray-900">Room {room.roomNumber}</h2>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close panel"
+            className="flex h-12 w-12 items-center justify-center rounded-lg text-xl text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+          >
             ✕
           </button>
         </div>
