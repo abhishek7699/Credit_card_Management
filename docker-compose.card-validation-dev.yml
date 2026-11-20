@@ -1,0 +1,19 @@
+# Turns ON real Mastercard Account Validation (Mastercard Developers SANDBOX) for guest pay-later bookings.
+# Layer it over the normal stack; CI and the default stack do NOT use it and need no Mastercard credentials.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.card-validation-dev.yml up -d --build transaction-service booking-service
+#
+# Reads MASTERCARD_DEV_CONSUMER_KEY, MASTERCARD_DEV_KEY_PATH (a .p12 OUTSIDE the repo), MASTERCARD_DEV_KEY_ALIAS and
+# MASTERCARD_DEV_KEYSTORE_PASSWORD from this checkout's .env (compose loads it) or your shell. The .p12 is mounted
+# read-only into transaction-service only; it is never copied into the repo or an image. Compose fails fast,
+# naming the variable, if one is missing.
+services:
+  transaction-service:
+    environment:
+      SPRING_PROFILES_ACTIVE: dev
+      MASTERCARD_DEV_CONSUMER_KEY: ${MASTERCARD_DEV_CONSUMER_KEY:?set MASTERCARD_DEV_CONSUMER_KEY in .env}
+      MASTERCARD_DEV_KEY_PATH: /run/mastercard/dev.p12
+      MASTERCARD_DEV_KEY_ALIAS: ${MASTERCARD_DEV_KEY_ALIAS:?set MASTERCARD_DEV_KEY_ALIAS in .env}
+      MASTERCARD_DEV_KEYSTORE_PASSWORD: ${MASTERCARD_DEV_KEYSTORE_PASSWORD:?set MASTERCARD_DEV_KEYSTORE_PASSWORD in .env}
+    volumes:
+      - ${MASTERCARD_DEV_KEY_PATH:?set MASTERCARD_DEV_KEY_PATH in .env}:/run/mastercard/dev.p12:ro
