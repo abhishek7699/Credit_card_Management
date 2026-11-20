@@ -4,6 +4,7 @@ import com.creditcard.booking.controller.dto.BookingRequest;
 import com.creditcard.booking.controller.dto.CardDetails;
 import com.creditcard.booking.controller.dto.ChargeRequest;
 import com.creditcard.booking.domain.Booking;
+import com.creditcard.booking.domain.BookingSource;
 import com.creditcard.booking.domain.BookingStatus;
 import com.creditcard.booking.domain.Charge;
 import com.creditcard.booking.domain.ChargeType;
@@ -163,6 +164,18 @@ class BookingServiceTest {
         verify(bookingRoomNightRepository).flush();
         // No payment-core interaction at all for booking creation (FR-017/FR-020).
         verify(transactionServiceBlockingStub, never()).initiateTransaction(any());
+    }
+
+    @Test
+    void createConfirmedBooking_recordsSourceGivenByCaller_defaultingToStaff() {
+        UUID roomId = UUID.randomUUID();
+        when(roomRepository.findById(roomId)).thenReturn(Optional.of(room(roomId)));
+        when(bookingRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        BookingRequest request = minimalRequest(roomId, LocalDate.of(2026, 11, 1), LocalDate.of(2026, 11, 3));
+
+        assertThat(service.createConfirmedBooking(request).getSource()).isEqualTo(BookingSource.STAFF);
+        assertThat(service.createConfirmedBookingWithSource(request, BookingSource.ONLINE).getSource())
+                .isEqualTo(BookingSource.ONLINE);
     }
 
     @Test

@@ -5,6 +5,7 @@ import com.creditcard.booking.controller.dto.CardDetails;
 import com.creditcard.booking.controller.dto.ChargeRequest;
 import com.creditcard.booking.domain.Booking;
 import com.creditcard.booking.domain.BookingRoomNight;
+import com.creditcard.booking.domain.BookingSource;
 import com.creditcard.booking.domain.BookingStatus;
 import com.creditcard.booking.domain.Charge;
 import com.creditcard.booking.domain.CheckoutAttemptStatus;
@@ -125,6 +126,13 @@ public class BookingService {
      */
     @Transactional
     public Booking createConfirmedBooking(BookingRequest request) {
+        return createConfirmedBookingWithSource(request, BookingSource.STAFF);
+    }
+
+    /** As {@link #createConfirmedBooking(BookingRequest)}, recording who made the booking
+     *  (STAFF, or ONLINE from the public front office). The price and checks are the same. */
+    @Transactional
+    public Booking createConfirmedBookingWithSource(BookingRequest request, BookingSource source) {
         if (!request.checkOut().isAfter(request.checkIn())) {
             throw new InvalidDateRangeException(request.checkIn(), request.checkOut());
         }
@@ -148,6 +156,7 @@ public class BookingService {
         booking.setExpectedDepartureTime(request.expectedDepartureTime());
         booking.setNotes(request.notes());
         booking.setStatus(BookingStatus.CONFIRMED);
+        booking.setSource(source);
         booking.setRoomChargeAmount(roomChargeAmount);
         Booking savedBooking = bookingRepository.save(booking);
 
