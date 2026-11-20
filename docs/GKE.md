@@ -21,7 +21,9 @@ gcloud config set project "${GCP_PROJECT_ID}"
 # Enable the APIs this needs
 gcloud services enable container.googleapis.com artifactregistry.googleapis.com
 
-# Artifact Registry repo for the 7 service images
+# Artifact Registry repo for the 7 service images. The name doesn't have
+# to be "credit-card" -- gke-deploy.sh's AR_REPO env var (default
+# credit-card) just needs to match whatever you create here.
 gcloud artifacts repositories create credit-card \
   --repository-format=docker \
   --location="${AR_REGION}" \
@@ -59,8 +61,11 @@ gcloud billing budgets create \
 ## Deploy
 
 ```bash
-GCP_PROJECT_ID=my-project ./scripts/gke-deploy.sh
+GCP_PROJECT_ID=my-project AR_REPO=credit-card ./scripts/gke-deploy.sh
 ```
+
+(`AR_REPO` only needs to be set if your repo isn't named `credit-card`
+— pass whatever you actually created above.)
 
 Builds all 7 service jars, builds and pushes their images to Artifact
 Registry, then applies the full stack via `k8s/overlays/gke` (the same
@@ -68,6 +73,29 @@ manifests as kind, at the base's `replicas: 2`, with images rewritten to
 the registry path instead of a local-only one). See
 [k8s/overlays/gke/kustomization.yaml.tmpl](../k8s/overlays/gke/kustomization.yaml.tmpl)
 for exactly what it changes from the base.
+
+**Building on Apple Silicon (M-series Mac):** `docker build` there
+produces an arm64 image by default, but GKE's standard node pools (and
+the `e2-*`/`n2-*` machine types in this doc) are amd64 — the pods will
+sit in `CrashLoopBackOff`/`exec format error` otherwise. Add
+`--platform linux/amd64` to the `docker build` line in
+`scripts/gke-deploy.sh` if you're on Apple Silicon; it's not the
+default in the script because it slows down the (far more common)
+local kind workflow for no benefit there.
+
+**Running the e2e suite against this cluster**, once it's up:
+
+```bash
+./scripts/e2e-test.sh --target kind
+```
+
+Despite the flag's name, nothing in `--target kind` is actually
+kind-specific — it just drives everything through `kubectl`
+port-forwards and `kubectl exec`/`kubectl scale`, which work identically
+against whatever cluster your current kubectl context points at. There
+is no separate `--target gke`; point your context at the GKE cluster
+(`gcloud container clusters get-credentials ...`) and use `--target
+kind` as-is.
 
 ## Between demos
 
@@ -82,6 +110,25 @@ are Ready again.
 GCP_PROJECT_ID=my-project ./scripts/demo-down.sh   # 0 nodes
 GCP_PROJECT_ID=my-project ./scripts/demo-up.sh     # back to 2
 ```
+
+## Known difference from kind: ext4's `lost+found`
+
+GKE's persistent-disk-backed PVCs are ext4-formatted, and every ext4
+filesystem has a `lost+found` directory at its root (for orphaned-inode
+recovery after an unclean shutdown) — kind's storage is a plain
+bind-mounted directory on the node container, so it never has one.
+Kafka's log-dir scanner treats every entry under `KAFKA_LOG_DIRS` as a
+`<topic>-<partition>` directory and refuses to start otherwise
+(`Found directory ... not in the form of topic-partition`), which only
+surfaces on a real cluster like this one. Already fixed in
+`k8s/infra/kafka.yaml` by pointing `KAFKA_LOG_DIRS` at a subdirectory of
+the PVC mount rather than its root, so `lost+found` (which stays at the
+mount's top level) is never something Kafka looks at, on either target
+— nothing you need to do, just worth knowing if a future infra change
+touches that file. CockroachDB and Zookeeper's PVCs have the same
+`lost+found` directory but aren't affected: CockroachDB's Pebble engine
+doesn't scan for unrecognized entries, and Zookeeper's own data/log
+dirs were already subdirectories of its mount, not the mount root.
 
 ## Tear down entirely
 

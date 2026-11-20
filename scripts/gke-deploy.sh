@@ -70,7 +70,7 @@ cd "${REPO_ROOT}"
 gcloud auth configure-docker "${AR_REGION}-docker.pkg.dev" --quiet
 for svc in "${SERVICES[@]}"; do
   info "Building and pushing ${REGISTRY}/${svc}:${TAG}"
-  docker build -q -f "services/${svc}/Dockerfile" -t "${REGISTRY}/${svc}:${TAG}" . >/dev/null
+  docker build --platform linux/amd64 -q -f "services/${svc}/Dockerfile" -t "${REGISTRY}/${svc}:${TAG}" . >/dev/null
   docker push -q "${REGISTRY}/${svc}:${TAG}" >/dev/null
 done
 pass "All 7 images built and pushed"
