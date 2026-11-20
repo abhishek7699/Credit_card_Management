@@ -50,6 +50,8 @@ public class KafkaConsumerConfig {
                 new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(txStatusConsumerFactory);
         factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.MANUAL_IMMEDIATE);
+        // Each consumed record runs inside a span that continues the trace in its headers.
+        factory.getContainerProperties().setObservationEnabled(true);
         return factory;
     }
 
@@ -68,6 +70,7 @@ public class KafkaConsumerConfig {
                 new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(fraudAlertConsumerFactory);
         factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.MANUAL_IMMEDIATE);
+        factory.getContainerProperties().setObservationEnabled(true);
         return factory;
     }
 

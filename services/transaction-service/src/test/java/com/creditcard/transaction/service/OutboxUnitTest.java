@@ -6,6 +6,9 @@ import com.creditcard.transaction.repository.OutboxRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import io.micrometer.tracing.Span;
+import io.micrometer.tracing.TraceContext;
+import io.micrometer.tracing.Tracer;
 import org.apache.kafka.common.errors.RecordTooLargeException;
 import org.apache.kafka.common.errors.SerializationException;
 import org.junit.jupiter.api.AfterEach;
@@ -36,6 +39,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Answers.RETURNS_SELF;
 import static org.mockito.Mockito.*;
 
 /** Unit coverage for the outbox classes (013). Integration behavior is in OutboxRelayIntegrationTest. */
@@ -52,6 +56,9 @@ class OutboxUnitTest {
 
     @Mock
     private OutboxPublisher outboxPublisher;
+
+    @Mock
+    private Tracer tracer;
 
     private final ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
 
@@ -101,7 +108,7 @@ class OutboxUnitTest {
     }
 
     private OutboxPublisher realPublisher() {
-        return new OutboxPublisher(outboxRepository, objectMapper, kafkaTemplate);
+        return new OutboxPublisher(outboxRepository, objectMapper, kafkaTemplate, tracer);
     }
 
     private static void setAttempts(OutboxEvent row, int attempts) {
@@ -118,7 +125,7 @@ class OutboxUnitTest {
 
     @Test
     void appendStoresTheEnvelopeAsJsonWithStableIdentity() {
-        OutboxService service = new OutboxService(outboxRepository, objectMapper, outboxPublisher);
+        OutboxService service = new OutboxService(outboxRepository, objectMapper, outboxPublisher, tracer);
         UUID eventId = UUID.randomUUID();
 
         service.append(TOPIC, eventId, "tx-key", "TransactionAuthorized", sampleEvent(eventId));
@@ -132,11 +139,33 @@ class OutboxUnitTest {
         assertThat(row.getEventType()).isEqualTo("TransactionAuthorized");
         assertThat(row.getPayload()).contains("\"outcome\":\"AUTHORIZED\"");
         assertThat(row.getSentAt()).isNull();
+        assertThat(row.getTraceId()).isNull();
+    }
+
+    @Test
+    void appendStoresTheCurrentTraceOnTheRow() {
+        OutboxService service = new OutboxService(outboxRepository, objectMapper, outboxPublisher, tracer);
+        UUID eventId = UUID.randomUUID();
+        Span span = mock(Span.class);
+        TraceContext context = mock(TraceContext.class);
+        when(tracer.currentSpan()).thenReturn(span);
+        when(span.context()).thenReturn(context);
+        when(context.traceId()).thenReturn("4bf92f3577b34da6a3ce929d0e0e4736");
+        when(context.spanId()).thenReturn("00f067aa0ba902b7");
+        when(context.sampled()).thenReturn(Boolean.TRUE);
+
+        service.append(TOPIC, eventId, "tx-key", "TransactionAuthorized", sampleEvent(eventId));
+
+        ArgumentCaptor<OutboxEvent> captor = ArgumentCaptor.forClass(OutboxEvent.class);
+        verify(outboxRepository).save(captor.capture());
+        assertThat(captor.getValue().getTraceId()).isEqualTo("4bf92f3577b34da6a3ce929d0e0e4736");
+        assertThat(captor.getValue().getSpanId()).isEqualTo("00f067aa0ba902b7");
+        assertThat(captor.getValue().getTraceSampled()).isTrue();
     }
 
     @Test
     void appendPublishesTheRowRightAfterCommit() {
-        OutboxService service = new OutboxService(outboxRepository, objectMapper, outboxPublisher);
+        OutboxService service = new OutboxService(outboxRepository, objectMapper, outboxPublisher, tracer);
         UUID eventId = UUID.randomUUID();
 
         service.append(TOPIC, eventId, "tx-key", "TransactionAuthorized", sampleEvent(eventId));
@@ -151,7 +180,7 @@ class OutboxUnitTest {
 
     @Test
     void aFailureRightAfterCommitIsLoggedAndDoesNotReachTheCaller() {
-        OutboxService service = new OutboxService(outboxRepository, objectMapper, outboxPublisher);
+        OutboxService service = new OutboxService(outboxRepository, objectMapper, outboxPublisher, tracer);
         UUID eventId = UUID.randomUUID();
         doThrow(new IllegalStateException("broker down")).when(outboxPublisher).publish(any());
 
@@ -165,7 +194,7 @@ class OutboxUnitTest {
     void appendWrapsSerializationFailure() throws Exception {
         ObjectMapper failing = mock(ObjectMapper.class);
         when(failing.writeValueAsString(any())).thenThrow(new com.fasterxml.jackson.core.JsonGenerationException("boom", (com.fasterxml.jackson.core.JsonGenerator) null));
-        OutboxService service = new OutboxService(outboxRepository, failing, outboxPublisher);
+        OutboxService service = new OutboxService(outboxRepository, failing, outboxPublisher, tracer);
         UUID eventId = UUID.randomUUID();
 
         assertThatThrownBy(() -> service.append("t", eventId, "k", "type", sampleEvent(eventId)))
@@ -208,6 +237,59 @@ class OutboxUnitTest {
         assertThat(body.getValue()).isInstanceOf(JsonNode.class);
         assertThat(((JsonNode) body.getValue()).get("eventId").asText()).isEqualTo(eventId.toString());
         verify(outboxRepository).markSent(eq(eventId), any(Instant.class));
+    }
+
+    @Test
+    void publisherSendsARowUnderItsStoredTraceAndEndsTheSpan() throws Exception {
+        UUID eventId = UUID.randomUUID();
+        OutboxEvent row = rowFor(eventId, "{}");
+        row.attachTrace("4bf92f3577b34da6a3ce929d0e0e4736", "00f067aa0ba902b7", Boolean.TRUE);
+        Span span = mock(Span.class);
+        Tracer.SpanInScope scope = mock(Tracer.SpanInScope.class);
+        TraceContext.Builder contextBuilder = mock(TraceContext.Builder.class, RETURNS_SELF);
+        TraceContext parent = mock(TraceContext.class);
+        Span.Builder spanBuilder = mock(Span.Builder.class, RETURNS_SELF);
+        when(tracer.traceContextBuilder()).thenReturn(contextBuilder);
+        doReturn(parent).when(contextBuilder).build();
+        when(tracer.spanBuilder()).thenReturn(spanBuilder);
+        doReturn(span).when(spanBuilder).start();
+        when(tracer.withSpan(span)).thenReturn(scope);
+        when(kafkaTemplate.send(anyString(), anyString(), any())).thenReturn(completed());
+
+        realPublisher().publish(row);
+
+        verify(contextBuilder).traceId("4bf92f3577b34da6a3ce929d0e0e4736");
+        verify(contextBuilder).spanId("00f067aa0ba902b7");
+        verify(contextBuilder).sampled(Boolean.TRUE);
+        verify(spanBuilder).setParent(parent);
+        verify(spanBuilder).name("outbox publish");
+        verify(scope).close();
+        verify(span).end();
+        verify(outboxRepository).markSent(eq(eventId), any(Instant.class));
+    }
+
+    @Test
+    void publisherEndsTheRelaySpanWhenTheSendFails() throws Exception {
+        UUID eventId = UUID.randomUUID();
+        OutboxEvent row = rowFor(eventId, "{}");
+        row.attachTrace("4bf92f3577b34da6a3ce929d0e0e4736", "00f067aa0ba902b7", Boolean.FALSE);
+        Span span = mock(Span.class);
+        Tracer.SpanInScope scope = mock(Tracer.SpanInScope.class);
+        TraceContext.Builder contextBuilder = mock(TraceContext.Builder.class, RETURNS_SELF);
+        Span.Builder spanBuilder = mock(Span.Builder.class, RETURNS_SELF);
+        when(tracer.traceContextBuilder()).thenReturn(contextBuilder);
+        doReturn(mock(TraceContext.class)).when(contextBuilder).build();
+        when(tracer.spanBuilder()).thenReturn(spanBuilder);
+        doReturn(span).when(spanBuilder).start();
+        when(tracer.withSpan(span)).thenReturn(scope);
+        CompletableFuture<SendResult<String, Object>> failed = new CompletableFuture<>();
+        failed.completeExceptionally(new RuntimeException("broker down"));
+        when(kafkaTemplate.send(anyString(), anyString(), any())).thenReturn(failed);
+
+        assertThatThrownBy(() -> realPublisher().publish(row)).isInstanceOf(IllegalStateException.class);
+
+        verify(span).end();
+        verify(outboxRepository, never()).markSent(any(), any());
     }
 
     @Test

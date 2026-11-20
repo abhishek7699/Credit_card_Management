@@ -78,3 +78,6 @@ logs/
 # GKE overlay rendered from k8s/overlays/gke/kustomization.yaml.tmpl by
 # scripts/gke-deploy.sh (bakes in your GCP project ID / region / tag)
 k8s/overlays/gke/kustomization.yaml
+
+# Python bytecode cache from running scripts/dev-auth-mock.py and helpers
+scripts/__pycache__/

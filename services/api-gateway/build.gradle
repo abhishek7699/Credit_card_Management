@@ -58,6 +58,10 @@ dependencies {
     // Micrometer distributed tracing
     implementation 'io.micrometer:micrometer-tracing-bridge-brave'
     implementation 'io.zipkin.reporter2:zipkin-reporter-brave'
+    // Brave gRPC client interceptor: carries the trace into every call to transaction-service
+    implementation 'io.zipkin.brave:brave-instrumentation-grpc'
+    // Reactor context propagation: carries the active span into reactive threads (no MDC thread-locals)
+    implementation 'io.micrometer:context-propagation'
 
     // Structured JSON logging
     implementation 'net.logstash.logback:logstash-logback-encoder:7.4'

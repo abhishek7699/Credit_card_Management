@@ -30,6 +30,9 @@ public class KafkaProducerConfig {
         props.put(ProducerConfig.RETRIES_CONFIG, 3);
         props.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, true);
         ProducerFactory<String, TransactionSettledEvent> pf = new DefaultKafkaProducerFactory<>(props);
-        return new KafkaTemplate<>(pf);
+        KafkaTemplate<String, TransactionSettledEvent> template = new KafkaTemplate<>(pf);
+        // Each record carries the current trace in its headers (Spring Boot enables this only on its own template).
+        template.setObservationEnabled(true);
+        return template;
     }
 }

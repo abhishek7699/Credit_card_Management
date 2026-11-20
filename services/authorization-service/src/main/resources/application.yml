@@ -43,6 +43,13 @@ spring:
 management:
   server:
     port: 8082
+  # Tracing is always on (trace ids in logs); spans are exported only when sampled. Dev compose sets 1.0.
+  tracing:
+    sampling:
+      probability: ${TRACING_SAMPLING_PROBABILITY:0.0}
+  zipkin:
+    tracing:
+      endpoint: ${ZIPKIN_ENDPOINT:http://localhost:9411/api/v2/spans}
   endpoints:
     web:
       exposure:

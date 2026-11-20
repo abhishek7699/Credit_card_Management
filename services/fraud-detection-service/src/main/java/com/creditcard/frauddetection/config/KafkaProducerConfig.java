@@ -35,6 +35,9 @@ public class KafkaProducerConfig {
 
     @Bean
     public KafkaTemplate<String, FraudAlertRaisedEvent> kafkaTemplate() {
-        return new KafkaTemplate<>(producerFactory());
+        KafkaTemplate<String, FraudAlertRaisedEvent> template = new KafkaTemplate<>(producerFactory());
+        // Each record carries the current trace in its headers (Spring Boot enables this only on its own template).
+        template.setObservationEnabled(true);
+        return template;
     }
 }

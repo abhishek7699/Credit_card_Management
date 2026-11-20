@@ -57,6 +57,8 @@ dependencies {
     // Micrometer distributed tracing (propagates trace ID in gRPC metadata + Kafka headers)
     implementation 'io.micrometer:micrometer-tracing-bridge-brave'
     implementation 'io.zipkin.reporter2:zipkin-reporter-brave'
+    // Brave gRPC server interceptor: continues the caller's trace on every inbound gRPC call
+    implementation 'io.zipkin.brave:brave-instrumentation-grpc'
 
     // Structured JSON logging
     implementation 'net.logstash.logback:logstash-logback-encoder:7.4'
