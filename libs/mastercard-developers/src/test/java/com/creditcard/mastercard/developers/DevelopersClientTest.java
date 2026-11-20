@@ -96,6 +96,108 @@ class DevelopersClientTest {
         assertThat(result.body()).isEqualTo("{\"Errors\":{}}");
     }
 
+    private static AccountValidationClient.Request request(String refId) {
+        return AccountValidationClient.Request.fromCard(refId, "5102589999999913", "10/50", "6173", "Jane Michelle Candy-Smith");
+    }
+
+    @Test
+    void validateApprovesWhenIssuerApprovesAndCvcMatches() throws Exception {
+        wireMock.stubFor(post(anyUrl()).willReturn(okJson("""
+                {"referenceId":"AVM_1","networkResponseCode":"00",
+                 "cvcValidationResults":{"status":"MATCHED"},"nameValidationResults":{"status":"PARTIAL_MATCHED"}}""")));
+        AccountValidationClient.Validation v = new AccountValidationClient(configForWireMock()).validate(request("AVM_1"), NOW);
+        assertThat(v.approved()).isTrue();
+        assertThat(v.referenceId()).isEqualTo("AVM_1");
+        assertThat(v.networkResponseCode()).isEqualTo("00");
+        JsonNode sent = new ObjectMapper().readTree(
+                wireMock.findAll(postRequestedFor(anyUrl())).get(0).getBodyAsString());
+        assertThat(sent.at("/accountDetails/account/expiry").asText()).isEqualTo("2050-10");
+        assertThat(sent.at("/accountDetails/account/cvc").asText()).isEqualTo("6173");
+        assertThat(sent.at("/accountDetails/name/firstName").asText()).isEqualTo("Jane");
+        assertThat(sent.at("/accountDetails/name/lastName").asText()).isEqualTo("Candy-Smith");
+    }
+
+    @Test
+    void validateDoesNotApproveWhenCvcOrNameOrIssuerSaysNo() throws Exception {
+        AccountValidationClient client = new AccountValidationClient(configForWireMock());
+        String[] bodies = {
+                "{\"networkResponseCode\":\"05\",\"cvcValidationResults\":{\"status\":\"MATCHED\"}}",
+                "{\"networkResponseCode\":\"00\",\"cvcValidationResults\":{\"status\":\"NOT_MATCHED\"}}",
+                "{\"networkResponseCode\":\"00\",\"cvcValidationResults\":{\"status\":\"MATCHED\"},\"nameValidationResults\":{\"status\":\"NOT_MATCHED\"}}",
+                "{\"networkResponseCode\":\"00\"}"};
+        for (String body : bodies) {
+            wireMock.stubFor(post(anyUrl()).willReturn(okJson(body)));
+            assertThat(client.validate(request("AVM_2"), NOW).approved()).as(body).isFalse();
+        }
+    }
+
+    @Test
+    void validateTreatsHttp400AsNotApproved() throws Exception {
+        wireMock.stubFor(post(anyUrl()).willReturn(aResponse().withStatus(400).withBody("{\"Errors\":{}}")));
+        AccountValidationClient.Validation v = new AccountValidationClient(configForWireMock()).validate(request("X_1"), NOW);
+        assertThat(v.approved()).isFalse();
+        assertThat(v.networkResponseCode()).isNull();
+    }
+
+    @Test
+    void validateFailsClosedOnAuthErrorServerErrorAndGarbage() throws Exception {
+        AccountValidationClient client = new AccountValidationClient(configForWireMock());
+        for (int status : new int[] {401, 500, 503}) {
+            wireMock.stubFor(post(anyUrl()).willReturn(aResponse().withStatus(status).withBody("secret-ish body")));
+            assertThatThrownBy(() -> client.validate(request("AVM_3"), NOW))
+                    .isInstanceOf(AccountValidationUnavailableException.class)
+                    .hasMessage("Account Validation returned HTTP " + status);
+        }
+        wireMock.stubFor(post(anyUrl()).willReturn(okJson("not json")));
+        assertThatThrownBy(() -> client.validate(request("AVM_3"), NOW))
+                .isInstanceOf(AccountValidationUnavailableException.class).hasMessageContaining("unreadable");
+    }
+
+    @Test
+    void validateFailsClosedOnTimeoutAndConnectionError() throws Exception {
+        MastercardDevelopersConfig config = configForWireMock();
+        wireMock.stubFor(post(anyUrl()).willReturn(aResponse().withFixedDelay(1500).withStatus(200)));
+        assertThatThrownBy(() -> new AccountValidationClient(config, java.time.Duration.ofMillis(200))
+                .validate(request("AVM_4"), NOW))
+                .isInstanceOf(AccountValidationUnavailableException.class)
+                .hasMessageContaining("HttpTimeoutException");
+        wireMock.stop();
+        assertThatThrownBy(() -> new AccountValidationClient(config).validate(request("AVM_4"), NOW))
+                .isInstanceOf(AccountValidationUnavailableException.class);
+    }
+
+    @Test
+    void validateRestoresInterruptFlag() throws Exception {
+        wireMock.stubFor(post(anyUrl()).willReturn(aResponse().withFixedDelay(1000).withStatus(200)));
+        AccountValidationClient client = new AccountValidationClient(configForWireMock());
+        Thread.currentThread().interrupt();
+        try {
+            assertThatThrownBy(() -> client.validate(request("AVM_5"), NOW))
+                    .isInstanceOf(AccountValidationUnavailableException.class);
+            assertThat(Thread.currentThread().isInterrupted()).isTrue();
+        } finally {
+            Thread.interrupted();
+        }
+    }
+
+    @Test
+    void requestMasksCardNumberAndCvcAndRejectsBadExpiry() {
+        String text = request("AVM_6").toString();
+        assertThat(text).doesNotContain("5102589999999913").doesNotContain("6173").contains("AVM_6");
+        assertThatThrownBy(() -> AccountValidationClient.Request.fromCard("AVM_6", "5102589999999913", "13/30", "1", "A B"))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> AccountValidationClient.Request.fromCard("AVM_6", "5102589999999913", null, "1", "A B"))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void cardholderNameSplitHandlesOneWordAndBlank() {
+        assertThat(CardholderName.split("Madonna")).containsExactly("#NOFIRSTNAME", "Madonna");
+        assertThat(CardholderName.split("  Jane   Doe ")).containsExactly("Jane", "Doe");
+        assertThat(CardholderName.split("  ")).containsExactly("#NOFIRSTNAME", "#NOLASTNAME");
+        assertThat(CardholderName.split(null)).containsExactly("#NOFIRSTNAME", "#NOLASTNAME");
+    }
+
     @Test
     void configFromEnvironmentUsesSandboxUrlAndMasksSecrets() throws Exception {
         MastercardDevelopersConfig config = MastercardDevelopersConfig.fromEnvironment(env);
