@@ -60,6 +60,12 @@ gateway:
     warmup:
       timeout: 120s
       poll-interval: 2s
+  # Requests per second (replenish) and burst, per key. Authenticated routes key by JWT
+  # subject; the public guest routes key by client IP and use their own, stricter limit.
+  rate-limit:
+    public:
+      replenish-rate: ${GATEWAY_PUBLIC_RATE_LIMIT_REPLENISH:5}
+      burst-capacity: ${GATEWAY_PUBLIC_RATE_LIMIT_BURST:10}
 
 resilience4j:
   circuitbreaker:

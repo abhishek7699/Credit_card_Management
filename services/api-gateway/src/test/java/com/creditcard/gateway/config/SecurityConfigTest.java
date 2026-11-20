@@ -143,6 +143,34 @@ class SecurityConfigTest {
     }
 
     @Test
+    void noToken_publicAvailability_notUnauthorized() {
+        webClient.get().uri("/api/v1/public/availability?checkIn=2026-11-01&checkOut=2026-11-03")
+                .exchange()
+                .expectStatus().isNotFound(); // permitted by security; no booking-service in this slice
+    }
+
+    @Test
+    void noToken_publicBookings_notUnauthorized() {
+        webClient.post().uri("/api/v1/public/bookings")
+                .exchange()
+                .expectStatus().isNotFound(); // permitted by security; no booking-service in this slice
+    }
+
+    @Test
+    void noToken_otherPublicPath_returns401() {
+        webClient.get().uri("/api/v1/public/anything-else")
+                .exchange()
+                .expectStatus().isUnauthorized();
+    }
+
+    @Test
+    void noToken_publicAvailability_wrongMethod_returns401() {
+        webClient.post().uri("/api/v1/public/availability")
+                .exchange()
+                .expectStatus().isUnauthorized();
+    }
+
+    @Test
     void housekeepingToken_getBooking_notForbidden() {
         webClient.mutateWith(mockJwt().authorities(() -> "ROLE_HOUSEKEEPING"))
                 .get().uri("/api/v1/bookings/00000000-0000-0000-0000-000000000000")

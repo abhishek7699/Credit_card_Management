@@ -29,6 +29,12 @@ public class GlobalExceptionHandler {
         return Map.of("error", ex.getMessage());
     }
 
+    @ExceptionHandler(BookingWindowException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public Map<String, String> handleBookingWindow(BookingWindowException ex) {
+        return Map.of("error", ex.getMessage());
+    }
+
     @ExceptionHandler(CardRequiredException.class)
     @ResponseStatus(HttpStatus.BAD_REQUEST)
     public Map<String, String> handleCardRequired(CardRequiredException ex) {

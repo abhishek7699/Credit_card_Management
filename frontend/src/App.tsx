@@ -6,6 +6,8 @@ import { StaffShell } from './components/StaffShell';
 import { StaffAuthGate } from './features/staff-session/StaffAuthGate';
 
 const RoomBoard = lazy(() => import('./features/room-board/RoomBoard'));
+const FrontOffice = lazy(() => import('./features/front-office/FrontOffice'));
+const BookingConfirmation = lazy(() => import('./features/front-office/BookingConfirmation'));
 
 function StaffApp() {
   return (
@@ -24,9 +26,27 @@ export default function App() {
     <BrowserRouter>
       <ErrorBoundary>
         <Routes>
+          {/* Guest front office (public, no login) at /. */}
+          <Route
+            path="/"
+            element={
+              <Suspense fallback={<LoadingSpinner />}>
+                <FrontOffice />
+              </Suspense>
+            }
+          />
+          <Route
+            path="/booked/:bookingId"
+            element={
+              <Suspense fallback={<LoadingSpinner />}>
+                <BookingConfirmation />
+              </Suspense>
+            }
+          />
+          {/* Staff app, unchanged, at /staff. */}
           <Route path="/staff/*" element={<StaffApp />} />
-          {/* /staff is the only app — every other path (including /) redirects here. */}
-          <Route path="*" element={<Navigate to="/staff" replace />} />
+          {/* Any other path goes back to the front office. */}
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </ErrorBoundary>
     </BrowserRouter>

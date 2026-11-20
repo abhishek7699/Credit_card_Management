@@ -56,6 +56,10 @@ public class SecurityConfig {
                         // Public endpoints
                         .pathMatchers("/actuator/**").permitAll()
                         .pathMatchers("/fallback/**").permitAll()
+                        // Guest front office (layer 2d): exactly these two routes need no JWT.
+                        // Exact paths, not /api/v1/public/**, so nothing else under the prefix opens.
+                        .pathMatchers(HttpMethod.GET, "/api/v1/public/availability").permitAll()
+                        .pathMatchers(HttpMethod.POST, "/api/v1/public/bookings").permitAll()
                         // Transaction routes
                         .pathMatchers(HttpMethod.POST, "/api/v1/transactions")
                                 .hasAnyRole("MERCHANT", "ADMIN")

@@ -30,6 +30,26 @@ test('does not render a balance-due badge when hasBalanceDue is false', () => {
   expect(screen.queryByTestId('balance-due-badge')).not.toBeInTheDocument();
 });
 
+test('shows an ONLINE badge when the occupant booked online', () => {
+  render(<RoomTile room={entry({ bookingSource: 'ONLINE', hasBalanceDue: true })} onClick={vi.fn()} />);
+  expect(screen.getByTestId('online-badge')).toHaveTextContent('ONLINE');
+});
+
+test('shows an ONLINE badge when the booking arriving today was made online', () => {
+  render(
+    <RoomTile
+      room={entry({ status: 'VACANT_CLEAN', guestName: null, arrivingBookingSource: 'ONLINE' })}
+      onClick={vi.fn()}
+    />,
+  );
+  expect(screen.getByTestId('online-badge')).toBeInTheDocument();
+});
+
+test('shows no ONLINE badge for a staff-made booking', () => {
+  render(<RoomTile room={entry({ bookingSource: 'STAFF', arrivingBookingSource: 'STAFF' })} onClick={vi.fn()} />);
+  expect(screen.queryByTestId('online-badge')).not.toBeInTheDocument();
+});
+
 test('does not render a balance-due badge when hasBalanceDue is null (not occupied)', () => {
   render(<RoomTile room={entry({ status: 'VACANT_CLEAN', guestName: null, hasBalanceDue: null })} onClick={vi.fn()} />);
   expect(screen.queryByTestId('balance-due-badge')).not.toBeInTheDocument();

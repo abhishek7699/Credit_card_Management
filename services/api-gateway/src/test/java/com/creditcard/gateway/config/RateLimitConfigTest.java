@@ -15,6 +15,7 @@ import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import reactor.test.StepVerifier;
 
+import java.net.InetSocketAddress;
 import java.time.Instant;
 import java.util.List;
 
@@ -42,6 +43,12 @@ class RateLimitConfigTest {
                 .build();
     }
 
+    private static MockServerWebExchange exchangeFrom(String path, String clientIp) {
+        return MockServerWebExchange.from(MockServerHttpRequest.get(path)
+                .remoteAddress(new InetSocketAddress(clientIp, 40000))
+                .build());
+    }
+
     @Test
     void authenticatedUser_returnsSubAsPrincipal() {
         var exchange = MockServerWebExchange.from(MockServerHttpRequest.get("/api/v1/transactions").build());
@@ -58,16 +65,17 @@ class RateLimitConfigTest {
     }
 
     @Test
-    void unauthenticated_returnsEmptyMono() {
-        var exchange = MockServerWebExchange.from(MockServerHttpRequest.get("/api/v1/transactions").build());
+    void unauthenticated_fallsBackToClientIp() {
+        var exchange = exchangeFrom("/api/v1/public/availability", "203.0.113.7");
 
         StepVerifier.create(keyResolver.resolve(exchange))
+                .expectNext("ip:203.0.113.7")
                 .verifyComplete();
     }
 
     @Test
-    void nonJwtPrincipal_returnsEmptyMono() {
-        var exchange = MockServerWebExchange.from(MockServerHttpRequest.get("/test").build());
+    void nonJwtPrincipal_fallsBackToClientIp() {
+        var exchange = exchangeFrom("/test", "203.0.113.8");
         var auth = new org.springframework.security.authentication.UsernamePasswordAuthenticationToken(
                 "user", "pass");
         var ctx = new SecurityContextImpl(auth);
@@ -76,13 +84,29 @@ class RateLimitConfigTest {
                 keyResolver.resolve(exchange)
                         .contextWrite(ReactiveSecurityContextHolder.withSecurityContext(
                                 reactor.core.publisher.Mono.just(ctx))))
+                .expectNext("ip:203.0.113.8")
                 .verifyComplete();
+    }
+
+    @Test
+    void unknownRemoteAddress_usesSharedUnknownKey() {
+        var exchange = MockServerWebExchange.from(MockServerHttpRequest.get("/api/v1/public/bookings")
+                .remoteAddress(null)
+                .build());
+
+        assertThat(RateLimitConfig.clientIp(exchange)).isEqualTo("unknown");
     }
 
     @Test
     void defaultRedisRateLimiter_configuresReplenishRateAndBurstCapacity() {
         RedisRateLimiter rateLimiter = config.defaultRedisRateLimiter(10, 20);
         assertThat(rateLimiter).isNotNull();
+    }
+
+    @Test
+    void publicRedisRateLimiter_isASeparateLimiterFromTheDefault() {
+        RedisRateLimiter publicLimiter = config.publicRedisRateLimiter(5, 10);
+        assertThat(publicLimiter).isNotNull().isNotSameAs(config.defaultRedisRateLimiter(10, 20));
     }
 
     @Test
@@ -105,8 +129,20 @@ class RateLimitConfigTest {
     }
 
     @Test
-    void jwtWithoutSubject_returnsEmptyMono() {
-        var exchange = MockServerWebExchange.from(MockServerHttpRequest.get("/api").build());
+    void publicRoute_withoutJwt_keysByIpWithRoutePrefix() {
+        var exchange = exchangeFrom("/api/v1/public/availability", "198.51.100.4");
+        Route route = mock(Route.class);
+        when(route.getId()).thenReturn("public-availability");
+        exchange.getAttributes().put(ServerWebExchangeUtils.GATEWAY_ROUTE_ATTR, route);
+
+        StepVerifier.create(keyResolver.resolve(exchange))
+                .expectNext("public-availability::ip:198.51.100.4")
+                .verifyComplete();
+    }
+
+    @Test
+    void jwtWithoutSubject_fallsBackToClientIp() {
+        var exchange = exchangeFrom("/api", "192.0.2.9");
         Jwt jwt = Jwt.withTokenValue("token")
                 .header("alg", "RS256")
                 .claim("scope", "read")
@@ -120,6 +156,7 @@ class RateLimitConfigTest {
                 keyResolver.resolve(exchange)
                         .contextWrite(ReactiveSecurityContextHolder.withSecurityContext(
                                 reactor.core.publisher.Mono.just(ctx))))
+                .expectNext("ip:192.0.2.9")
                 .verifyComplete();
     }
 

@@ -72,6 +72,10 @@ idempotency:
 booking:
   merchant-id: ${BOOKING_MERCHANT_ID:HOTEL-001}
   checkout-timeout-minutes: ${BOOKING_CHECKOUT_TIMEOUT_MINUTES:10}
+  # Guest-made bookings only (public front office). Staff bookings are not limited.
+  online:
+    max-stay-nights: ${BOOKING_ONLINE_MAX_STAY_NIGHTS:14}
+    max-days-ahead: ${BOOKING_ONLINE_MAX_DAYS_AHEAD:365}
 
 # Swagger UI (/swagger-ui.html) and OpenAPI spec (/v3/api-docs) are OFF by default, so
 # GKE and any run without a profile expose no API docs. Enabled by application-local.yml

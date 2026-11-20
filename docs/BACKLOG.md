@@ -118,6 +118,16 @@ These were named up front as out of scope for every layer until explicitly start
 
 - **Validate Idempotency-Key at the gateway**: reject keys that are non-ASCII or longer than 255 characters, instead of forwarding them to transaction-service.
 
+## Guest front office (layer 2d)
+
+- **Client IP behind a proxy**: the public rate limit keys on the socket's remote address. Behind a load balancer (GKE) every guest then shares one bucket. Fixing it needs a trusted-proxy list for X-Forwarded-For; reading that header without one lets a client bypass the limit.
+- **Guest booking lookup and cancellation**: the guest gets a reference but no way to view or cancel the booking. Both are out of scope for this layer.
+- **Guest email confirmation**: no email is sent; the reference is shown on screen only.
+- **Pay-now**: guests pay at checkout only. Taking payment at booking is not built.
+- **Public rooms and dates are not cached**: every search hits booking-service. Fine at 18 rooms.
+- **Arrival-date check uses the server's clock (UTC in compose)**: a guest far ahead of UTC can pick "today" that the server still sees as yesterday, and be refused. Needs the hotel's time zone as a setting.
+- **Public booking rejects only the dates above**: no duplicate-guest check, no deposit, no minimum stay.
+
 ## Distributed tracing
 
 - **fraud.alert.raised does not use the shared event envelope yet**: its payload is published in its own shape, not the envelope the other topics use. Left as is so the event format does not change in the tracing work. Move it onto the envelope in a separate change with a consumer migration (notification-service reads it).
