@@ -17,6 +17,15 @@ export interface AvailabilityResponse {
   rooms: OfferRoom[];
 }
 
+/** The guest's card. Sent once so the server can check it with no charge; the server keeps only the
+ *  outcome and the last 4 digits, and this app never stores it. */
+export interface GuestCard {
+  cardNumber: string;
+  expiry: string;
+  cvv: string;
+  cardholderName: string;
+}
+
 export interface OnlineBookingRequest {
   roomId: string;
   checkIn: string;
@@ -26,6 +35,7 @@ export interface OnlineBookingRequest {
   guestEmail: string | null;
   adults: number;
   children: number;
+  card: GuestCard;
 }
 
 export interface OnlineBookingConfirmation {

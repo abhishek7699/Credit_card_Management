@@ -1498,11 +1498,24 @@ step16_online_booking_and_staff_guard() {
     return 1
   fi
 
-  # No Authorization header at all: the guest route is public.
+  # A guest booking must carry a card (checked, never charged). Without one: 400, nothing created.
   resp=$(curl -s -w '\n%{http_code}' \
     -X POST "http://localhost:${GW_PORT}/api/v1/public/bookings" \
     -H "Content-Type: application/json" \
-    -d "{\"roomId\":\"${room_id}\",\"checkIn\":\"${check_in}\",\"checkOut\":\"${check_out}\",\"guestName\":\"E2E Online Guest\",\"guestPhone\":\"+15555550199\",\"guestEmail\":\"e2e-online@example.com\",\"adults\":1,\"children\":0}" \
+    -d "{\"roomId\":\"${room_id}\",\"checkIn\":\"${check_in}\",\"checkOut\":\"${check_out}\",\"guestName\":\"E2E Online Guest\",\"guestPhone\":\"+15555550199\"}" \
+    2>/dev/null)
+  http_code=$(echo "$resp" | tail -1)
+  if [[ "$http_code" != "400" ]]; then
+    fail "Step 16 — Guest booking without a card: expected 400, got ${http_code}"
+    return 1
+  fi
+
+  # No Authorization header at all: the guest route is public. The card check is switched off in
+  # CI (card-validation.enabled=false), so a well-formed card passes without Mastercard credentials.
+  resp=$(curl -s -w '\n%{http_code}' \
+    -X POST "http://localhost:${GW_PORT}/api/v1/public/bookings" \
+    -H "Content-Type: application/json" \
+    -d "{\"roomId\":\"${room_id}\",\"checkIn\":\"${check_in}\",\"checkOut\":\"${check_out}\",\"guestName\":\"E2E Online Guest\",\"guestPhone\":\"+15555550199\",\"guestEmail\":\"e2e-online@example.com\",\"adults\":1,\"children\":0,\"card\":{\"cardNumber\":\"4111111111111111\",\"expiry\":\"12/30\",\"cvv\":\"123\",\"cardholderName\":\"E2E Online Guest\"}}" \
     2>/dev/null)
   http_code=$(echo "$resp" | tail -1)
   body=$(echo "$resp" | sed '$d')

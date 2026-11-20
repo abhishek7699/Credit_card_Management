@@ -1,7 +1,7 @@
 package com.creditcard.booking.service;
 
-import com.creditcard.booking.controller.dto.BookingRequest;
 import com.creditcard.booking.controller.dto.PublicAvailabilityResponse;
+import com.creditcard.booking.controller.dto.PublicBookingRequest;
 import com.creditcard.booking.controller.dto.PublicBookingResponse;
 import com.creditcard.booking.controller.dto.PublicRoomOffer;
 import com.creditcard.booking.domain.Booking;
@@ -29,15 +29,18 @@ public class OnlineBookingService {
     private final BookingService bookingService;
     private final RoomRepository roomRepository;
     private final OnlineBookingPolicy policy;
+    private final CardValidationService cardValidationService;
 
     public OnlineBookingService(RoomAvailabilityService roomAvailabilityService,
                                 BookingService bookingService,
                                 RoomRepository roomRepository,
-                                OnlineBookingPolicy policy) {
+                                OnlineBookingPolicy policy,
+                                CardValidationService cardValidationService) {
         this.roomAvailabilityService = roomAvailabilityService;
         this.bookingService = bookingService;
         this.roomRepository = roomRepository;
         this.policy = policy;
+        this.cardValidationService = cardValidationService;
     }
 
     /** Available rooms for the range, each with its total for the stay and what's included. */
@@ -50,11 +53,16 @@ public class OnlineBookingService {
         return new PublicAvailabilityResponse(checkIn, checkOut, nights, rooms);
     }
 
-    /** Books the requested room for the guest. Throws RoomUnavailableException (409) if the
-     *  room was taken for any night in the range, the same as for a staff booking. */
-    public PublicBookingResponse book(BookingRequest request, LocalDate today) {
+    /** Books the requested room for the guest. The card is checked first, with no charge (a failed
+     *  check throws CardNotVerifiedException 422, an unavailable one 503, and nothing is stored), and
+     *  only its verdict, referenceId and last 4 digits are kept on the booking. The check runs before
+     *  the booking's database transaction opens, so no transaction waits on Mastercard. Throws
+     *  RoomUnavailableException (409) if the room was taken, the same as for a staff booking. */
+    public PublicBookingResponse book(PublicBookingRequest request, LocalDate today) {
         policy.validate(request.checkIn(), request.checkOut(), today);
-        Booking booking = bookingService.createConfirmedBookingWithSource(request, BookingSource.ONLINE);
+        CardValidationResult cardCheck = cardValidationService.validate(request.card());
+        Booking booking = bookingService.createConfirmedBookingWithSource(
+                request.toBookingRequest(), BookingSource.ONLINE, cardCheck);
         Room room = roomRepository.findById(booking.getRoomId())
                 .orElseThrow(() -> new RoomNotFoundException(booking.getRoomId()));
         return new PublicBookingResponse(

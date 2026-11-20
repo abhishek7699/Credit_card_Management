@@ -21,6 +21,9 @@ dependencies {
     // Exposes /actuator/prometheus for k8s/monitoring to scrape
     implementation 'io.micrometer:micrometer-registry-prometheus'
 
+    // Mastercard Developers (OAuth 1.0a) client for ValidateCard
+    implementation project(':libs:mastercard-developers')
+
     // Spring Boot core
     implementation 'org.springframework.boot:spring-boot-starter'
     implementation 'org.springframework.boot:spring-boot-starter-web'

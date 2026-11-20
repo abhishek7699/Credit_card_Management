@@ -139,6 +139,14 @@ public class BookingService {
      *  (STAFF, or ONLINE from the public front office). The price and checks are the same. */
     @Transactional
     public Booking createConfirmedBookingWithSource(BookingRequest request, BookingSource source) {
+        return createConfirmedBookingWithSource(request, source, null);
+    }
+
+    /** As above, also recording the guest's card check (verdict, referenceId, last 4 digits only).
+     *  {@code cardValidation} is null for staff bookings, which have no card at this step. */
+    @Transactional
+    public Booking createConfirmedBookingWithSource(BookingRequest request, BookingSource source,
+                                                    CardValidationResult cardValidation) {
         if (!request.checkOut().isAfter(request.checkIn())) {
             throw new InvalidDateRangeException(request.checkIn(), request.checkOut());
         }
@@ -163,6 +171,11 @@ public class BookingService {
         booking.setNotes(request.notes());
         booking.setStatus(BookingStatus.CONFIRMED);
         booking.setSource(source);
+        if (cardValidation != null) {
+            booking.setCardValidationStatus(cardValidation.status());
+            booking.setCardValidationReferenceId(cardValidation.referenceId());
+            booking.setCardLast4(cardValidation.last4());
+        }
         booking.setRoomChargeAmount(roomChargeAmount);
         Booking savedBooking = bookingRepository.save(booking);
 

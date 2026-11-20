@@ -38,6 +38,15 @@ function availabilityWith(rooms: unknown[]) {
   );
 }
 
+async function fillGuestAndCard() {
+  await userEvent.type(screen.getByLabelText('Full name'), 'Jane Doe');
+  await userEvent.type(screen.getByLabelText('Phone'), '+1 555 0100');
+  await userEvent.type(screen.getByLabelText('Card number'), '5102589999999913');
+  await userEvent.type(screen.getByLabelText('Expiry (MM/YY)'), '10/50');
+  await userEvent.type(screen.getByLabelText('CVV'), '123');
+  await userEvent.type(screen.getByLabelText('Name on card'), 'Jane Candy-Smith');
+}
+
 function setDates(checkIn: string, checkOut: string) {
   fireEvent.change(screen.getByLabelText('Check-in'), { target: { value: checkIn } });
   fireEvent.change(screen.getByLabelText('Check-out'), { target: { value: checkOut } });
@@ -131,8 +140,7 @@ test('a guest can book a room and lands on the confirmation with the reference',
   await userEvent.click(screen.getByRole('button', { name: 'Search rooms' }));
   await userEvent.click(await screen.findByRole('button', { name: 'Book room 101' }));
 
-  await userEvent.type(screen.getByLabelText('Full name'), 'Jane Doe');
-  await userEvent.type(screen.getByLabelText('Phone'), '+1 555 0100');
+  await fillGuestAndCard();
   await userEvent.click(screen.getByRole('button', { name: 'Confirm booking' }));
 
   expect(await screen.findByRole('heading', { name: 'Booking confirmed' })).toBeInTheDocument();
@@ -147,7 +155,10 @@ test('a guest can book a room and lands on the confirmation with the reference',
     guestEmail: null,
     adults: 1,
     children: 0,
+    card: { cardNumber: '5102589999999913', expiry: '10/50', cvv: '123', cardholderName: 'Jane Candy-Smith' },
   });
+  // The card was in that request; once it settles it must not linger in the app's store.
+  expect(JSON.stringify(store.getState())).not.toContain('5102589999999913');
 });
 
 test('a room taken in the meantime shows a clear message and the guest stays on the form', async () => {
@@ -159,11 +170,33 @@ test('a room taken in the meantime shows a clear message and the guest stays on 
   setDates('2030-01-10', '2030-01-12');
   await userEvent.click(screen.getByRole('button', { name: 'Search rooms' }));
   await userEvent.click(await screen.findByRole('button', { name: 'Book room 101' }));
-  await userEvent.type(screen.getByLabelText('Full name'), 'Jane Doe');
-  await userEvent.type(screen.getByLabelText('Phone'), '+1 555 0100');
+  await fillGuestAndCard();
   await userEvent.click(screen.getByRole('button', { name: 'Confirm booking' }));
 
   await waitFor(() =>
     expect(screen.getByRole('alert')).toHaveTextContent('That room was just booked for those dates'));
   expect(screen.getByRole('button', { name: 'Confirm booking' })).toBeInTheDocument();
+});
+
+test('a card that cannot be verified is rejected with a clear message, and the card is not kept', async () => {
+  server.use(
+    availabilityWith([ROOM_101]),
+    http.post('*/api/v1/public/bookings', () =>
+      HttpResponse.json(
+        { error: "We couldn't verify your card. Please check the card details or use a different card." },
+        { status: 422 },
+      ),
+    ),
+  );
+  renderFrontOffice();
+  setDates('2030-01-10', '2030-01-12');
+  await userEvent.click(screen.getByRole('button', { name: 'Search rooms' }));
+  await userEvent.click(await screen.findByRole('button', { name: 'Book room 101' }));
+  await fillGuestAndCard();
+  await userEvent.click(screen.getByRole('button', { name: 'Confirm booking' }));
+
+  await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent("We couldn't verify your card"));
+  expect(screen.queryByRole('heading', { name: 'Booking confirmed' })).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Confirm booking' })).toBeInTheDocument();
+  expect(JSON.stringify(store.getState())).not.toContain('5102589999999913');
 });

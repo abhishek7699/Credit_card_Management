@@ -128,6 +128,17 @@ These were named up front as out of scope for every layer until explicitly start
 - **Arrival-date check uses the server's clock (UTC in compose)**: a guest far ahead of UTC can pick "today" that the server still sees as yesterday, and be refused. Needs the hotel's time zone as a setting.
 - **Public booking rejects only the dates above**: no duplicate-guest check, no deposit, no minimum stay.
 
+## Guest card guarantee (Mastercard Account Validation)
+
+- **Sandbox only**: the check runs against the Mastercard Developers sandbox, which returns mock answers chosen by the referenceId prefix. Real use needs MTF then production: a real Partner-Id, acquirer credentials, payload encryption and production keys.
+- **Card-testing risk on a public route**: any guest can ask us to check a card. The only abuse control is the per-IP public rate limit. Before this runs against real Mastercard, add a much stricter limit on this route and a bot check, or it becomes a card-testing oracle.
+- **What counts as MATCHED is a choice**: issuer approved (00) AND CVC matched AND name not a mismatch. A partial name match passes; an issuer that cannot verify names also passes. Revisit with real issuers.
+- **A validated card is not a charge guarantee**: it proves the card is real and the CVC matched, not that funds exist. It is also not kept, so the guest re-enters the card at checkout.
+- **Staff bookings have no card guarantee**: unchanged on purpose.
+- **Repeat submits repeat the check**: the public booking route has no Idempotency-Key, so a double click validates twice.
+- **Currency is fixed to USD** in the validation request.
+- **Booking rows keep only the verdict, referenceId and last 4**: staff screens do not show them yet.
+
 ## Distributed tracing
 
 - **fraud.alert.raised does not use the shared event envelope yet**: its payload is published in its own shape, not the envelope the other topics use. Left as is so the event format does not change in the tracing work. Move it onto the envelope in a separate change with a consumer migration (notification-service reads it).

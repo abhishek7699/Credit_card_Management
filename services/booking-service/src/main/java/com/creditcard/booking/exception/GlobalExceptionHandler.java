@@ -41,6 +41,18 @@ public class GlobalExceptionHandler {
         return Map.of("error", ex.getMessage());
     }
 
+    @ExceptionHandler(CardNotVerifiedException.class)
+    @ResponseStatus(HttpStatus.UNPROCESSABLE_ENTITY)
+    public Map<String, String> handleCardNotVerified(CardNotVerifiedException ex) {
+        return Map.of("error", ex.getMessage());
+    }
+
+    @ExceptionHandler(CardValidationUnavailableException.class)
+    @ResponseStatus(HttpStatus.SERVICE_UNAVAILABLE)
+    public Map<String, String> handleCardValidationUnavailable(CardValidationUnavailableException ex) {
+        return Map.of("error", ex.getMessage());
+    }
+
     @ExceptionHandler(InvalidIdempotencyKeyException.class)
     @ResponseStatus(HttpStatus.BAD_REQUEST)
     public Map<String, String> handleInvalidIdempotencyKey(InvalidIdempotencyKeyException ex) {

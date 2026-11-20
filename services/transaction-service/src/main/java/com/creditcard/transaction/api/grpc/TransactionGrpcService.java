@@ -8,11 +8,17 @@ import com.creditcard.transaction.grpc.v1.InitiateTransactionResponse;
 import com.creditcard.transaction.grpc.v1.LookupTransactionByIdempotencyKeyRequest;
 import com.creditcard.transaction.grpc.v1.LookupTransactionByIdempotencyKeyResponse;
 import com.creditcard.transaction.grpc.v1.TransactionServiceGrpc;
+import com.creditcard.mastercard.developers.AccountValidationUnavailableException;
+import com.creditcard.transaction.grpc.v1.ValidateCardRequest;
+import com.creditcard.transaction.grpc.v1.ValidateCardResponse;
+import com.creditcard.transaction.service.CardValidationService;
 import com.creditcard.transaction.service.IdempotencyKeyService;
 import com.creditcard.transaction.service.TransactionService;
 import io.grpc.Status;
 import io.grpc.stub.StreamObserver;
 import net.devh.boot.grpc.server.service.GrpcService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.math.BigDecimal;
 import java.util.Optional;
@@ -23,10 +29,41 @@ public class TransactionGrpcService extends TransactionServiceGrpc.TransactionSe
     /** Matches the idempotency_keys.idempotency_key column width. */
     static final int MAX_IDEMPOTENCY_KEY_LENGTH = 255;
 
-    private final TransactionService transactionService;
+    private static final Logger log = LoggerFactory.getLogger(TransactionGrpcService.class);
 
-    public TransactionGrpcService(TransactionService transactionService) {
+    private final TransactionService transactionService;
+    private final CardValidationService cardValidationService;
+
+    public TransactionGrpcService(TransactionService transactionService, CardValidationService cardValidationService) {
         this.transactionService = transactionService;
+        this.cardValidationService = cardValidationService;
+    }
+
+    /**
+     * Checks a card without charging or storing it. The request message is never logged (its toString would
+     * print the card number and CVC), and errors carry fixed descriptions only, never card data.
+     */
+    @Override
+    public void validateCard(ValidateCardRequest request, StreamObserver<ValidateCardResponse> responseObserver) {
+        try {
+            CardValidationService.Outcome outcome = cardValidationService.validate(
+                    request.getCardNumber(), request.getCardExpiry(), request.getCvv(), request.getCardholderName());
+            responseObserver.onNext(ValidateCardResponse.newBuilder()
+                    .setStatus(outcome.status().name())
+                    .setReferenceId(outcome.referenceId())
+                    .setLast4(outcome.last4())
+                    .build());
+            responseObserver.onCompleted();
+        } catch (IllegalArgumentException e) {
+            responseObserver.onError(Status.INVALID_ARGUMENT.withDescription(e.getMessage()).asRuntimeException());
+        } catch (AccountValidationUnavailableException e) {
+            log.warn("Card validation unavailable: {}", e.getMessage());
+            responseObserver.onError(Status.UNAVAILABLE
+                    .withDescription("Card validation is unavailable").asRuntimeException());
+        } catch (Exception e) {
+            log.error("Card validation failed: {}", e.getClass().getSimpleName());
+            responseObserver.onError(Status.INTERNAL.withDescription("Card validation failed").asRuntimeException());
+        }
     }
 
     @Override

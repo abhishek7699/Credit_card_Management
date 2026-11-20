@@ -183,6 +183,35 @@ class BookingServiceTest {
     }
 
     @Test
+    void createConfirmedBooking_guestBooking_keepsOnlyVerdictReferenceAndLast4() {
+        UUID roomId = UUID.randomUUID();
+        when(roomRepository.findById(roomId)).thenReturn(Optional.of(room(roomId)));
+        when(bookingRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        BookingRequest request = minimalRequest(roomId, LocalDate.of(2026, 11, 1), LocalDate.of(2026, 11, 3));
+
+        Booking result = service.createConfirmedBookingWithSource(request, BookingSource.ONLINE,
+                new CardValidationResult("MATCHED", "AVM_abc", "9913"));
+
+        assertThat(result.getCardValidationStatus()).isEqualTo("MATCHED");
+        assertThat(result.getCardValidationReferenceId()).isEqualTo("AVM_abc");
+        assertThat(result.getCardLast4()).isEqualTo("9913");
+    }
+
+    @Test
+    void createConfirmedBooking_staffBooking_hasNoCardValidationAtAll() {
+        UUID roomId = UUID.randomUUID();
+        when(roomRepository.findById(roomId)).thenReturn(Optional.of(room(roomId)));
+        when(bookingRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Booking result = service.createConfirmedBooking(
+                minimalRequest(roomId, LocalDate.of(2026, 11, 1), LocalDate.of(2026, 11, 3)));
+
+        assertThat(result.getCardValidationStatus()).isNull();
+        assertThat(result.getCardValidationReferenceId()).isNull();
+        assertThat(result.getCardLast4()).isNull();
+    }
+
+    @Test
     void createConfirmedBooking_fullOptionalFields_allRecorded() {
         UUID roomId = UUID.randomUUID();
         Room room = room(roomId);

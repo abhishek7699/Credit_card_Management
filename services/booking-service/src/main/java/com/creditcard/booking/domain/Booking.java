@@ -75,6 +75,18 @@ public class Booking {
     @Column(name = "source", nullable = false, length = 20)
     private BookingSource source = BookingSource.STAFF;
 
+    /** Outcome of the no-charge card check made when a guest booked online (V12), else null.
+     *  Only the verdict, Mastercard's referenceId and the last 4 digits are kept: never the
+     *  card number or CVC. */
+    @Column(name = "card_validation_status", length = 20)
+    private String cardValidationStatus;
+
+    @Column(name = "card_validation_reference_id", length = 64)
+    private String cardValidationReferenceId;
+
+    @Column(name = "card_last4", length = 4)
+    private String cardLast4;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "cancellation_reason", length = 30)
     private CancellationReason cancellationReason;
@@ -161,6 +173,15 @@ public class Booking {
 
     public BookingSource getSource() { return source; }
     public void setSource(BookingSource source) { this.source = source; }
+
+    public String getCardValidationStatus() { return cardValidationStatus; }
+    public void setCardValidationStatus(String cardValidationStatus) { this.cardValidationStatus = cardValidationStatus; }
+
+    public String getCardValidationReferenceId() { return cardValidationReferenceId; }
+    public void setCardValidationReferenceId(String cardValidationReferenceId) { this.cardValidationReferenceId = cardValidationReferenceId; }
+
+    public String getCardLast4() { return cardLast4; }
+    public void setCardLast4(String cardLast4) { this.cardLast4 = cardLast4; }
 
     public CancellationReason getCancellationReason() { return cancellationReason; }
     public void setCancellationReason(CancellationReason cancellationReason) { this.cancellationReason = cancellationReason; }
