@@ -1,8 +1,9 @@
 import { useState, type FormEvent, type ReactNode } from 'react';
 import type { OfferRoom, OnlineBookingRequest } from './types';
+import { validateCardFields, type CardFormErrors, type CardFormState } from '../booking/validation';
 import { validateGuestForm, type GuestFormErrors, type GuestFormValues } from './validation';
 
-export type GuestDetails = Pick<OnlineBookingRequest, 'guestName' | 'guestPhone' | 'guestEmail' | 'adults' | 'children'>;
+export type GuestDetails = Pick<OnlineBookingRequest, 'guestName' | 'guestPhone' | 'guestEmail' | 'adults' | 'children' | 'card'>;
 
 interface GuestBookingFormProps {
   room: OfferRoom;
@@ -13,26 +14,41 @@ interface GuestBookingFormProps {
 }
 
 const EMPTY: GuestFormValues = { guestName: '', guestPhone: '', guestEmail: '', adults: '1', children: '0' };
+const EMPTY_CARD: CardFormState = { cardNumber: '', expiry: '', cvv: '', cardholderName: '' };
 
 export function GuestBookingForm({ room, onSubmit, submitting, serverError }: GuestBookingFormProps) {
   const [values, setValues] = useState<GuestFormValues>(EMPTY);
   const [errors, setErrors] = useState<GuestFormErrors>({});
+  const [card, setCard] = useState<CardFormState>(EMPTY_CARD);
+  const [cardErrors, setCardErrors] = useState<CardFormErrors>({});
 
   function update(field: keyof GuestFormValues, value: string) {
     setValues((prev) => ({ ...prev, [field]: value }));
   }
 
+  function updateCard(field: keyof CardFormState, value: string) {
+    setCard((prev) => ({ ...prev, [field]: value }));
+  }
+
   function handleSubmit(event: FormEvent) {
     event.preventDefault();
     const found = validateGuestForm(values);
+    const cardFound = validateCardFields(card);
     setErrors(found);
-    if (Object.keys(found).length > 0) return;
+    setCardErrors(cardFound);
+    if (Object.keys(found).length > 0 || Object.keys(cardFound).length > 0) return;
     onSubmit({
       guestName: values.guestName.trim(),
       guestPhone: values.guestPhone.trim(),
       guestEmail: values.guestEmail.trim() || null,
       adults: Number(values.adults),
       children: Number(values.children),
+      card: {
+        cardNumber: card.cardNumber.replace(/\s+/g, ''),
+        expiry: card.expiry.trim(),
+        cvv: card.cvv.trim(),
+        cardholderName: card.cardholderName.trim(),
+      },
     });
   }
 
@@ -99,6 +115,55 @@ export function GuestBookingForm({ room, onSubmit, submitting, serverError }: Gu
           />
         </Field>
       </div>
+
+      <fieldset className="space-y-4 rounded border border-slate-200 p-4">
+        <legend className="px-1 text-sm font-semibold text-slate-800">Card to guarantee your booking</legend>
+        <p className="text-sm text-slate-700">
+          We check that your card is valid to hold this booking. Nothing is charged, and we never store your card
+          number or security code.
+        </p>
+        <Field label="Card number" id="guest-card-number" error={cardErrors.cardNumber}>
+          <input
+            id="guest-card-number"
+            className="rounded border border-slate-300 bg-white px-3 py-2"
+            inputMode="numeric"
+            value={card.cardNumber}
+            onChange={(e) => updateCard('cardNumber', e.target.value)}
+            autoComplete="cc-number"
+          />
+        </Field>
+        <div className="grid grid-cols-2 gap-4">
+          <Field label="Expiry (MM/YY)" id="guest-card-expiry" error={cardErrors.expiry}>
+            <input
+              id="guest-card-expiry"
+              className="rounded border border-slate-300 bg-white px-3 py-2"
+              placeholder="MM/YY"
+              value={card.expiry}
+              onChange={(e) => updateCard('expiry', e.target.value)}
+              autoComplete="cc-exp"
+            />
+          </Field>
+          <Field label="CVV" id="guest-card-cvv" error={cardErrors.cvv}>
+            <input
+              id="guest-card-cvv"
+              className="rounded border border-slate-300 bg-white px-3 py-2"
+              inputMode="numeric"
+              value={card.cvv}
+              onChange={(e) => updateCard('cvv', e.target.value)}
+              autoComplete="cc-csc"
+            />
+          </Field>
+        </div>
+        <Field label="Name on card" id="guest-card-name" error={cardErrors.cardholderName}>
+          <input
+            id="guest-card-name"
+            className="rounded border border-slate-300 bg-white px-3 py-2"
+            value={card.cardholderName}
+            onChange={(e) => updateCard('cardholderName', e.target.value)}
+            autoComplete="cc-name"
+          />
+        </Field>
+      </fieldset>
 
       {serverError && (
         <p role="alert" className="rounded bg-red-50 p-3 text-red-800">
