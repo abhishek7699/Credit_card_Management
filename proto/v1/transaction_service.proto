@@ -31,6 +31,12 @@ service TransactionService {
   // GetTransaction: Retrieves the current state of a transaction by its ID.
   // Returns masked card number and current status only — never the card token.
   rpc GetTransaction(GetTransactionRequest) returns (GetTransactionResponse);
+
+  // LookupTransactionByIdempotencyKey: Lookup-only. Reports whether a transaction was created
+  // under this Idempotency-Key and its current status. It never creates or charges anything.
+  // Callers use it to learn whether an InitiateTransaction that failed on their side was processed.
+  rpc LookupTransactionByIdempotencyKey(LookupTransactionByIdempotencyKeyRequest)
+      returns (LookupTransactionByIdempotencyKeyResponse);
 }
 
 // InitiateTransactionRequest: Contains all card payment details as submitted by
@@ -115,4 +121,24 @@ message GetTransactionResponse {
   // merchant_id: The merchant who submitted this transaction.
   // Used by the api-gateway to enforce merchant data isolation for MERCHANT-role callers.
   string merchant_id = 9;
+}
+
+// LookupTransactionByIdempotencyKeyRequest: The Idempotency-Key used on InitiateTransaction.
+message LookupTransactionByIdempotencyKeyRequest {
+  // idempotency_key: The key sent as the "idempotency-key" gRPC metadata on InitiateTransaction.
+  string idempotency_key = 1;
+}
+
+// LookupTransactionByIdempotencyKeyResponse: found=false means no transaction exists for the
+// key (a retained key whose creation rolled back, or a key that was never used), so nothing was
+// charged under it. When found=true, transaction_id and status describe the current transaction.
+message LookupTransactionByIdempotencyKeyResponse {
+  // found: True when a transaction was created under this key.
+  bool found = 1;
+
+  // transaction_id: UUID of the transaction. Empty when found is false.
+  string transaction_id = 2;
+
+  // status: Current status. One of: PENDING, AUTHORIZED, DECLINED, FAILED. Empty when found is false.
+  string status = 3;
 }

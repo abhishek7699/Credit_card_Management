@@ -232,6 +232,13 @@ public class TransactionService {
         return transactionRepository.findById(id);
     }
 
+    /** Lookup-only: the transaction created under an InitiateTransaction Idempotency-Key, if any. */
+    @Transactional(readOnly = true)
+    public Optional<Transaction> findByIdempotencyKey(String idempotencyKey) {
+        return idempotencyKeyService.find(idempotencyKey)
+                .flatMap(stored -> transactionRepository.findById(stored.resourceId()));
+    }
+
     private TransactionInitiatedEvent buildInitiatedEvent(Transaction tx) {
         TransactionInitiatedEvent.Payload payload = new TransactionInitiatedEvent.Payload();
         payload.setTransactionId(tx.getId().toString());

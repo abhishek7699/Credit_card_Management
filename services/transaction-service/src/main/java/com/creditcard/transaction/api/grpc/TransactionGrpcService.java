@@ -5,6 +5,8 @@ import com.creditcard.transaction.grpc.v1.GetTransactionRequest;
 import com.creditcard.transaction.grpc.v1.GetTransactionResponse;
 import com.creditcard.transaction.grpc.v1.InitiateTransactionRequest;
 import com.creditcard.transaction.grpc.v1.InitiateTransactionResponse;
+import com.creditcard.transaction.grpc.v1.LookupTransactionByIdempotencyKeyRequest;
+import com.creditcard.transaction.grpc.v1.LookupTransactionByIdempotencyKeyResponse;
 import com.creditcard.transaction.grpc.v1.TransactionServiceGrpc;
 import com.creditcard.transaction.service.IdempotencyKeyService;
 import com.creditcard.transaction.service.TransactionService;
@@ -92,6 +94,46 @@ public class TransactionGrpcService extends TransactionServiceGrpc.TransactionSe
         } catch (Exception e) {
             responseObserver.onError(Status.INTERNAL
                     .withDescription("Transaction initiation failed")
+                    .withCause(e)
+                    .asRuntimeException());
+        }
+    }
+
+    /**
+     * Lookup-only (never creates or charges). Booking's checkout sweep calls it with the attempt id
+     * it sent as the InitiateTransaction key, to learn whether that call was processed.
+     */
+    @Override
+    public void lookupTransactionByIdempotencyKey(
+            LookupTransactionByIdempotencyKeyRequest request,
+            StreamObserver<LookupTransactionByIdempotencyKeyResponse> responseObserver) {
+
+        String key = request.getIdempotencyKey();
+        if (key.isBlank()) {
+            responseObserver.onError(Status.INVALID_ARGUMENT
+                    .withDescription("idempotency_key is required")
+                    .asRuntimeException());
+            return;
+        }
+        if (key.length() > MAX_IDEMPOTENCY_KEY_LENGTH) {
+            responseObserver.onError(Status.INVALID_ARGUMENT
+                    .withDescription("idempotency_key must be at most " + MAX_IDEMPOTENCY_KEY_LENGTH + " characters")
+                    .asRuntimeException());
+            return;
+        }
+
+        try {
+            LookupTransactionByIdempotencyKeyResponse.Builder response =
+                    LookupTransactionByIdempotencyKeyResponse.newBuilder();
+            transactionService.findByIdempotencyKey(key).ifPresent(tx -> response
+                    .setFound(true)
+                    .setTransactionId(tx.getId().toString())
+                    .setStatus(tx.getStatus().name()));
+            responseObserver.onNext(response.build());
+            responseObserver.onCompleted();
+        } catch (RuntimeException e) {
+            responseObserver.onError(Status.INTERNAL
+                    .withDescription("Idempotency-key lookup failed")
                     .withCause(e)
                     .asRuntimeException());
         }

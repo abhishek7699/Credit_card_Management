@@ -9,6 +9,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Supplier;
 
@@ -54,6 +55,19 @@ public class IdempotencyKeyService {
         StoredResult result = creation.get();
         repository.recordResult(key, result.resourceId(), result.status());
         return result;
+    }
+
+    /**
+     * Lookup-only: the result stored under a live key, if a creation for it committed. Never
+     * claims or creates anything. A key that is expired or whose creation rolled back has no
+     * row (or no resource), so the caller can tell that nothing was created under it.
+     */
+    @Transactional(readOnly = true)
+    public Optional<StoredResult> find(String key) {
+        return repository.findById(key)
+                .filter(row -> row.getExpiresAt().isAfter(Instant.now()))
+                .filter(row -> row.getResourceId() != null)
+                .map(row -> new StoredResult(row.getResourceId(), row.getResponseStatus()));
     }
 
     /** Deletes keys past their expiry so the table does not grow without bound. */

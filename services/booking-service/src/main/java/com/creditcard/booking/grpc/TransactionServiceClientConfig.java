@@ -2,6 +2,7 @@ package com.creditcard.booking.grpc;
 
 import com.creditcard.transaction.grpc.v1.TransactionServiceGrpc;
 import io.grpc.Channel;
+import io.grpc.ClientInterceptors;
 import net.devh.boot.grpc.client.inject.GrpcClient;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -20,6 +21,7 @@ public class TransactionServiceClientConfig {
 
     @Bean
     public TransactionServiceGrpc.TransactionServiceBlockingStub transactionServiceBlockingStub() {
-        return TransactionServiceGrpc.newBlockingStub(transactionServiceChannel);
+        return TransactionServiceGrpc.newBlockingStub(
+                ClientInterceptors.intercept(transactionServiceChannel, new IdempotencyKeyClientInterceptor()));
     }
 }
