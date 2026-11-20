@@ -4,6 +4,7 @@ import com.creditcard.transaction.domain.Transaction;
 import com.creditcard.transaction.domain.TransactionStatus;
 import com.creditcard.transaction.grpc.v1.LookupTransactionByIdempotencyKeyRequest;
 import com.creditcard.transaction.grpc.v1.LookupTransactionByIdempotencyKeyResponse;
+import com.creditcard.transaction.service.CardValidationService;
 import com.creditcard.transaction.service.TransactionService;
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
@@ -37,7 +38,7 @@ class LookupTransactionByIdempotencyKeyGrpcTest {
 
     @BeforeEach
     void setUp() {
-        grpcService = new TransactionGrpcService(transactionService);
+        grpcService = new TransactionGrpcService(transactionService, org.mockito.Mockito.mock(CardValidationService.class));
     }
 
     @Test
