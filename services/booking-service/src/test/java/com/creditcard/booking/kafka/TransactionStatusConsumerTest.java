@@ -61,11 +61,11 @@ class TransactionStatusConsumerTest {
         TransactionStatusEvent event = new TransactionStatusEvent();
         ConsumerRecord<String, TransactionStatusEvent> record =
                 new ConsumerRecord<>("transaction.status.updated", 0, 0, "key", event);
-        doThrow(new UnknownTransactionException("txn-1"))
+        doThrow(new IllegalStateException("db down"))
                 .when(bookingService).handlePaymentOutcome(any());
 
         assertThatThrownBy(() -> consumer.onMessage(record, acknowledgment))
-                .isInstanceOf(UnknownTransactionException.class);
+                .isInstanceOf(IllegalStateException.class);
 
         verify(acknowledgment, never()).acknowledge();
     }

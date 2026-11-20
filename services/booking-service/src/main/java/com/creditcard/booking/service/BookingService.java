@@ -18,7 +18,7 @@ import com.creditcard.booking.exception.InvalidBookingStateException;
 import com.creditcard.booking.exception.InvalidDateRangeException;
 import com.creditcard.booking.exception.RoomNotFoundException;
 import com.creditcard.booking.exception.RoomUnavailableException;
-import com.creditcard.booking.kafka.UnknownTransactionException;
+import com.creditcard.booking.grpc.IdempotencyKeyClientInterceptor;
 import com.creditcard.booking.kafka.event.TransactionStatusEvent;
 import com.creditcard.booking.repository.BookingRepository;
 import com.creditcard.booking.repository.BookingRoomNightRepository;
@@ -29,6 +29,7 @@ import com.creditcard.booking.repository.RoomRepository;
 import com.creditcard.transaction.grpc.v1.InitiateTransactionRequest;
 import com.creditcard.transaction.grpc.v1.InitiateTransactionResponse;
 import com.creditcard.transaction.grpc.v1.TransactionServiceGrpc;
+import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -40,7 +41,9 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.EnumSet;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
@@ -57,14 +60,14 @@ public class BookingService {
     private static final Logger log = LoggerFactory.getLogger(BookingService.class);
     private static final String CURRENCY_CODE = "USD";
     private static final String IDEMPOTENCY_PREFIX = "booking:";
-    private static final String OUTCOME_AUTHORIZED = "AUTHORIZED";
-    private static final String OUTCOME_DECLINED = "DECLINED";
-    private static final String OUTCOME_FAILED = "FAILED";
     /** Statuses that count as "paid" toward a booking's balance due (data-model.md's
      *  balance formula) — AUTHORIZED the normal way, or LATE_AUTHORIZED after a
      *  sweep (FR-012b). */
     private static final List<CheckoutAttemptStatus> PAID_CHECKOUT_STATUSES =
             List.of(CheckoutAttemptStatus.AUTHORIZED, CheckoutAttemptStatus.LATE_AUTHORIZED);
+    /** InitiateTransaction is retried only on these: the call may not have reached transaction-service. */
+    private static final Set<Status.Code> RETRYABLE_CODES = EnumSet.of(Status.Code.UNAVAILABLE, Status.Code.DEADLINE_EXCEEDED);
+    private static final int MAX_INITIATE_ATTEMPTS = 3;
 
     private final BookingRepository bookingRepository;
     private final RoomRepository roomRepository;
@@ -74,6 +77,7 @@ public class BookingService {
     private final CheckoutPaymentAttemptRepository checkoutPaymentAttemptRepository;
     private final TransactionServiceGrpc.TransactionServiceBlockingStub transactionServiceBlockingStub;
     private final IdempotencyKeyService idempotencyKeyService;
+    private final CheckoutPaymentLedger checkoutPaymentLedger;
     private final String merchantId;
 
     public BookingService(BookingRepository bookingRepository,
@@ -84,6 +88,7 @@ public class BookingService {
                            CheckoutPaymentAttemptRepository checkoutPaymentAttemptRepository,
                            TransactionServiceGrpc.TransactionServiceBlockingStub transactionServiceBlockingStub,
                            IdempotencyKeyService idempotencyKeyService,
+                           CheckoutPaymentLedger checkoutPaymentLedger,
                            @Value("${booking.merchant-id}") String merchantId) {
         this.bookingRepository = bookingRepository;
         this.roomRepository = roomRepository;
@@ -93,6 +98,7 @@ public class BookingService {
         this.checkoutPaymentAttemptRepository = checkoutPaymentAttemptRepository;
         this.transactionServiceBlockingStub = transactionServiceBlockingStub;
         this.idempotencyKeyService = idempotencyKeyService;
+        this.checkoutPaymentLedger = checkoutPaymentLedger;
         this.merchantId = merchantId;
     }
 
@@ -257,18 +263,15 @@ public class BookingService {
     }
 
     /**
-     * FR-007/FR-008/FR-009 (layer 2b, extended by layer 2c): checks a CHECKED_IN
-     * booking out. Zero balance (FR-013) — completes immediately, exactly as before
-     * this layer, with no card and no payment-core call. Balance greater than zero
-     * (FR-007) — requires a card, atomically moves the booking to CHECKOUT_PENDING
-     * (the same conditional-update pattern checkIn uses — this is also what FR-009's
-     * "only one checkout attempt in flight" 409 reduces to: a second concurrent call
-     * finds the booking no longer CHECKED_IN and gets the same rejection as any other
-     * wrong-state attempt), creates a PENDING CheckoutPaymentAttempt for that exact
-     * amount, and calls the payment core. A call failure leaves the attempt with no
-     * transactionId — swept the same as a never-answered one (CheckoutAttemptSweepService).
+     * FR-007/FR-008/FR-009 (layer 2b, extended by layer 2c): checks a CHECKED_IN booking out.
+     * Zero balance (FR-013) completes at once, with no card and no payment call. A balance above
+     * zero (FR-007) needs a card. The PENDING attempt is committed before any payment call
+     * ({@link CheckoutPaymentLedger#begin}), so a crash during the call cannot lose it. The call
+     * carries the attempt id as its Idempotency-Key and is retried with that same key, so a call
+     * that was processed but whose reply was lost still creates one transaction. No database
+     * transaction is open while the payment call is in flight. An attempt that never gets a reply
+     * stays PENDING, and the sweep resolves it by key.
      */
-    @Transactional
     public Booking checkOut(UUID bookingId, CardDetails card) {
         Booking booking = getById(bookingId);
         if (booking.getStatus() != BookingStatus.CHECKED_IN) {
@@ -278,69 +281,62 @@ public class BookingService {
 
         BigDecimal balanceDue = getBalanceDue(booking);
         if (balanceDue.compareTo(BigDecimal.ZERO) <= 0) {
-            return completeCheckoutWithNoBalance(booking);
+            checkoutPaymentLedger.completeWithNoBalance(booking);
+            return getById(bookingId);
         }
         if (card == null) {
             throw new CardRequiredException(bookingId, balanceDue);
         }
 
-        int bookingUpdated = bookingRepository.updateStatusIfCurrent(
-                bookingId, BookingStatus.CHECKOUT_PENDING, BookingStatus.CHECKED_IN);
-        if (bookingUpdated == 0) {
-            throw new InvalidBookingStateException(bookingId,
-                    "booking is no longer CHECKED_IN (a checkout attempt may already be in progress)");
+        CheckoutPaymentAttempt attempt = checkoutPaymentLedger.begin(bookingId, balanceDue);
+        Optional<String> transactionId = initiateWithRetry(attempt, card);
+        if (transactionId.isPresent()) {
+            checkoutPaymentLedger.linkTransaction(attempt.getId(), transactionId.get());
+            checkoutPaymentLedger.applyParked(transactionId.get());
         }
+        return getById(bookingId);
+    }
 
-        CheckoutPaymentAttempt attempt = new CheckoutPaymentAttempt();
-        attempt.setBookingId(bookingId);
-        attempt.setAmount(balanceDue);
-        attempt.setStatus(CheckoutAttemptStatus.PENDING);
-        attempt = checkoutPaymentAttemptRepository.save(attempt);
-
+    /**
+     * Calls InitiateTransaction with the attempt id as its Idempotency-Key. Only failures where the
+     * call may not have reached transaction-service are retried, and the same key makes that retry
+     * safe. Returns the transactionId, or empty when no reply arrived. The attempt then stays PENDING.
+     */
+    private Optional<String> initiateWithRetry(CheckoutPaymentAttempt attempt, CardDetails card) {
         InitiateTransactionRequest grpcRequest = InitiateTransactionRequest.newBuilder()
                 .setCardNumber(card.cardNumber())
                 .setCardExpiry(card.expiry())
                 .setCvv(card.cvv())
                 .setCardholderName(card.cardholderName())
-                .setAmount(balanceDue.toPlainString())
+                .setAmount(attempt.getAmount().toPlainString())
                 .setCurrencyCode(CURRENCY_CODE)
                 .setMerchantId(merchantId)
                 .build();
-        try {
-            InitiateTransactionResponse response = transactionServiceBlockingStub
-                    .withDeadlineAfter(5, TimeUnit.SECONDS)
-                    .initiateTransaction(grpcRequest);
-            attempt.setTransactionId(response.getTransactionId());
-            checkoutPaymentAttemptRepository.save(attempt);
-        } catch (StatusRuntimeException e) {
-            log.warn("InitiateTransaction call failed for checkout attempt {} (booking {}, status={}) — booking "
-                            + "stays CHECKOUT_PENDING; the checkout-attempt sweep resolves it if no outcome ever arrives",
-                    attempt.getId(), bookingId, e.getStatus().getCode());
+        String key = attempt.getId().toString();
+        for (int i = 1; i <= MAX_INITIATE_ATTEMPTS; i++) {
+            try {
+                InitiateTransactionResponse response = IdempotencyKeyClientInterceptor.withKey(key,
+                        () -> transactionServiceBlockingStub.withDeadlineAfter(5, TimeUnit.SECONDS)
+                                .initiateTransaction(grpcRequest));
+                return Optional.of(response.getTransactionId());
+            } catch (StatusRuntimeException e) {
+                if (!RETRYABLE_CODES.contains(e.getStatus().getCode())) {
+                    log.warn("InitiateTransaction for checkout attempt {} failed with {}; not retrying — the attempt "
+                            + "stays PENDING until the sweep resolves it by key", key, e.getStatus().getCode());
+                    return Optional.empty();
+                }
+                log.warn("InitiateTransaction attempt {}/{} for checkout attempt {} failed with {}; retrying with the "
+                        + "same key", i, MAX_INITIATE_ATTEMPTS, key, e.getStatus().getCode());
+            }
         }
-
-        return getById(bookingId);
-    }
-
-    /** The original, payment-free checkout (FR-007/FR-008, unchanged since layer 2b) —
-     *  reached only when {@link #getBalanceDue} is zero or less. */
-    private Booking completeCheckoutWithNoBalance(Booking booking) {
-        int bookingUpdated = bookingRepository.updateStatusIfCurrent(
-                booking.getId(), BookingStatus.CHECKED_OUT, BookingStatus.CHECKED_IN);
-        if (bookingUpdated == 0) {
-            throw new InvalidBookingStateException(booking.getId(), "booking is no longer CHECKED_IN");
-        }
-
-        roomRepository.setStatus(booking.getRoomId(), RoomStatus.DIRTY);
-
-        return getById(booking.getId());
+        log.warn("InitiateTransaction for checkout attempt {} got no reply after {} attempts; the attempt stays "
+                + "PENDING until the sweep resolves it by key", key, MAX_INITIATE_ATTEMPTS);
+        return Optional.empty();
     }
 
     /**
-     * FR-012a (Clarifications): CheckoutAttemptSweepService's sweep calls this once
-     * per stuck attempt, each in its own transaction. The attempt's own conditional
-     * update is the race guard — if a late outcome for it already landed (or lands
-     * concurrently) via {@link #handlePaymentOutcome}, this becomes a no-op rather
-     * than double-applying.
+     * FR-012a (Clarifications): the sweep calls this once per stuck attempt that transaction-service
+     * says was never charged. The attempt is expired and the booking goes back to CHECKED_IN.
      */
     @Transactional
     public void expireCheckoutAttempt(CheckoutPaymentAttempt attempt) {
@@ -353,25 +349,21 @@ public class BookingService {
     }
 
     /**
-     * Consumes transaction.status.updated (via TransactionStatusConsumer). Every
-     * outcome this consumer sees is a checkout-attempt outcome now — booking creation
-     * no longer has a transactionId space of its own at all (2026-10-31 rework;
-     * research.md §5). Looks up the attempt by transactionId; if it's missing, throws
-     * so the Kafka error handler retries with bounded backoff rather than marking this
-     * delivery processed (research.md §3a) — this is the one case that must NOT be a
-     * no-op, since the attempt row and this event can race (the attempt is persisted
-     * PENDING, then the gRPC call is made, then the returned transactionId is saved, as
-     * separate steps). The outcome matrix itself is in {@link #handleCheckoutOutcome}
-     * (FR-010/FR-011/FR-012a/FR-012b/FR-012c).
+     * Consumes transaction.status.updated (via TransactionStatusConsumer). Finds the attempt by
+     * transactionId. If no attempt is linked yet, the outcome is parked durably and the consumer acks.
+     * It is applied once the attempt links, or when the sweep resolves it, so no delivery is dropped.
      */
     @Transactional
     public void handlePaymentOutcome(TransactionStatusEvent event) {
         TransactionStatusEvent.Payload payload = event.getPayload();
-        CheckoutPaymentAttempt attempt = checkoutPaymentAttemptRepository
-                .findByTransactionId(payload.getTransactionId())
-                .orElseThrow(() -> new UnknownTransactionException(payload.getTransactionId()));
+        Optional<CheckoutPaymentAttempt> attempt =
+                checkoutPaymentAttemptRepository.findByTransactionId(payload.getTransactionId());
+        if (attempt.isEmpty()) {
+            checkoutPaymentLedger.park(payload.getTransactionId(), event.getEventId(), payload.getOutcome());
+            return;
+        }
         if (markProcessedOrSkip(event)) {
-            handleCheckoutOutcome(attempt, payload);
+            checkoutPaymentLedger.applyOutcome(attempt.get(), payload.getOutcome());
         }
     }
 
@@ -383,54 +375,5 @@ public class BookingService {
             return false;
         }
         return true;
-    }
-
-    /**
-     * FR-010/FR-011 (checkout saga): PENDING+AUTHORIZED -> attempt AUTHORIZED, booking
-     * CHECKOUT_PENDING -> CHECKED_OUT, room -> DIRTY; PENDING+DECLINED/FAILED ->
-     * attempt DECLINED/FAILED, booking back to CHECKED_IN (balance unchanged — staff
-     * can retry). FR-012b: EXPIRED+AUTHORIZED (a late outcome after the checkout-attempt
-     * sweep already reverted the booking) -> attempt LATE_AUTHORIZED, recorded as a
-     * payment (reduces the balance {@link #getBalanceDue} returns next), booking stays
-     * CHECKED_IN, a WARN logged — never silently dropped (FR-012b's own instruction).
-     * FR-012c: EXPIRED+DECLINED/FAILED is a true no-op, nothing to record. Every
-     * transition is conditional on the attempt's current status (research.md §2) so a
-     * concurrent sweep and a late outcome can never double-apply.
-     */
-    private void handleCheckoutOutcome(CheckoutPaymentAttempt attempt, TransactionStatusEvent.Payload payload) {
-        String outcome = payload.getOutcome();
-        if (attempt.getStatus() == CheckoutAttemptStatus.PENDING) {
-            if (OUTCOME_AUTHORIZED.equals(outcome)) {
-                int attemptUpdated = checkoutPaymentAttemptRepository.updateStatusIfCurrent(
-                        attempt.getId(), CheckoutAttemptStatus.AUTHORIZED, CheckoutAttemptStatus.PENDING);
-                if (attemptUpdated == 1) {
-                    Booking booking = getById(attempt.getBookingId());
-                    bookingRepository.updateStatusIfCurrent(
-                            booking.getId(), BookingStatus.CHECKED_OUT, BookingStatus.CHECKOUT_PENDING);
-                    roomRepository.setStatus(booking.getRoomId(), RoomStatus.DIRTY);
-                }
-            } else if (OUTCOME_DECLINED.equals(outcome) || OUTCOME_FAILED.equals(outcome)) {
-                CheckoutAttemptStatus newStatus = OUTCOME_DECLINED.equals(outcome)
-                        ? CheckoutAttemptStatus.DECLINED
-                        : CheckoutAttemptStatus.FAILED;
-                int attemptUpdated = checkoutPaymentAttemptRepository.updateStatusIfCurrent(
-                        attempt.getId(), newStatus, CheckoutAttemptStatus.PENDING);
-                if (attemptUpdated == 1) {
-                    bookingRepository.updateStatusIfCurrent(
-                            attempt.getBookingId(), BookingStatus.CHECKED_IN, BookingStatus.CHECKOUT_PENDING);
-                }
-            }
-        } else if (attempt.getStatus() == CheckoutAttemptStatus.EXPIRED && OUTCOME_AUTHORIZED.equals(outcome)) {
-            int attemptUpdated = checkoutPaymentAttemptRepository.updateStatusIfCurrent(
-                    attempt.getId(), CheckoutAttemptStatus.LATE_AUTHORIZED, CheckoutAttemptStatus.EXPIRED);
-            if (attemptUpdated == 1) {
-                log.warn("AUTHORIZED outcome arrived for checkout attempt {} (booking {}, amount={}) after it was "
-                                + "already swept as EXPIRED — recording it as a payment (balance reduced by that "
-                                + "amount); booking stays CHECKED_IN",
-                        attempt.getId(), attempt.getBookingId(), attempt.getAmount());
-            }
-        }
-        // Any other combination (already AUTHORIZED/DECLINED/FAILED/LATE_AUTHORIZED,
-        // or EXPIRED+DECLINED/FAILED) is a true no-op — nothing to record (FR-012c).
     }
 }

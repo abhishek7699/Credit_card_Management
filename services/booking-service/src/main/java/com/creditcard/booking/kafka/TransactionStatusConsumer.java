@@ -21,12 +21,9 @@ public class TransactionStatusConsumer {
     }
 
     /**
-     * Deliberately no try/catch around {@code handlePaymentOutcome}: any failure
-     * (notably {@link UnknownTransactionException}) must propagate to the
-     * container's error handler, configured in {@link KafkaConsumerConfig} with bounded
-     * retry-with-backoff (research.md §3a) — swallowing it here would make the race it
-     * exists to handle indistinguishable from "this event has no booking and never
-     * will."
+     * No try/catch around {@code handlePaymentOutcome}. An outcome whose checkout attempt is not
+     * linked yet is parked durably inside it, so the record is acked and never dropped. Any other
+     * failure propagates to the container's error handler, configured in {@link KafkaConsumerConfig}.
      */
     @KafkaListener(
             topics = "transaction.status.updated",

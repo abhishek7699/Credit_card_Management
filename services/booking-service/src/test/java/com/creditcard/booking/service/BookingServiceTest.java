@@ -18,12 +18,12 @@ import com.creditcard.booking.exception.InvalidBookingStateException;
 import com.creditcard.booking.exception.InvalidDateRangeException;
 import com.creditcard.booking.exception.RoomNotFoundException;
 import com.creditcard.booking.exception.RoomUnavailableException;
-import com.creditcard.booking.kafka.UnknownTransactionException;
 import com.creditcard.booking.kafka.event.TransactionStatusEvent;
 import com.creditcard.booking.repository.BookingRepository;
 import com.creditcard.booking.repository.BookingRoomNightRepository;
 import com.creditcard.booking.repository.ChargeRepository;
 import com.creditcard.booking.repository.CheckoutPaymentAttemptRepository;
+import com.creditcard.booking.repository.UnmatchedPaymentOutcomeRepository;
 import com.creditcard.booking.repository.ProcessedEventRepository;
 import com.creditcard.booking.repository.RoomRepository;
 import com.creditcard.transaction.grpc.v1.TransactionServiceGrpc;
@@ -70,14 +70,18 @@ class BookingServiceTest {
     private TransactionServiceGrpc.TransactionServiceBlockingStub transactionServiceBlockingStub;
     @Mock
     private IdempotencyKeyService idempotencyKeyService;
+    @Mock
+    private UnmatchedPaymentOutcomeRepository unmatchedPaymentOutcomeRepository;
 
     private BookingService service;
 
     @BeforeEach
     void setUp() {
+        CheckoutPaymentLedger ledger = new CheckoutPaymentLedger(bookingRepository, roomRepository,
+                checkoutPaymentAttemptRepository, unmatchedPaymentOutcomeRepository);
         service = new BookingService(bookingRepository, roomRepository, bookingRoomNightRepository,
                 processedEventRepository, chargeRepository, checkoutPaymentAttemptRepository,
-                transactionServiceBlockingStub, idempotencyKeyService, "HOTEL-001");
+                transactionServiceBlockingStub, idempotencyKeyService, ledger, "HOTEL-001");
     }
 
     private static Room room(UUID id) {
@@ -257,12 +261,13 @@ class BookingServiceTest {
     }
 
     @Test
-    void handlePaymentOutcome_noMatchingAttempt_throwsForRetry_andNeverWritesProcessedEvent() {
+    void handlePaymentOutcome_noLinkedAttemptYet_parksTheOutcome_andDoesNotThrowOrMarkProcessed() {
+        // The outcome can arrive before its attempt is linked. It must be kept, not dropped or retried away.
         when(checkoutPaymentAttemptRepository.findByTransactionId("txn-missing")).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> service.handlePaymentOutcome(event("txn-missing", "AUTHORIZED")))
-                .isInstanceOf(UnknownTransactionException.class);
+        service.handlePaymentOutcome(event("txn-missing", "AUTHORIZED"));
 
+        verify(unmatchedPaymentOutcomeRepository).insertIfAbsent(eq("txn-missing"), any(), eq("AUTHORIZED"), any());
         verify(processedEventRepository, never()).insertIfAbsent(any());
     }
 

@@ -25,6 +25,12 @@ public interface CheckoutPaymentAttemptRepository extends JpaRepository<Checkout
      *  booking's attempts in specific statuses. */
     List<CheckoutPaymentAttempt> findByBookingIdInAndStatusIn(List<UUID> bookingIds, List<CheckoutAttemptStatus> statuses);
 
+    /** Sets the transactionId once. A retry that returns the same id changes nothing (IS NULL guard). */
+    @Modifying(clearAutomatically = true)
+    @Query("UPDATE CheckoutPaymentAttempt c SET c.transactionId = :transactionId "
+         + "WHERE c.id = :id AND c.transactionId IS NULL")
+    int linkTransactionIfAbsent(@Param("id") UUID id, @Param("transactionId") String transactionId);
+
     /** Used by CheckoutAttemptSweepService's scheduled sweep (US3) to find PENDING
      *  attempts older than the configured checkout-timeout window. */
     List<CheckoutPaymentAttempt> findByStatusAndCreatedAtBefore(CheckoutAttemptStatus status, Instant cutoff);
