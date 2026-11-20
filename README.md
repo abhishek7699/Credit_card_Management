@@ -3,7 +3,7 @@
 A payment processing system — authorization, fraud detection, settlement,
 notifications, and reporting, fronted by an API gateway and driven
 end-to-end by Kafka — built to rehearse the full lifecycle of a real
-microservices stack: local development, CI with 100% test coverage, a
+microservices stack: local development, CI with enforced test coverage gates, a
 Kubernetes dry run on `kind`, and a path to a real GKE deployment. Every
 piece (tokenization, rate limiting, circuit breaking, settlement
 batching) is wired for real, not stubbed, and verified by a 14-step
@@ -101,7 +101,7 @@ timed-out transaction is never settled. Timer values and their rules are in
 - **Data**: CockroachDB (Postgres wire protocol), Flyway migrations per service
 - **Secrets**: HashiCorp Vault (Transit engine for PAN tokenization)
 - **Observability**: Micrometer → Prometheus → Grafana (request rate/error rate/latency/Kafka lag/circuit breaker state, one dashboard, see `k8s/infra/grafana-dashboard.yaml`)
-- **Testing**: JUnit 5, Testcontainers 2.0.5 (CockroachDB), Spring's `@EmbeddedKafka`, JaCoCo (100% instruction+branch coverage gate in CI)
+- **Testing**: JUnit 5, Testcontainers 2.0.5 (CockroachDB), Spring's `@EmbeddedKafka`, JaCoCo (90% instruction+branch coverage gate in CI)
 - **Infra**: Docker Compose (local dev), `kind` (local Kubernetes rehearsal), GKE (real deployment — see [docs/GKE.md](docs/GKE.md)), Kustomize overlays for per-environment replica counts and image sources
 
 ## Running locally

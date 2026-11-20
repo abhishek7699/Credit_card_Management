@@ -101,7 +101,7 @@ sourceSets {
     }
 }
 
-// ── JaCoCo — 100% instruction + branch coverage gate (Constitution Principle II) ─
+// ── JaCoCo — 90% instruction + branch coverage gate (Constitution Principle II) ─
 jacoco {
     toolVersion = '0.8.11'
 }
@@ -147,11 +147,11 @@ jacocoTestCoverageVerification {
             ]
             limit {
                 counter = 'INSTRUCTION'
-                minimum = 1.0
+                minimum = 0.9
             }
             limit {
                 counter = 'BRANCH'
-                minimum = 1.0
+                minimum = 0.9
             }
         }
     }

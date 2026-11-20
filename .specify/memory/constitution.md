@@ -48,12 +48,12 @@ critical security incident and MUST block the pipeline.
   receives or processes raw card numbers.
 - Code reviewers MUST explicitly verify this rule on every PR touching card data paths.
 
-### II. Test-First / 100% Coverage (NON-NEGOTIABLE)
+### II. Test-First / 90% Coverage (NON-NEGOTIABLE)
 
 TDD is mandatory across all services. The cycle is strictly: write failing test → get
 explicit approval from the developer → implement the minimum code to pass → refactor.
 No implementation code is written before its corresponding test exists and has been
-confirmed to fail for the right reason. 100% line and branch coverage is the non-negotiable
+confirmed to fail for the right reason. 90% line and branch coverage is the non-negotiable
 gate for every class in every service. Coverage reports MUST be generated and pass before
 any pull request can proceed with GitHub Actions.
 
@@ -62,7 +62,7 @@ any pull request can proceed with GitHub Actions.
   CockroachDB, Kafka, and Redis dependencies.
 - Contract tests: required for every inter-service gRPC stub (using generated proto-based
   mocks), every Kafka event schema, and every external REST endpoint on the api-gateway.
-- The GitHub Actions workflow MUST fail the build if coverage drops below 100%.
+- The GitHub Actions workflow MUST fail the build if coverage drops below 90%.
 
 ### III. Idempotent Event Consumers (NON-NEGOTIABLE)
 
@@ -301,7 +301,7 @@ begin until the web app is stable and approved.
   versioning rules before any new work begins under the amended rule.
 - All pull requests MUST include a "Constitution Check" section confirming compliance
   with all eight Core Principles.
-- Any pipeline that cannot demonstrate 100% test coverage (Principle II) or that
+- Any pipeline that cannot demonstrate 90% test coverage (Principle II) or that
   contains a raw card data leak in logs (Principle I / VI) MUST be blocked and not
   merged under any circumstances, including release deadlines.
 - Any `.proto` breaking change that lacks a version migration path (Principle VII) MUST

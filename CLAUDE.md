@@ -30,7 +30,7 @@ I want to learn the codebase, not just get changes. For every task:
   layer's spec requires it.
 - B2B: users are hotel staff (front desk, housekeeping, owner), not guests.
 - Fix root causes, not retries. Keep existing conventions (schema per service, Flyway,
-  idempotent consumers, event envelope, 100% JaCoCo).
+  idempotent consumers, event envelope, 90% JaCoCo).
 
 ## Roadmap (layers on top of the payment core)
 - 2a Booking (done): rooms, availability search, staff create booking for a guest,
