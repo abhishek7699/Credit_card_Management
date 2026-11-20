@@ -1469,6 +1469,86 @@ cleanup() {
 trap cleanup EXIT
 
 # ── Summary ───────────────────────────────────────────────────────────────────
+# ── Step 16: Front office (layer 2d) — a guest books with no token; staff board shows ONLINE ──
+# Guest route needs no JWT and the board badges it ONLINE. Staff route with no JWT is 401.
+# Check-in is today (UTC, matching booking-service's LocalDate.now() in its container),
+# so the booking shows as arriving on the board.
+step16_online_booking_and_staff_guard() {
+  if [[ "${TARGET}" == "kind" ]]; then
+    skip "Step 16 — booking-service has no k8s manifests yet (deferred to the backlog); compose-only for this layer"
+    return 0
+  fi
+
+  info "Step 16 — Guest books with no token; board shows ONLINE; staff route without token is 401"
+
+  local check_in check_out resp http_code body room_id
+  check_in=$(date -u +%F)
+  check_out=$(python3 -c "import datetime;print(datetime.datetime.utcnow().date()+datetime.timedelta(days=1))")
+
+  resp=$(curl -s -w '\n%{http_code}' \
+    "http://localhost:${GW_PORT}/api/v1/public/availability?checkIn=${check_in}&checkOut=${check_out}" 2>/dev/null)
+  http_code=$(echo "$resp" | tail -1)
+  body=$(echo "$resp" | sed '$d')
+  if [[ "$http_code" != "200" ]]; then
+    fail "Step 16 — Public availability failed without a token: expected 200, got ${http_code}. Body: ${body}"
+    return 1
+  fi
+  room_id=$(echo "$body" | python3 -c "import sys,json; rooms=json.load(sys.stdin)['rooms']; print(rooms[0]['roomId'] if rooms else '')" 2>/dev/null || echo "")
+  if [[ -z "$room_id" ]]; then
+    fail "Step 16 — No room free for today to ${check_out} (public availability)"
+    return 1
+  fi
+
+  # No Authorization header at all: the guest route is public.
+  resp=$(curl -s -w '\n%{http_code}' \
+    -X POST "http://localhost:${GW_PORT}/api/v1/public/bookings" \
+    -H "Content-Type: application/json" \
+    -d "{\"roomId\":\"${room_id}\",\"checkIn\":\"${check_in}\",\"checkOut\":\"${check_out}\",\"guestName\":\"E2E Online Guest\",\"guestPhone\":\"+15555550199\",\"guestEmail\":\"e2e-online@example.com\",\"adults\":1,\"children\":0}" \
+    2>/dev/null)
+  http_code=$(echo "$resp" | tail -1)
+  body=$(echo "$resp" | sed '$d')
+  if [[ "$http_code" != "201" ]]; then
+    fail "Step 16 — Guest booking without a token: expected 201, got ${http_code}. Body: ${body}"
+    return 1
+  fi
+  local booking_id payable
+  booking_id=$(echo "$body" | python3 -c "import sys,json; print(json.load(sys.stdin).get('bookingId',''))" 2>/dev/null || echo "")
+  payable=$(echo "$body" | python3 -c "import sys,json; print(json.load(sys.stdin).get('payAtCheckout',''))" 2>/dev/null || echo "")
+  if [[ -z "$booking_id" || "$payable" != "True" ]]; then
+    fail "Step 16 — Expected a bookingId and payAtCheckout=true, got: ${body}"
+    return 1
+  fi
+
+  # The board, read by staff, shows the booking as ONLINE on that room.
+  resp=$(curl -s -w '\n%{http_code}' "http://localhost:${GW_PORT}/api/v1/rooms/board" \
+    -H "Authorization: Bearer ${FRONT_DESK_JWT}" 2>/dev/null)
+  http_code=$(echo "$resp" | tail -1)
+  body=$(echo "$resp" | sed '$d')
+  if [[ "$http_code" != "200" ]]; then
+    fail "Step 16 — Board fetch failed: expected 200, got ${http_code}. Body: ${body}"
+    return 1
+  fi
+  local entry
+  entry=$(board_room_entry "$body" "$room_id")
+  if echo "$entry" | python3 -c "
+import sys, json
+e = json.load(sys.stdin)
+sys.exit(0 if e.get('arrivingBookingSource') == 'ONLINE' else 1)
+" 2>/dev/null; then
+    pass "Step 16 — Guest booking ${booking_id} made with no token; staff board shows it as ONLINE"
+  else
+    fail "Step 16 — Board entry for room ${room_id} does not show arrivingBookingSource=ONLINE: ${entry}"
+  fi
+
+  # A staff route with no token is still rejected.
+  http_code=$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:${GW_PORT}/api/v1/rooms/board" 2>/dev/null)
+  if [[ "$http_code" == "401" ]]; then
+    pass "Step 16 — Staff board with no token returns 401"
+  else
+    fail "Step 16 — Staff board with no token: expected 401, got ${http_code}"
+  fi
+}
+
 print_summary() {
   echo ""
   echo -e "${BOLD}═══════════════════════════════════════════════════${NC}"
@@ -1529,6 +1609,7 @@ main() {
   step13_checkout_declined
   step14_room_board_lifecycle
   step15_checkout_with_charge
+  step16_online_booking_and_staff_guard
 
   print_summary
 }
