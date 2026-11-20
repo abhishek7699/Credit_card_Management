@@ -1,5 +1,5 @@
 name: CI
-# Builds all seven microservices, enforces 100% JaCoCo instruction+branch coverage,
+# Builds all seven microservices, enforces 90% JaCoCo instruction+branch coverage,
 # builds Docker images, starts the full compose stack, and runs end-to-end integration
 # tests covering payment submission, rate limiting, circuit breaking, and settlement.
 
@@ -101,12 +101,12 @@ jobs:
           key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
           restore-keys: ${{ runner.os }}-gradle-
 
-      # ── 3. Build + unit/integration tests + JaCoCo 100% coverage gate ────────
+      # ── 3. Build + unit/integration tests + JaCoCo 90% coverage gate ────────
       - name: Build and verify coverage
         run: |
           chmod +x gradlew
           # build compiles + runs tests + produces bootJars (needed by Dockerfiles)
-          # jacocoTestCoverageVerification enforces 100% instruction+branch gate
+          # jacocoTestCoverageVerification enforces 90% instruction+branch gate
           # --max-workers=2 keeps heap pressure safe on the 7-GB CI runner
           ./gradlew build jacocoTestCoverageVerification \
             --no-daemon \

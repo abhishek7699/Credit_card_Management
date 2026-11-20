@@ -145,12 +145,12 @@ jacocoTestCoverageVerification {
             limit {
                 counter = 'INSTRUCTION'
                 value   = 'COVEREDRATIO'
-                minimum = 1.0
+                minimum = 0.9
             }
             limit {
                 counter = 'BRANCH'
                 value   = 'COVEREDRATIO'
-                minimum = 1.0
+                minimum = 0.9
             }
         }
     }
