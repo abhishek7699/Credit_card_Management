@@ -1468,7 +1468,6 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# ── Summary ───────────────────────────────────────────────────────────────────
 # ── Step 16: Front office (layer 2d) — a guest books with no token; staff board shows ONLINE ──
 # Guest route needs no JWT and the board badges it ONLINE. Staff route with no JWT is 401.
 # Check-in is today (UTC, matching booking-service's LocalDate.now() in its container),
@@ -1549,6 +1548,7 @@ sys.exit(0 if e.get('arrivingBookingSource') == 'ONLINE' else 1)
   fi
 }
 
+# ── Summary ───────────────────────────────────────────────────────────────────
 print_summary() {
   echo ""
   echo -e "${BOLD}═══════════════════════════════════════════════════${NC}"
