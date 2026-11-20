@@ -1,48 +1,63 @@
 # Credit Card Payment Gateway
 
-A payment processing system — authorization, fraud detection, settlement,
-notifications, and reporting, fronted by an API gateway and driven
-end-to-end by Kafka — built to rehearse the full lifecycle of a real
-microservices stack: local development, CI with enforced test coverage gates, a
-Kubernetes dry run on `kind`, and a path to a real GKE deployment. Every
-piece (tokenization, rate limiting, circuit breaking, settlement
-batching) is wired for real, not stubbed, and verified by a 14-step
-end-to-end test against a live card submission.
+A hotel payments system: a **card-payment core** (authorization, fraud checks, settlement,
+notifications, reporting, behind an API gateway and driven by Kafka) with a **hotel booking
+system** on top. Guests book and are checked against Mastercard without being charged; staff run
+the room board, check guests in, add charges, and take payment at checkout. It is built to rehearse
+the full lifecycle of a real microservices stack: CI with an enforced 90% coverage gate, a live
+end-to-end test, and Docker Compose, `kind` and GKE deployments. **The current version runs
+locally with Docker Compose; see [Running locally](#running-locally) and [docs/DEMO.md](docs/DEMO.md).**
 
-**Layered on top of that payment core** is a hotel booking system,
-added one layer at a time (see `CLAUDE.md`'s Roadmap): `booking-service`
-(layers 2a + 2b) is rooms, availability search, the front-desk-staff
-booking saga, room status (check-in/check-out/housekeeping), and the
-room board; layer 2c adds per-stay charges and balance-due checkout.
-Hotel layers never touch card data themselves; they only ask the
-payment core to charge and react to the result over the same gRPC/Kafka
-contracts the original 7 services already use. Layer 2d (`frontend/`,
-**Hotel Payment App**) connects a real staff UI to all of it — see
-[Running locally](#running-locally)'s "Frontend" section.
+## What it does
+
+**Guest front office** (`/`, no sign-in). A guest picks dates, sees the free rooms with a price for
+the stay and what is included, and books. They enter a card, but **nothing is charged**: the card is
+only checked with Mastercard Account Validation to guarantee a pay-later booking. The system keeps
+the verdict, Mastercard's reference and the last 4 digits, never the card number or CVC.
+
+**Staff app** (`/staff`, role-picker dev login). Front desk see a room board coloured by status,
+check guests in, add charges (minibar, room service), and check out; checkout charges the balance
+through the payment core. Housekeeping mark dirty rooms clean. Bookings made online carry an
+**ONLINE** badge.
+
+| Room board | Checkout with a balance |
+|---|---|
+| ![Room board](docs/screenshots/after/02-room-board.png) | ![Checkout and charges](docs/screenshots/after/05-panel-checkout-and-charges.png) |
+
+*These screenshots are of the staff app only. They were taken before the guest front office was added,
+so there is no screenshot of it yet.*
 
 ## Services
 
 | Service | Role |
 |---|---|
-| `api-gateway` | External REST entry point — JWT auth, per-route RBAC, rate limiting, circuit breaking, bridges REST→gRPC for `transaction-service` |
-| `transaction-service` | Tokenizes cards via Vault, persists transactions, publishes `transaction.initiated` |
-| `authorization-service` | Consumes `transaction.initiated`, authorizes/declines against a card account's credit, publishes `transaction.status.updated` |
-| `fraud-detection-service` | Consumes `transaction.initiated` in parallel, evaluates and records a fraud decision |
-| `notification-service` | Consumes `transaction.status.updated`, sends email/SMS notifications |
-| `settlement-service` | Batches authorized transactions into settlement runs (Spring Batch) |
-| `reporting-service` | Read-only queries across the other services' data for dashboards/support |
-| `booking-service` | **Layers 2a + 2b.** Room inventory, availability search, and the staff booking saga (HELD → charge via `transaction-service` → CONFIRMED/CANCELLED); room status, check-in/check-out, and the room board, consuming the same `transaction.status.updated` event |
+| `api-gateway` | The only external entry point: JWT auth, per-route roles, rate limiting, circuit breaking, REST to gRPC for `transaction-service`. Exactly two guest routes are open without a token, and rate-limited by IP |
+| `transaction-service` | Tokenizes cards via Vault, records transactions, publishes outcomes through an outbox, and answers `ValidateCard` (Mastercard Account Validation) |
+| `authorization-service` | Authorizes or declines a transaction through a payment processor (the built-in simulator by default) and reports the result |
+| `fraud-detection-service` | Evaluates each transaction in parallel and records a fraud decision |
+| `notification-service` | Sends payment emails (Mailpit locally) to a registered cardholder contact |
+| `settlement-service` | Batches authorized transactions into settlement runs (Spring Batch), with a configurable acquirer label |
+| `reporting-service` | Read-only queries across the other services' data |
+| `booking-service` | Rooms, availability, bookings, room status and the board, per-stay charges, the checkout payment saga, and the guest card check |
+| `frontend/` | React app: the guest front office and the staff app |
+| `libs/mastercard-gateway`, `libs/mastercard-developers` | Mastercard clients: Gateway (payments) and Developers (OAuth 1.0a signed Account Validation) |
+
+Hotel code never touches card data on its own: it hands the card to the payment core for one charge or
+one check, and reacts to the result.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    Client -->|HTTPS + JWT| Gateway[api-gateway]
+    Guest[Guest front office] -->|public routes, no JWT| Gateway[api-gateway]
+    Staff[Staff app] -->|JWT| Gateway
     Gateway -->|gRPC| Txn[transaction-service]
     Gateway -->|HTTP| Report[reporting-service]
-    Gateway -->|HTTP, FRONT_DESK role| Booking[booking-service]
+    Gateway -->|HTTP| Booking[booking-service]
     Gateway -.->|rate limit| Redis[(Redis)]
 
+    Booking -->|gRPC InitiateTransaction, LookupTransaction, ValidateCard| Txn
+    Txn -->|OAuth 1.0a| MCDev[Mastercard Account Validation sandbox]
     Txn -->|Vault Transit: tokenize PAN| Vault[(Vault)]
     Txn -->|transaction.initiated| Kafka[(Kafka)]
 
@@ -56,127 +71,122 @@ flowchart LR
     Kafka --> Notify[notification-service]
     Kafka --> Booking
 
-    Booking -->|gRPC InitiateTransaction| Txn
-
     Txn & Auth & Fraud & Settle & Notify & Booking -->|JDBC| CRDB[(CockroachDB)]
     Report -->|JDBC, read-only| CRDB
-
-    Prom[Prometheus] -.scrapes.-> Txn & Auth & Fraud & Settle & Notify & Report & Gateway & Booking
-    Grafana -.queries.-> Prom
+    Svc[All services] -.->|spans| Zipkin[Zipkin]
+    Prom[Prometheus] -.scrapes.-> Svc
 ```
 
-Each service owns its own schema in a shared CockroachDB cluster (no
-cross-service table access except `reporting-service`'s intentionally
-read-only queries) and talks to its neighbors only through Kafka events
-or, for the gateway's hot path to `transaction-service` (and
-`booking-service`'s own call to it), gRPC. Card numbers are tokenized
-via Vault's Transit engine before anything ever touches a database or
-log line — Step 6 of the e2e test (below) scans every service's logs
-for the raw PAN on every run to prove that. `booking-service` never
-receives a tokenized or raw card number back from this path — it only
-forwards what the caller submitted to `transaction-service` and reacts
-to the resulting `transaction.status.updated` event, the same contract
-`notification-service` and `settlement-service` already consume.
+Each service owns its own schema in a shared CockroachDB cluster (only `reporting-service` reads
+across them, read-only) and talks to its neighbours through Kafka events or gRPC. Card numbers are
+tokenized via Vault's Transit engine before anything reaches a database or log line; step 6 of the
+e2e test scans every service's logs for the raw card number on every run.
 
-`transaction-service` is the only publisher of transaction outcomes. Authorization
-and the PENDING timeout sweep report to it, and it records each final state with a
-conditional `PENDING -> final` update. Events for that state are written to a
-transactional outbox in the same database transaction and published right after
-commit; a polling relay (every 500 ms) sends any row that was not sent. Consumers
-therefore see one final outcome per transaction, in the order its events were written
-(events for different transactions are not ordered against each other).
+## How a payment flows
 
-A PENDING transaction older than 300 s is failed with reason `TIMEOUT`, and
-`transaction.timed_out` is published. Authorization releases any credit it held for
-that transaction, and skips a late `transaction.initiated` for it. Settlement only
-receives `transaction.authorized` for transactions that were actually authorized, so a
-timed-out transaction is never settled. Timer values and their rules are in
-`specs/013-transaction-pending-timeout/design.md`.
+1. At checkout, `booking-service` records a PENDING checkout attempt, then calls `transaction-service`
+   over gRPC with the card.
+2. `transaction-service` tokenizes the card, saves the transaction as PENDING and publishes
+   `transaction.initiated`.
+3. `authorization-service` and `fraud-detection-service` each consume it. Authorization decides and
+   reports back; `transaction-service` records the final state and publishes it through its outbox.
+4. `booking-service` completes the checkout (`CHECKED_OUT`, room becomes Dirty), `notification-service`
+   sends the email, and `settlement-service` queues the transaction for the next batch.
+5. A settlement run (nightly at 23:59, or `POST /internal/settlement/trigger`) settles it. Reporting
+   then shows the batch, including the acquirer name.
+
+## Mastercard
+
+- **Account Validation: working, against Mastercard's sandbox.** Guest bookings are guaranteed by a
+  no-charge check (`libs/mastercard-developers`, signed with Mastercard's `oauth1-signer`). Not
+  matched is a `422` with a message for the guest; Mastercard unreachable is a `503` and the booking is
+  not confirmed (fail closed). The switch `card-validation.enabled` is **off by default**, so CI and
+  the e2e need no credentials, and on in the `dev` profile. Details and the sandbox test card:
+  [docs/CARD_VALIDATION.md](docs/CARD_VALIDATION.md). The sandbox returns mock answers; real use needs
+  Mastercard's test and production environments.
+- **Mastercard Gateway: built, switched off.** `authorization-service` can approve, decline, capture and
+  void through Mastercard Gateway (`libs/mastercard-gateway`, `specs/014-mastercard-mtf-processor`), but
+  `PAYMENT_PROCESSOR` defaults to `simulated` and stays there until a Mastercard test merchant account
+  is available. Payments in the demo and the e2e go through the simulator.
+
+## Reliability
+
+- **Transactional outbox.** `transaction-service` writes each outcome event in the same database
+  transaction as the state change; a relay (500 ms) publishes anything not yet sent. Consumers see one
+  final outcome per transaction, in order.
+- **PENDING timeout.** A PENDING transaction older than 300 s is failed with reason `TIMEOUT`, its credit
+  hold is released, and it is never settled (`specs/013-transaction-pending-timeout`).
+- **Idempotency keys.** `InitiateTransaction` and staff booking creation honour an `Idempotency-Key`, so
+  a retry cannot create a second charge or booking.
+- **The checkout saga and its race fix.** The checkout attempt is saved *before* the payment call and its
+  id is the idempotency key, so a crash mid-call leaves a row and up to 3 retries on a lost reply cannot
+  double-charge. An outcome that arrives before its attempt is linked is parked in
+  `unmatched_payment_outcomes` and applied when the link lands, never dropped. A sweep only looks up by
+  key (it never charges): approved attempts become `CHECKED_OUT`, unknown ones revert to `CHECKED_IN`.
+- **Fail closed.** If the card check cannot complete, the guest booking is not confirmed.
+
+## Tracing
+
+Every service exports spans to Zipkin (started by `docker compose --profile dev`, UI at
+http://localhost:9411) and logs its `traceId`. The trace id travels over gRPC metadata and Kafka headers,
+including through the outbox relay, so one checkout reads as a single trace from the staff request
+through `transaction-service` and `authorization-service` and back. Sampling is 1.0 in Compose and 0.0
+by default elsewhere.
 
 ## Tech stack
 
 - **Services**: Java 17, Spring Boot 3.2, Spring Data JPA, Spring Kafka, Spring Cloud Gateway (WebFlux)
-- **Resilience**: Resilience4j (circuit breakers on the gateway's calls to `transaction-service`, `reporting-service`, and `booking-service` — the booking-submission route carries its own longer timeout, see Engineering challenges below), Redis-backed rate limiting
-- **Transport**: gRPC (gateway → transaction-service), Kafka (everything else), REST
+- **Frontend**: React, TypeScript, Redux Toolkit Query, Vite; Vitest and Playwright
+- **Resilience**: Resilience4j circuit breakers on the gateway (the booking-submission route has its own longer timeout), Redis-backed rate limiting
+- **Transport**: gRPC (gateway and `booking-service` to `transaction-service`), Kafka (everything else), REST
 - **Data**: CockroachDB (Postgres wire protocol), Flyway migrations per service
 - **Secrets**: HashiCorp Vault (Transit engine for PAN tokenization)
-- **Observability**: Micrometer → Prometheus → Grafana (request rate/error rate/latency/Kafka lag/circuit breaker state, one dashboard, see `k8s/infra/grafana-dashboard.yaml`)
-- **Testing**: JUnit 5, Testcontainers 2.0.5 (CockroachDB), Spring's `@EmbeddedKafka`, JaCoCo (90% instruction+branch coverage gate in CI)
-- **Infra**: Docker Compose (local dev), `kind` (local Kubernetes rehearsal), GKE (real deployment — see [docs/GKE.md](docs/GKE.md)), Kustomize overlays for per-environment replica counts and image sources
+- **Observability**: Micrometer, Prometheus, Grafana, Zipkin
+- **Testing**: JUnit 5, Testcontainers 2.0.5 (CockroachDB), `@EmbeddedKafka`, WireMock, JaCoCo (90% instruction+branch gate in CI)
+- **Infra**: Docker Compose, `kind`, GKE (see below), Kustomize overlays
 
 ## Running locally
 
-### Docker Compose (fastest)
+The full walkthrough, from a guest booking to settlement and housekeeping, is in
+[docs/DEMO.md](docs/DEMO.md). The short version:
 
 ```bash
-cp .env.example .env   # dev-only defaults, see SECURITY.md
-docker compose up -d --build
-./scripts/e2e-test.sh
+cp .env.example .env          # dev-only defaults, see SECURITY.md
+./gradlew assemble -x test    # the Dockerfiles copy the built jars
+docker compose --profile dev up -d --build    # adds Zipkin and a seeded test card
+cd frontend && npm install && npm run dev     # http://localhost:5173 (guest), /staff (staff)
+./scripts/e2e-test.sh         # the 16-step end-to-end test
 ```
+
+Add `-f docker-compose.yml -f docker-compose.card-validation-dev.yml` to check guest cards against the
+Mastercard sandbox (needs the `MASTERCARD_DEV_*` values in `.env`). Mailpit is at http://localhost:8025.
+
+Frontend tests: `npm test`, `npm run test:coverage` (90% gate), `npm run e2e` (Playwright, needs the stack).
 
 ### kind (Kubernetes rehearsal)
 
-Brings up the same 7 services plus Prometheus/Grafana on a local
-single-node Kubernetes cluster — a dry run for GKE, at 1 replica per
-service to keep memory pressure low during rollouts (`k8s/overlays/kind`;
-GKE's overlay keeps the real default of 2).
+Brings up the seven payment-core services and Prometheus/Grafana on a local single-node cluster, at one
+replica each (`k8s/overlays/kind`).
 
 ```bash
 ./scripts/k8s-up.sh
 ./scripts/e2e-test.sh --target kind
 ```
 
-Open Grafana (anonymous viewer access, no login needed):
+Grafana (anonymous viewer): `kubectl port-forward -n credit-card svc/grafana 3000:3000`, then
+http://localhost:3000. Tear down with `./scripts/k8s-down.sh`.
 
-```bash
-kubectl port-forward -n credit-card svc/grafana 3000:3000
-open http://localhost:3000
-```
+### GKE: an earlier version
 
-Tear down with `./scripts/k8s-down.sh`.
-
-### GKE
-
-A minimal, cost-conscious path (zonal cluster, spot node pool, $5 budget
-alert) is documented in [docs/GKE.md](docs/GKE.md), with
-`scripts/gke-deploy.sh` and `scripts/demo-up.sh` / `demo-down.sh` to
-scale the node pool between demos without tearing anything else down.
-
-### Frontend
-
-**Hotel Payment App** (`frontend/`) is the staff room board (layer 2d) —
-talking to the real backend, not mock data, behind a dev-only role-picker
-login. `/staff` is the only app; every other path redirects there. Needs
-the Docker Compose stack from above (which now also brings up a standing,
-**dev-only** `auth-mock` service for that login — see SECURITY.md; it
-exists only in `docker-compose.yml`/CI, never in `k8s/` or any deployed
-environment):
-
-```bash
-docker compose up -d --build   # brings up auth-mock too
-cd frontend
-npm install
-npm run dev
-```
-
-Open `http://localhost:5173` (redirects to `/staff`), pick a role (Front
-Desk or Housekeeping), and sign in — talking to the real
-`booking-service`/`api-gateway` through `/api/v1/rooms/board` and the
-booking/check-in/check-out/charges endpoints layers 2a-2c already built.
-
-Tests:
-
-```bash
-npm test               # Vitest + React Testing Library + MSW
-npm run test:coverage  # same, with the 90% coverage gate
-npx playwright install --with-deps chromium   # once, before the next line
-npm run e2e             # Playwright smoke test — needs the stack + `npm run dev` already up
-```
+[docs/GKE.md](docs/GKE.md) deploys the seven payment-core services only, with a cost-conscious setup
+(zonal cluster, spot node pool, $5 budget alert). **That deployment shows an earlier version of the
+system.** `booking-service`, the front office and staff app, card validation and the checkout saga are
+not deployed there (see `docs/BACKLOG.md`). The current version runs locally with Docker Compose.
 
 ## How the e2e test works
 
 `scripts/e2e-test.sh` drives one real card transaction through every
-service and asserts on each hop:
+service, then the hotel flows on top, and asserts on each hop:
 
 1. **Start/connect** — brings up Compose, or port-forwards into kind
 2. **Health checks** — every service's `/actuator/health`
@@ -189,12 +199,14 @@ service and asserts on each hop:
 9. **Reporting query** — confirms `reporting-service` returns the transaction with a masked card number
 10. **Settlement** — triggers a settlement batch, polls until `SETTLED`
 11. **Fraud + notification records** — confirms both side-effects landed in their own services' tables
-12. **Booking confirmed** — a `FRONT_DESK`-role staff JWT books a room through `booking-service` with a card the payment core authorizes; polls until the booking reaches `CONFIRMED` (compose only — `booking-service` has no `kind`/GKE manifests yet)
-13. **Booking declined** — books a different room with a card that has no seeded account (an automatic decline, no extra seeding needed); confirms the booking reaches `CANCELLED` with reason `PAYMENT_DECLINED` and the room reappears in availability search (compose only)
+12. **Booking confirmed** — a `FRONT_DESK`-role staff JWT books a room with no card; the `201` is already the `CONFIRMED` booking, with a balance due equal to the room cost (compose only; `booking-service` has no `kind`/GKE manifests)
+13. **Declined checkout** — checks out with a card that has no seeded account (an automatic decline); the guest stays `CHECKED_IN` with the same balance and can retry; the room is not freed (compose only)
 14. **Room board lifecycle** — book → confirm → check-in (`FRONT_DESK`) → board shows that room `OCCUPIED` with the guest's name → check-out → board shows `DIRTY` → housekeeping marks it `VACANT_CLEAN` → board shows `VACANT_CLEAN` again (compose only)
+15. **Full stay** — book, check in, add a room-service charge, then check out with a card covering the room cost plus the charge; the booking is `CHECKED_OUT` and the room `DIRTY`
+16. **Online booking and staff guard** — a guest books with no token and a card (a booking without a card is a `400`), the board shows it as `ONLINE`, and a staff route with no token is `401` (compose only; the card check is switched off in CI, so no Mastercard credentials are needed)
 
 A separate Playwright smoke test (`frontend/e2e/`) covers the same lifecycle
-through the actual staff UI rather than the raw API — see "Frontend" below.
+through the actual staff UI rather than the raw API (`npm run e2e`, see [Running locally](#running-locally)).
 
 ## Engineering challenges
 
@@ -260,32 +272,34 @@ with the cluster up, repeatedly, until it recovered on its own.
 
 ## Known limitations
 
-- No refunds, voids or reversals. A transaction that was already settled stays settled.
-- The booking-service startup check for the timeout timer rules is not wired yet
-  (see `docs/BACKLOG.md`).
-- Booking's room search does not look at housekeeping status, so check-in can still
-  reject a room that the search returned. The e2e test works around this by reading
-  the board.
-- Local e2e runs reuse the same Docker volumes, so room and booking state carries over
-  between runs.
+- **Card-testing risk on the public booking route.** Anyone can ask the system to check a card, and the only
+  abuse control is the per-IP rate limit. Before this runs against real Mastercard it needs a much stricter
+  limit and a bot check, or it becomes a card-testing oracle (`docs/BACKLOG.md`).
+- Account Validation runs against the Mastercard *sandbox*, which returns mock answers. A validated card
+  proves the card is real and the CVC matched, not that funds exist, and it is not kept, so the guest
+  re-enters it at checkout.
+- Payments go through the built-in simulator. The Mastercard Gateway processor is built but off.
+- The acquirer name ("Chase") on a settlement batch is a display label. There is no bank connection.
+- No refunds, voids or reversals. A settled transaction stays settled.
+- Staff login is a dev-only role picker (`auth-mock`); real auth is on the backlog.
+- Booking's room search does not look at housekeeping status, so check-in can reject a room the search
+  returned. The e2e test works around this by reading the board.
+- Local e2e runs reuse the same Docker volumes, so room and booking state carries over between runs.
+- The staff-app screenshots predate the guest front office.
 
 ## Project layout
 
 ```
-services/<name>/       8 independent Spring Boot services (7-service payment core
-                        + booking-service, the first hotel layer on top of it)
-frontend/               React + TypeScript SPA: the existing owner-dashboard/
-                        payment-submission prototype (mock data, PIN login) plus
-                        /staff (layer 2d) — a real staff room board against the
-                        live backend, dev-only role-picker login
-k8s/base/               Kubernetes manifests, replicas: 2 (the GKE default) —
-                        the 7 payment-core services; booking-service's k8s/GKE
-                        wiring is deferred to the backlog (see CLAUDE.md)
-k8s/overlays/kind       1 replica per service, local-only images
-k8s/overlays/gke        images rewritten to Artifact Registry
-k8s/infra/              CockroachDB, Kafka, Zookeeper, Vault, Redis, Prometheus, Grafana
-scripts/                k8s-up/down, gke-deploy, demo-up/down, e2e-test
-docs/GKE.md             exact gcloud commands for a real deployment
-docs/BACKLOG.md         scope deliberately deferred to a later layer or pass
-SECURITY.md             what's dev-only and must not ship as-is
+services/<name>/       8 Spring Boot services (the 7-service payment core + booking-service)
+libs/                  mastercard-gateway (payments), mastercard-developers (Account Validation)
+frontend/              React + TypeScript: guest front office (/) and staff app (/staff)
+proto/v1/              the gRPC contract (transaction_service.proto)
+k8s/                   base manifests (payment core), kind and GKE overlays, infra
+scripts/               e2e-test, k8s-up/down, gke-deploy, demo-up/down, mastercard-sandbox-smoke
+docker-compose.yml     the local stack; docker-compose.card-validation-dev.yml turns on the sandbox check
+docs/DEMO.md           step-by-step local demo
+docs/CARD_VALIDATION.md  guest card check, switch, sandbox test card
+docs/GKE.md            gcloud commands for the (earlier-version) GKE deployment
+docs/BACKLOG.md        scope deliberately deferred
+SECURITY.md            what is dev-only and must not ship as-is
 ```
