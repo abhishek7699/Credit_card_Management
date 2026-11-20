@@ -316,7 +316,7 @@ public class BookingService {
         for (int i = 1; i <= MAX_INITIATE_ATTEMPTS; i++) {
             try {
                 InitiateTransactionResponse response = IdempotencyKeyClientInterceptor.withKey(key,
-                        () -> transactionServiceBlockingStub.withDeadlineAfter(5, TimeUnit.SECONDS)
+                        () -> transactionServiceBlockingStub.withWaitForReady().withDeadlineAfter(5, TimeUnit.SECONDS)
                                 .initiateTransaction(grpcRequest));
                 return Optional.of(response.getTransactionId());
             } catch (StatusRuntimeException e) {

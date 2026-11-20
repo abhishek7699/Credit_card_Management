@@ -116,6 +116,7 @@ public class CheckoutAttemptSweepService {
 
     private Optional<LookupTransactionByIdempotencyKeyResponse> lookup(String key) {
         LookupTransactionByIdempotencyKeyResponse response = transactionServiceBlockingStub
+                .withWaitForReady()
                 .withDeadlineAfter(5, TimeUnit.SECONDS)
                 .lookupTransactionByIdempotencyKey(LookupTransactionByIdempotencyKeyRequest.newBuilder()
                         .setIdempotencyKey(key)
