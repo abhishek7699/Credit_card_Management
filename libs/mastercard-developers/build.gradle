@@ -1,0 +1,68 @@
+plugins {
+    id 'java-library'
+    id 'io.spring.dependency-management' version '1.1.4'
+    id 'jacoco'
+}
+
+group = 'com.creditcard'
+version = '0.0.1-SNAPSHOT'
+
+dependencyManagement {
+    imports {
+        mavenBom 'org.springframework.boot:spring-boot-dependencies:3.2.5'
+    }
+}
+
+dependencies {
+    // Mastercard's official OAuth 1.0a signer. We never hand-roll signing.
+    implementation 'com.mastercard.developer:oauth1-signer:1.5.3'
+    implementation 'com.fasterxml.jackson.core:jackson-databind'
+
+    testImplementation 'com.github.tomakehurst:wiremock-jre8-standalone:2.35.1'
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testImplementation 'org.assertj:assertj-core'
+}
+
+jacoco {
+    toolVersion = '0.8.11'
+}
+
+jacocoTestReport {
+    dependsOn test
+    reports {
+        xml.required = true
+        html.required = true
+    }
+}
+
+jacocoTestCoverageVerification {
+    dependsOn jacocoTestReport
+    violationRules {
+        rule {
+            limit {
+                counter = 'INSTRUCTION'
+                minimum = 0.9
+            }
+            limit {
+                counter = 'BRANCH'
+                minimum = 0.9
+            }
+        }
+    }
+}
+
+test {
+    useJUnitPlatform()
+    finalizedBy jacocoTestReport
+}
+
+check {
+    dependsOn jacocoTestCoverageVerification
+}
+
+// Manual only: `./gradlew :libs:mastercard-developers:smoke -q`. Never part of check/CI.
+tasks.register('smoke', JavaExec) {
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.creditcard.mastercard.developers.SandboxSmoke'
+    standardInput = System.in
+}
