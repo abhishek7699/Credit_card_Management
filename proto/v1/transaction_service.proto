@@ -148,6 +148,7 @@ message LookupTransactionByIdempotencyKeyResponse {
 
   // status: Current status. One of: PENDING, AUTHORIZED, DECLINED, FAILED. Empty when found is false.
   string status = 3;
+}
 
 // ValidateCardRequest: the card as the guest typed it.
 // SECURITY: card_number and cvv are cleartext in transit (mTLS in production, Principle I),

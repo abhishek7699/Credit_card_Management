@@ -75,7 +75,7 @@ public class Booking {
     @Column(name = "source", nullable = false, length = 20)
     private BookingSource source = BookingSource.STAFF;
 
-    /** Outcome of the no-charge card check made when a guest booked online (V11), else null.
+    /** Outcome of the no-charge card check made when a guest booked online (V12), else null.
      *  Only the verdict, Mastercard's referenceId and the last 4 digits are kept: never the
      *  card number or CVC. */
     @Column(name = "card_validation_status", length = 20)
