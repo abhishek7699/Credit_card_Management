@@ -2,6 +2,7 @@ package com.creditcard.booking.service;
 
 import com.creditcard.booking.controller.dto.RoomBoardResponse;
 import com.creditcard.booking.domain.Booking;
+import com.creditcard.booking.domain.BookingSource;
 import com.creditcard.booking.domain.BookingStatus;
 import com.creditcard.booking.domain.Charge;
 import com.creditcard.booking.domain.ChargeType;
@@ -245,6 +246,7 @@ class RoomServiceTest {
         UUID roomId = UUID.randomUUID();
         Room vacantRoom = room(roomId, "101", 1, 1, RoomStatus.VACANT_CLEAN);
         Booking arriving = arrivingTodayBooking(roomId);
+        arriving.setSource(BookingSource.ONLINE);
         when(roomRepository.findAllByOrderByFloorAscPositionAsc()).thenReturn(List.of(vacantRoom));
         when(bookingRepository.findByStatus(BookingStatus.CHECKED_IN)).thenReturn(List.of());
         when(bookingRepository.findByStatusAndCheckIn(BookingStatus.CONFIRMED, LocalDate.now()))
@@ -255,6 +257,7 @@ class RoomServiceTest {
         var entry = board.get(0).rooms().get(0);
         assertThat(entry.arrivingBookingId()).isEqualTo(arriving.getId());
         assertThat(entry.arrivingGuestName()).isEqualTo("John Smith");
+        assertThat(entry.arrivingBookingSource()).isEqualTo(BookingSource.ONLINE);
         // Independent of the occupant fields — this room isn't occupied at all.
         assertThat(entry.guestName()).isNull();
         assertThat(entry.currentBookingId()).isNull();

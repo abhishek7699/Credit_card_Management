@@ -179,6 +179,8 @@ public class RoomService {
                 occupant != null ? occupant.getId() : null,
                 arriving != null ? arriving.getId() : null,
                 arriving != null ? arriving.getGuestName() : null,
-                hasBalanceDue);
+                hasBalanceDue,
+                occupant != null ? occupant.getSource() : null,
+                arriving != null ? arriving.getSource() : null);
     }
 }

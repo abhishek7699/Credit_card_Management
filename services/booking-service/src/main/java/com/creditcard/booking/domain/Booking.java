@@ -70,6 +70,11 @@ public class Booking {
     @Column(name = "status", nullable = false, length = 20)
     private BookingStatus status;
 
+    /** Who created this booking (V10). Defaults to STAFF, matching the column default. */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "source", nullable = false, length = 20)
+    private BookingSource source = BookingSource.STAFF;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "cancellation_reason", length = 30)
     private CancellationReason cancellationReason;
@@ -153,6 +158,9 @@ public class Booking {
 
     public BookingStatus getStatus() { return status; }
     public void setStatus(BookingStatus status) { this.status = status; }
+
+    public BookingSource getSource() { return source; }
+    public void setSource(BookingSource source) { this.source = source; }
 
     public CancellationReason getCancellationReason() { return cancellationReason; }
     public void setCancellationReason(CancellationReason cancellationReason) { this.cancellationReason = cancellationReason; }

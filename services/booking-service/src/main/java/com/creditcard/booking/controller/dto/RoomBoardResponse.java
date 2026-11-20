@@ -1,5 +1,6 @@
 package com.creditcard.booking.controller.dto;
 
+import com.creditcard.booking.domain.BookingSource;
 import com.creditcard.booking.domain.RoomStatus;
 
 import java.time.LocalDate;
@@ -26,6 +27,10 @@ public record RoomBoardResponse(int floor, List<RoomBoardEntry> rooms) {
      * <p>hasBalanceDue (layer 2c, FR-006): true/false only when status == OCCUPIED
      * (same presence rule as guestName); null otherwise -- a non-occupied room has
      * no booking to owe anything.
+     *
+     * <p>bookingSource / arrivingBookingSource (front office): where the occupant's
+     * and the arriving booking's came from, so the board can badge guest-made
+     * bookings ONLINE. Present only when the matching booking is present.
      */
     public record RoomBoardEntry(
             UUID roomId,
@@ -38,7 +43,9 @@ public record RoomBoardResponse(int floor, List<RoomBoardEntry> rooms) {
             UUID currentBookingId,
             UUID arrivingBookingId,
             String arrivingGuestName,
-            Boolean hasBalanceDue
+            Boolean hasBalanceDue,
+            BookingSource bookingSource,
+            BookingSource arrivingBookingSource
     ) {
     }
 }
