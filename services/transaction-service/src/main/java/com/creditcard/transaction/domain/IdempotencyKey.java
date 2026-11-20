@@ -36,4 +36,6 @@ public class IdempotencyKey {
     public UUID getResourceId() { return resourceId; }
 
     public String getResponseStatus() { return responseStatus; }
+
+    public Instant getExpiresAt() { return expiresAt; }
 }
