@@ -37,6 +37,13 @@ service TransactionService {
   // Callers use it to learn whether an InitiateTransaction that failed on their side was processed.
   rpc LookupTransactionByIdempotencyKey(LookupTransactionByIdempotencyKeyRequest)
       returns (LookupTransactionByIdempotencyKeyResponse);
+
+  // ValidateCard: Asks Mastercard Account Validation whether the card is real and the CVC and
+  // name match, WITHOUT charging it and WITHOUT persisting anything. Used to guarantee a
+  // pay-later guest booking. The card number and CVC exist only in memory for this call.
+  // Errors: INVALID_ARGUMENT (malformed card data), UNAVAILABLE (Mastercard could not answer;
+  // callers must fail closed, never treat it as MATCHED).
+  rpc ValidateCard(ValidateCardRequest) returns (ValidateCardResponse);
 }
 
 // InitiateTransactionRequest: Contains all card payment details as submitted by
@@ -141,4 +148,34 @@ message LookupTransactionByIdempotencyKeyResponse {
 
   // status: Current status. One of: PENDING, AUTHORIZED, DECLINED, FAILED. Empty when found is false.
   string status = 3;
+
+// ValidateCardRequest: the card as the guest typed it.
+// SECURITY: card_number and cvv are cleartext in transit (mTLS in production, Principle I),
+// are never stored, and MUST NOT be logged by any caller or callee (generated toString()
+// prints every field, so never log a request message).
+message ValidateCardRequest {
+  // card_number: Raw PAN, 13-19 digits, no spaces or dashes.
+  string card_number = 1;
+
+  // card_expiry: MM/YY (e.g., "10/50").
+  string card_expiry = 2;
+
+  // cvv: 3 or 4 digits.
+  string cvv = 3;
+
+  // cardholder_name: Name as it appears on the card.
+  string cardholder_name = 4;
+}
+
+// ValidateCardResponse: the outcome and the only card-related data safe to keep.
+message ValidateCardResponse {
+  // status: "MATCHED" (issuer approved the account, CVC matched, name not a mismatch) or
+  // "NOT_MATCHED".
+  string status = 1;
+
+  // reference_id: The referenceId sent to Mastercard Account Validation for this check.
+  string reference_id = 2;
+
+  // last4: Last four digits of the card number.
+  string last4 = 3;
 }

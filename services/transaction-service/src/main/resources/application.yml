@@ -76,6 +76,14 @@ logging:
   pattern:
     console: "%d{ISO8601} [%thread] %-5level %logger{36} [traceId=%X{traceId}] - %msg%n"
 
+# ValidateCard (guest pay-later bookings): real Mastercard Account Validation. OFF by default, so CI and
+# the e2e need no Mastercard credentials; when off, a well-formed card always passes. The dev profile
+# (application-dev.yml) turns it on.
+card-validation:
+  enabled: ${CARD_VALIDATION_ENABLED:false}
+  timeout-seconds: ${CARD_VALIDATION_TIMEOUT_SECONDS:6}
+  reference-prefix: ""
+
 transaction:
   outbox:
     poll-interval-ms: ${TRANSACTION_OUTBOX_POLL_MS:500}

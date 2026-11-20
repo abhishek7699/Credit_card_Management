@@ -1,0 +1,8 @@
+# Dev profile: real Mastercard Account Validation against the Mastercard Developers SANDBOX.
+# Needs MASTERCARD_DEV_CONSUMER_KEY, MASTERCARD_DEV_KEY_PATH, MASTERCARD_DEV_KEY_ALIAS and
+# MASTERCARD_DEV_KEYSTORE_PASSWORD in the environment; startup fails, naming the variable, if one is missing.
+card-validation:
+  enabled: true
+  # The sandbox picks the test scenario from the referenceId prefix: "AVM_" = CVC and name matched.
+  # Change it (e.g. AVNOM_, DEC05_) to exercise the failing scenarios. Leave empty outside the sandbox.
+  reference-prefix: ${CARD_VALIDATION_REFERENCE_PREFIX:AVM_}

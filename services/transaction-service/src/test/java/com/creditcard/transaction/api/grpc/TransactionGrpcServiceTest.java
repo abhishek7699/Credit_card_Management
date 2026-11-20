@@ -6,6 +6,11 @@ import com.creditcard.transaction.grpc.v1.GetTransactionRequest;
 import com.creditcard.transaction.grpc.v1.GetTransactionResponse;
 import com.creditcard.transaction.grpc.v1.InitiateTransactionRequest;
 import com.creditcard.transaction.grpc.v1.InitiateTransactionResponse;
+import com.creditcard.transaction.grpc.v1.ValidateCardRequest;
+import com.creditcard.transaction.grpc.v1.ValidateCardResponse;
+import com.creditcard.mastercard.developers.AccountValidationUnavailableException;
+import io.grpc.Status;
+import com.creditcard.transaction.service.CardValidationService;
 import com.creditcard.transaction.service.IdempotencyKeyService;
 import com.creditcard.transaction.service.TransactionService;
 import io.grpc.Context;
@@ -34,6 +39,9 @@ class TransactionGrpcServiceTest {
     private TransactionService transactionService;
 
     @Mock
+    private CardValidationService cardValidationService;
+
+    @Mock
     private StreamObserver<InitiateTransactionResponse> responseObserver;
 
     @Mock
@@ -43,7 +51,7 @@ class TransactionGrpcServiceTest {
 
     @BeforeEach
     void setUp() {
-        transactionGrpcService = new TransactionGrpcService(transactionService);
+        transactionGrpcService = new TransactionGrpcService(transactionService, cardValidationService);
     }
 
     @Test
@@ -383,5 +391,76 @@ class TransactionGrpcServiceTest {
 
         verify(responseObserver).onError(any(StatusRuntimeException.class));
         verify(responseObserver, never()).onNext(any());
+    }
+
+    // ── ValidateCard ──────────────────────────────────────────────────────────
+
+    private static ValidateCardRequest cardRequest() {
+        return ValidateCardRequest.newBuilder().setCardNumber("5102589999999913").setCardExpiry("10/50")
+                .setCvv("6173").setCardholderName("Jane Doe").build();
+    }
+
+    @SuppressWarnings("unchecked")
+    private StreamObserver<ValidateCardResponse> cardObserver() {
+        return mock(StreamObserver.class);
+    }
+
+    @Test
+    void validateCard_returnsStatusReferenceAndLast4Only() {
+        when(cardValidationService.validate("5102589999999913", "10/50", "6173", "Jane Doe"))
+                .thenReturn(new CardValidationService.Outcome(CardValidationService.Status.MATCHED, "AVM_x", "9913"));
+        StreamObserver<ValidateCardResponse> observer = cardObserver();
+
+        transactionGrpcService.validateCard(cardRequest(), observer);
+
+        ArgumentCaptor<ValidateCardResponse> captor = ArgumentCaptor.forClass(ValidateCardResponse.class);
+        verify(observer).onNext(captor.capture());
+        verify(observer).onCompleted();
+        assertThat(captor.getValue().getStatus()).isEqualTo("MATCHED");
+        assertThat(captor.getValue().getReferenceId()).isEqualTo("AVM_x");
+        assertThat(captor.getValue().getLast4()).isEqualTo("9913");
+        assertThat(captor.getValue().toString()).doesNotContain("5102589999999913");
+    }
+
+    @Test
+    void validateCard_malformedCard_isInvalidArgument() {
+        when(cardValidationService.validate(any(), any(), any(), any()))
+                .thenThrow(new IllegalArgumentException("card_number must be 13-19 digits"));
+        StreamObserver<ValidateCardResponse> observer = cardObserver();
+
+        transactionGrpcService.validateCard(cardRequest(), observer);
+
+        assertThat(errorOf(observer).getStatus().getCode()).isEqualTo(Status.Code.INVALID_ARGUMENT);
+    }
+
+    @Test
+    void validateCard_mastercardUnavailable_isUnavailableWithNoCardData() {
+        when(cardValidationService.validate(any(), any(), any(), any()))
+                .thenThrow(new AccountValidationUnavailableException("Account Validation returned HTTP 503"));
+        StreamObserver<ValidateCardResponse> observer = cardObserver();
+
+        transactionGrpcService.validateCard(cardRequest(), observer);
+
+        StatusRuntimeException error = errorOf(observer);
+        assertThat(error.getStatus().getCode()).isEqualTo(Status.Code.UNAVAILABLE);
+        assertThat(String.valueOf(error.getMessage())).doesNotContain("5102589999999913").doesNotContain("6173");
+    }
+
+    @Test
+    void validateCard_anythingElse_isInternalWithAFixedMessage() {
+        when(cardValidationService.validate(any(), any(), any(), any())).thenThrow(new IllegalStateException("boom"));
+        StreamObserver<ValidateCardResponse> observer = cardObserver();
+
+        transactionGrpcService.validateCard(cardRequest(), observer);
+
+        StatusRuntimeException error = errorOf(observer);
+        assertThat(error.getStatus().getCode()).isEqualTo(Status.Code.INTERNAL);
+        assertThat(error.getStatus().getDescription()).isEqualTo("Card validation failed");
+    }
+
+    private static StatusRuntimeException errorOf(StreamObserver<ValidateCardResponse> observer) {
+        ArgumentCaptor<Throwable> captor = ArgumentCaptor.forClass(Throwable.class);
+        verify(observer).onError(captor.capture());
+        return (StatusRuntimeException) captor.getValue();
     }
 }
