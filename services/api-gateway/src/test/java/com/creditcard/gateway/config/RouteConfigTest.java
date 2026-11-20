@@ -44,6 +44,11 @@ class RouteConfigTest {
     @MockBean
     private RedisRateLimiter redisRateLimiter;
 
+    // Named mock for the public limiter (RateLimitConfig#publicRedisRateLimiter): it is a
+    // second RedisRateLimiter bean, and unmocked it would try to reach Redis at startup.
+    @MockBean(name = "publicRedisRateLimiter")
+    private RedisRateLimiter publicRedisRateLimiter;
+
     @MockBean
     private KeyResolver jwtSubjectKeyResolver;
 
@@ -106,5 +111,11 @@ class RouteConfigTest {
     void bookingChargesGetRouteExists() {
         List<String> ids = allRoutes().stream().map(Route::getId).toList();
         assertThat(ids).contains("booking-charges-get");
+    }
+
+    @Test
+    void publicAvailabilityAndBookingRoutesExist() {
+        List<String> ids = allRoutes().stream().map(Route::getId).toList();
+        assertThat(ids).contains("public-availability", "public-booking");
     }
 }

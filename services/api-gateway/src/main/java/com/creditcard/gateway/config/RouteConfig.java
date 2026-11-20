@@ -1,6 +1,7 @@
 package com.creditcard.gateway.config;
 
 import com.creditcard.gateway.filter.GrpcTransactionGatewayFilterFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cloud.gateway.filter.ratelimit.KeyResolver;
 import org.springframework.cloud.gateway.filter.ratelimit.RedisRateLimiter;
@@ -23,12 +24,16 @@ public class RouteConfig {
     @Value("${BOOKING_SERVICE_URL:http://booking-service:8080}")
     private String bookingServiceUrl;
 
+    private final RedisRateLimiter publicRateLimiter;
+
     public RouteConfig(GrpcTransactionGatewayFilterFactory grpcFilter,
                        KeyResolver keyResolver,
-                       RedisRateLimiter rateLimiter) {
+                       RedisRateLimiter rateLimiter,
+                       @Qualifier("publicRedisRateLimiter") RedisRateLimiter publicRateLimiter) {
         this.grpcFilter = grpcFilter;
         this.keyResolver = keyResolver;
         this.rateLimiter = rateLimiter;
+        this.publicRateLimiter = publicRateLimiter;
     }
 
     @Bean
@@ -269,6 +274,38 @@ public class RouteConfig {
                                         .setKeyResolver(keyResolver))
                                 .circuitBreaker(c -> c
                                         .setName("booking-service-cb")
+                                        .setFallbackUri("forward:/fallback/booking")))
+                        .uri(bookingServiceUrl))
+
+                // ── Guest front office: availability (GET, no JWT) — layer 2d ─────────
+                // SecurityConfig permits this exact path without a token. It is keyed by
+                // client IP (no JWT) and uses the stricter public limiter. booking-service
+                // enforces the stay and date rules and prices every room itself.
+                .route("public-availability", r -> r
+                        .path("/api/v1/public/availability")
+                        .and().method(HttpMethod.GET)
+                        .filters(f -> f
+                                .requestRateLimiter(c -> c
+                                        .setRateLimiter(publicRateLimiter)
+                                        .setKeyResolver(keyResolver))
+                                .circuitBreaker(c -> c
+                                        .setName("booking-service-cb")
+                                        .setFallbackUri("forward:/fallback/booking")))
+                        .uri(bookingServiceUrl))
+
+                // ── Guest front office: create booking (POST, no JWT) — layer 2d ──────
+                // Same breaker as the staff booking submit (its backend latency includes
+                // the 5 s gRPC deadline, so it gets the longer timeout), and the same
+                // public limiter as availability.
+                .route("public-booking", r -> r
+                        .path("/api/v1/public/bookings")
+                        .and().method(HttpMethod.POST)
+                        .filters(f -> f
+                                .requestRateLimiter(c -> c
+                                        .setRateLimiter(publicRateLimiter)
+                                        .setKeyResolver(keyResolver))
+                                .circuitBreaker(c -> c
+                                        .setName("booking-submit-cb")
                                         .setFallbackUri("forward:/fallback/booking")))
                         .uri(bookingServiceUrl))
 
