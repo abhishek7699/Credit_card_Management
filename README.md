@@ -168,7 +168,7 @@ Tests:
 
 ```bash
 npm test               # Vitest + React Testing Library + MSW
-npm run test:coverage  # same, with the 100% coverage gate
+npm run test:coverage  # same, with the 90% coverage gate
 npx playwright install --with-deps chromium   # once, before the next line
 npm run e2e             # Playwright smoke test — needs the stack + `npm run dev` already up
 ```

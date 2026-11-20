@@ -58,13 +58,13 @@ export default defineConfig({
       // Principle II applied the same way JaCoCo applies it on the backend: to
       // the code a change actually touches). The old owner-dashboard/payment
       // prototype this once excluded has since been deleted — /staff is the
-      // only app left.
+      // only app left. The gate is 90% to match the backend (Principle II, v2.0.0).
       thresholds: {
-        'src/features/staff-session/**': { lines: 100, branches: 100, functions: 100, statements: 100 },
-        'src/features/room-board/**': { lines: 100, branches: 100, functions: 100, statements: 100 },
-        'src/features/booking/**': { lines: 100, branches: 100, functions: 100, statements: 100 },
-        'src/components/RetryBanner.tsx': { lines: 100, branches: 100, functions: 100, statements: 100 },
-        'src/components/StaffShell.tsx': { lines: 100, branches: 100, functions: 100, statements: 100 },
+        'src/features/staff-session/**': { lines: 90, branches: 90, functions: 90, statements: 90 },
+        'src/features/room-board/**': { lines: 90, branches: 90, functions: 90, statements: 90 },
+        'src/features/booking/**': { lines: 90, branches: 90, functions: 90, statements: 90 },
+        'src/components/RetryBanner.tsx': { lines: 90, branches: 90, functions: 90, statements: 90 },
+        'src/components/StaffShell.tsx': { lines: 90, branches: 90, functions: 90, statements: 90 },
       },
     },
   },

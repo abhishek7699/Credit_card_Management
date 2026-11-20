@@ -63,7 +63,7 @@ jobs:
         working-directory: frontend
         run: npm run build
 
-      - name: Test with coverage (100% gate on this layer's own files — vite.config.ts)
+      - name: Test with coverage (90% gate on this layer's own files — vite.config.ts)
         working-directory: frontend
         run: npm run test:coverage
 
