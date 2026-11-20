@@ -1,5 +1,6 @@
 import { useCheckOutMutation } from '../booking/bookingApi';
 import { CheckOutCardForm } from '../booking/CheckOutCardForm';
+import { alertError, alertSuccess, btnPrimary, stateText } from '../../components/ui';
 import type { BookingStatus, CardDetails } from '../../types/staff';
 
 interface CheckOutActionProps {
@@ -19,11 +20,11 @@ export function CheckOutAction({ bookingId, guestName, status, balanceDue }: Che
   const [checkOut, { isLoading, isError }] = useCheckOutMutation();
 
   if (status === 'CHECKED_OUT') {
-    return <p className="text-sm text-green-700">Checked out.</p>;
+    return <p className={alertSuccess}>Checked out.</p>;
   }
 
   if (status === 'CHECKOUT_PENDING') {
-    return <p className="text-sm text-gray-700">Processing checkout…</p>;
+    return <p className={stateText}>Processing checkout… this can take a few seconds.</p>;
   }
 
   async function handleNoBalanceClick() {
@@ -47,12 +48,12 @@ export function CheckOutAction({ bookingId, guestName, status, balanceDue }: Che
 
   if (balanceDue > 0) {
     return (
-      <div>
-        <p className="mb-3 text-sm text-gray-700">
+      <div className="space-y-4">
+        <p className={stateText}>
           {guestName ?? 'This guest'} has a balance due of ${balanceDue.toFixed(2)}.
         </p>
         {isError && (
-          <div role="alert" className="mb-3 rounded border border-red-300 bg-red-50 p-3 text-sm text-red-700">
+          <div role="alert" className={alertError}>
             Checkout was declined or failed. Please try a different card.
           </div>
         )}
@@ -62,19 +63,10 @@ export function CheckOutAction({ bookingId, guestName, status, balanceDue }: Che
   }
 
   return (
-    <div>
-      <p className="mb-3 text-sm text-gray-700">{guestName ?? 'This guest'} is currently occupying this room.</p>
-      {isError && (
-        <div role="alert" className="mb-3 rounded border border-red-300 bg-red-50 p-3 text-sm text-red-700">
-          Check-out failed. Please try again.
-        </div>
-      )}
-      <button
-        type="button"
-        onClick={handleNoBalanceClick}
-        disabled={isLoading}
-        className="w-full rounded bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-      >
+    <div className="space-y-4">
+      <p className={stateText}>{guestName ?? 'This guest'} is currently occupying this room.</p>
+      {isError && <div role="alert" className={alertError}>Check-out didn&apos;t go through. Tap Check Out to try again.</div>}
+      <button type="button" onClick={handleNoBalanceClick} disabled={isLoading} className={btnPrimary}>
         {isLoading ? 'Checking out…' : 'Check Out'}
       </button>
     </div>

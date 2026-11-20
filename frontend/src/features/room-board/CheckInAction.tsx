@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useCheckInMutation } from '../booking/bookingApi';
+import { alertError, alertSuccess, btnPrimary, stateText } from '../../components/ui';
 
 interface CheckInActionProps {
   bookingId: string;
@@ -11,7 +12,7 @@ export function CheckInAction({ bookingId, guestName }: CheckInActionProps) {
   const [done, setDone] = useState(false);
 
   if (done) {
-    return <p className="text-sm text-green-700">Checked in.</p>;
+    return <p className={alertSuccess}>Checked in.</p>;
   }
 
   async function handleClick() {
@@ -25,21 +26,12 @@ export function CheckInAction({ bookingId, guestName }: CheckInActionProps) {
   }
 
   return (
-    <div>
-      <p className="mb-3 text-sm text-gray-700">
+    <div className="space-y-4">
+      <p className={stateText}>
         {guestName ? `${guestName} is arriving today.` : 'A guest is arriving today.'}
       </p>
-      {isError && (
-        <div role="alert" className="mb-3 rounded border border-red-300 bg-red-50 p-3 text-sm text-red-700">
-          Check-in failed. Please try again.
-        </div>
-      )}
-      <button
-        type="button"
-        onClick={handleClick}
-        disabled={isLoading}
-        className="w-full rounded bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-      >
+      {isError && <div role="alert" className={alertError}>Check-in didn&apos;t go through. Tap Check In to try again.</div>}
+      <button type="button" onClick={handleClick} disabled={isLoading} className={btnPrimary}>
         {isLoading ? 'Checking in…' : 'Check In'}
       </button>
     </div>

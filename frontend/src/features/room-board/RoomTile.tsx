@@ -1,38 +1,30 @@
-import type { RoomBoardEntry, RoomStatus } from '../../types/staff';
-
-const STATUS_COLOR: Record<RoomStatus, string> = {
-  VACANT_CLEAN: 'border-green-300 bg-green-100 text-green-900',
-  OCCUPIED: 'border-red-300 bg-red-100 text-red-900',
-  DIRTY: 'border-amber-300 bg-amber-100 text-amber-900',
-  MAINTENANCE: 'border-gray-400 bg-gray-200 text-gray-700',
-};
-
-const STATUS_LABEL: Record<RoomStatus, string> = {
-  VACANT_CLEAN: 'Vacant',
-  OCCUPIED: 'Occupied',
-  DIRTY: 'Dirty',
-  MAINTENANCE: 'Maintenance',
-};
+import type { RoomBoardEntry } from '../../types/staff';
+import { ROOM_STATUS_STYLE } from './roomStatusStyle';
 
 interface RoomTileProps {
   room: RoomBoardEntry;
   onClick: (room: RoomBoardEntry) => void;
 }
 
+/** A whole room is one large button (min 96px tall) so it is easy to hit on a tablet. */
 export function RoomTile({ room, onClick }: RoomTileProps) {
+  const style = ROOM_STATUS_STYLE[room.status];
   return (
     <button
       type="button"
       onClick={() => onClick(room)}
       data-testid={`room-${room.roomNumber}`}
       data-status={room.status}
-      className={`flex flex-col items-start gap-0.5 rounded border p-3 text-left text-sm ${STATUS_COLOR[room.status]}`}
+      className={`flex min-h-24 flex-col items-start gap-1 rounded-lg border-2 p-3 text-left text-base shadow-sm hover:brightness-95 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 ${style.tile}`}
     >
-      <span className="font-semibold">{room.roomNumber}</span>
-      <span>{STATUS_LABEL[room.status]}</span>
-      {room.status === 'OCCUPIED' && room.guestName && <span className="text-xs">{room.guestName}</span>}
+      <span className="text-lg font-bold">{room.roomNumber}</span>
+      <span className="font-medium">{style.label}</span>
+      {room.status === 'OCCUPIED' && room.guestName && <span className="text-sm">{room.guestName}</span>}
       {room.hasBalanceDue && (
-        <span className="rounded bg-amber-500 px-1 text-xs font-semibold text-white" data-testid="balance-due-badge">
+        <span
+          className="mt-auto rounded bg-amber-500 px-2 py-0.5 text-sm font-semibold text-white"
+          data-testid="balance-due-badge"
+        >
           Balance due
         </span>
       )}

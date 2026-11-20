@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { validateCardFields, type CardFormErrors, type CardFormState } from './validation';
 import type { CardDetails } from '../../types/staff';
+import { btnPrimary, fieldError, fieldLabel, input } from '../../components/ui';
 
 const INITIAL: CardFormState = {
   cardNumber: '',
@@ -11,7 +12,7 @@ const INITIAL: CardFormState = {
 
 function FieldError({ message }: { message: string | undefined }) {
   if (!message) return null;
-  return <p className="mt-1 text-sm text-red-600">{message}</p>;
+  return <p className={fieldError}>{message}</p>;
 }
 
 interface CheckOutCardFormProps {
@@ -55,7 +56,7 @@ export function CheckOutCardForm({ onSubmit, isSubmitting }: CheckOutCardFormPro
   return (
     <form onSubmit={handleSubmit} noValidate className="space-y-4">
       <div>
-        <label htmlFor="checkout-cardNumber" className="block text-sm font-medium text-gray-700">
+        <label htmlFor="checkout-cardNumber" className={fieldLabel}>
           Card Number
         </label>
         <input
@@ -64,14 +65,14 @@ export function CheckOutCardForm({ onSubmit, isSubmitting }: CheckOutCardFormPro
           inputMode="numeric"
           value={values.cardNumber}
           onChange={(e) => handleChange('cardNumber', e.target.value)}
-          className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"
+          className={input}
         />
         <FieldError message={errors.cardNumber} />
       </div>
 
       <div className="grid grid-cols-2 gap-4">
         <div>
-          <label htmlFor="checkout-expiry" className="block text-sm font-medium text-gray-700">
+          <label htmlFor="checkout-expiry" className={fieldLabel}>
             Expiry
           </label>
           <input
@@ -80,12 +81,12 @@ export function CheckOutCardForm({ onSubmit, isSubmitting }: CheckOutCardFormPro
             placeholder="MM/YY"
             value={values.expiry}
             onChange={(e) => handleChange('expiry', e.target.value)}
-            className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"
+            className={input}
           />
           <FieldError message={errors.expiry} />
         </div>
         <div>
-          <label htmlFor="checkout-cvv" className="block text-sm font-medium text-gray-700">
+          <label htmlFor="checkout-cvv" className={fieldLabel}>
             CVV
           </label>
           <input
@@ -94,14 +95,14 @@ export function CheckOutCardForm({ onSubmit, isSubmitting }: CheckOutCardFormPro
             inputMode="numeric"
             value={values.cvv}
             onChange={(e) => handleChange('cvv', e.target.value)}
-            className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"
+            className={input}
           />
           <FieldError message={errors.cvv} />
         </div>
       </div>
 
       <div>
-        <label htmlFor="checkout-cardholderName" className="block text-sm font-medium text-gray-700">
+        <label htmlFor="checkout-cardholderName" className={fieldLabel}>
           Cardholder Name
         </label>
         <input
@@ -109,7 +110,7 @@ export function CheckOutCardForm({ onSubmit, isSubmitting }: CheckOutCardFormPro
           type="text"
           value={values.cardholderName}
           onChange={(e) => handleChange('cardholderName', e.target.value)}
-          className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"
+          className={input}
         />
         <FieldError message={errors.cardholderName} />
       </div>
@@ -117,7 +118,7 @@ export function CheckOutCardForm({ onSubmit, isSubmitting }: CheckOutCardFormPro
       <button
         type="submit"
         disabled={isSubmitting}
-        className="w-full rounded bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+        className={btnPrimary}
       >
         {isSubmitting ? 'Processing…' : 'Charge and Check Out'}
       </button>
