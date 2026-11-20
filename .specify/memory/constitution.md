@@ -1,7 +1,12 @@
 <!--
 SYNC IMPACT REPORT
 ==================
-Version change: 1.3.0 → 1.4.0 (MINOR — new principle added: IX. External Provider Calls.
+Version change: 1.4.0 → 2.0.0 (MAJOR — Principle II relaxed from 100% to 90% line and branch
+coverage; the Principle II and Governance text was already changed to 90% on main, and this
+bump records that redefinition. Contributor agreement under Governance is to be confirmed by
+the project owner.)
+
+Previous: 1.3.0 → 1.4.0 (MINOR — new principle added: IX. External Provider Calls.
 Governs calls from a service to a third party (payment processors, email/SMS providers).
 Added so such calls are not forced into Principle V's service-to-service rules.)
 
@@ -308,4 +313,4 @@ begin until the web app is stable and approved.
   block the merge.
 - For runtime development guidance, refer to `CLAUDE.md` at the repository root.
 
-**Version**: 1.4.0 | **Ratified**: 2026-06-11 | **Last Amended**: 2026-11-12
+**Version**: 2.0.0 | **Ratified**: 2026-06-11 | **Last Amended**: 2026-11-19
