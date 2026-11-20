@@ -5,6 +5,8 @@ import com.creditcard.booking.controller.dto.PublicBookingResponse;
 import com.creditcard.booking.controller.dto.PublicRoomOffer;
 import com.creditcard.booking.domain.BookingStatus;
 import com.creditcard.booking.exception.BookingWindowException;
+import com.creditcard.booking.exception.CardNotVerifiedException;
+import com.creditcard.booking.exception.CardValidationUnavailableException;
 import com.creditcard.booking.service.OnlineBookingService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -31,7 +33,8 @@ class PublicBookingControllerTest {
 
     private static final String VALID_BOOKING = """
             {"roomId":"%s","checkIn":"2030-01-10","checkOut":"2030-01-12",
-             "guestName":"Jane Doe","guestPhone":"+1-555-0100"}
+             "guestName":"Jane Doe","guestPhone":"+1-555-0100",
+             "card":{"cardNumber":"5102589999999913","expiry":"10/50","cvv":"6173","cardholderName":"Jane Doe"}}
             """.formatted(UUID.randomUUID());
 
     @Autowired
@@ -93,5 +96,47 @@ class PublicBookingControllerTest {
 
         mockMvc.perform(post("/api/v1/public/bookings").contentType(APPLICATION_JSON).content(body))
                 .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void book_missingCard_returns400AndNeverReachesTheService() throws Exception {
+        String body = """
+                {"roomId":"%s","checkIn":"2030-01-10","checkOut":"2030-01-12",
+                 "guestName":"Jane Doe","guestPhone":"+1-555-0100"}
+                """.formatted(UUID.randomUUID());
+
+        mockMvc.perform(post("/api/v1/public/bookings").contentType(APPLICATION_JSON).content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.card").exists());
+        org.mockito.Mockito.verifyNoInteractions(onlineBookingService);
+    }
+
+    @Test
+    void book_blankCvv_returns400_andTheResponseNeverEchoesTheCard() throws Exception {
+        String body = VALID_BOOKING.replace("\"cvv\":\"6173\"", "\"cvv\":\"\"");
+
+        mockMvc.perform(post("/api/v1/public/bookings").contentType(APPLICATION_JSON).content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content()
+                        .string(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("5102589999999913"))));
+    }
+
+    @Test
+    void book_cardNotVerified_returns422WithAClearMessage() throws Exception {
+        when(onlineBookingService.book(any(), any())).thenThrow(new CardNotVerifiedException());
+
+        mockMvc.perform(post("/api/v1/public/bookings").contentType(APPLICATION_JSON).content(VALID_BOOKING))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.error").value(
+                        "We couldn't verify your card. Please check the card details or use a different card."));
+    }
+
+    @Test
+    void book_cardCheckUnavailable_returns503WithARetryMessage() throws Exception {
+        when(onlineBookingService.book(any(), any())).thenThrow(new CardValidationUnavailableException());
+
+        mockMvc.perform(post("/api/v1/public/bookings").contentType(APPLICATION_JSON).content(VALID_BOOKING))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.error").value("We couldn't check your card right now. Please try again in a moment."));
     }
 }

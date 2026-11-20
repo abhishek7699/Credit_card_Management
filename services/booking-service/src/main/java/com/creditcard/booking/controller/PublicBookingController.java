@@ -1,6 +1,6 @@
 package com.creditcard.booking.controller;
 
-import com.creditcard.booking.controller.dto.BookingRequest;
+import com.creditcard.booking.controller.dto.PublicBookingRequest;
 import com.creditcard.booking.controller.dto.PublicAvailabilityResponse;
 import com.creditcard.booking.controller.dto.PublicBookingResponse;
 import com.creditcard.booking.service.OnlineBookingService;
@@ -40,7 +40,7 @@ public class PublicBookingController {
 
     @PostMapping("/bookings")
     @ResponseStatus(HttpStatus.CREATED)
-    public PublicBookingResponse book(@Valid @RequestBody BookingRequest request) {
+    public PublicBookingResponse book(@Valid @RequestBody PublicBookingRequest request) {
         return onlineBookingService.book(request, LocalDate.now());
     }
 }

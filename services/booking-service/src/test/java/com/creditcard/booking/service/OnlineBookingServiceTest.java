@@ -1,5 +1,9 @@
 package com.creditcard.booking.service;
 
+import com.creditcard.booking.controller.dto.CardDetails;
+import com.creditcard.booking.controller.dto.PublicBookingRequest;
+import com.creditcard.booking.exception.CardNotVerifiedException;
+import com.creditcard.booking.exception.CardValidationUnavailableException;
 import com.creditcard.booking.controller.dto.BookingRequest;
 import com.creditcard.booking.controller.dto.PublicAvailabilityResponse;
 import com.creditcard.booking.controller.dto.PublicBookingResponse;
@@ -42,13 +46,15 @@ class OnlineBookingServiceTest {
     private BookingService bookingService;
     @Mock
     private RoomRepository roomRepository;
+    @Mock
+    private CardValidationService cardValidationService;
 
     private OnlineBookingService service;
 
     @BeforeEach
     void setUp() {
         service = new OnlineBookingService(roomAvailabilityService, bookingService, roomRepository,
-                new OnlineBookingPolicy(14, 365));
+                new OnlineBookingPolicy(14, 365), cardValidationService);
     }
 
     private static Room room(UUID id, String number, String type, String rate, List<String> included) {
@@ -61,9 +67,12 @@ class OnlineBookingServiceTest {
         return room;
     }
 
-    private static BookingRequest request(UUID roomId, LocalDate checkIn, LocalDate checkOut) {
-        return new BookingRequest(roomId, checkIn, checkOut, "Jane Doe", "+1-555-0100",
-                "jane@example.com", null, 2, 0, null, null, null);
+    private static final CardDetails CARD = new CardDetails("5102589999999913", "10/50", "6173", "Jane Doe");
+    private static final CardValidationResult MATCHED = new CardValidationResult("MATCHED", "AVM_abc", "9913");
+
+    private static PublicBookingRequest request(UUID roomId, LocalDate checkIn, LocalDate checkOut) {
+        return new PublicBookingRequest(roomId, checkIn, checkOut, "Jane Doe", "+1-555-0100",
+                "jane@example.com", null, 2, 0, null, null, null, CARD);
     }
 
     @Test
@@ -103,7 +112,8 @@ class OnlineBookingServiceTest {
     void book_createsAnOnlineBooking_andReturnsTheServerPrice() {
         UUID roomId = UUID.randomUUID();
         UUID bookingId = UUID.randomUUID();
-        BookingRequest request = request(roomId, TODAY.plusDays(2), TODAY.plusDays(4));
+        PublicBookingRequest request = request(roomId, TODAY.plusDays(2), TODAY.plusDays(4));
+        when(cardValidationService.validate(CARD)).thenReturn(MATCHED);
         Booking booking = new Booking();
         ReflectionTestUtils.setField(booking, "id", bookingId);
         booking.setRoomId(roomId);
@@ -111,7 +121,8 @@ class OnlineBookingServiceTest {
         booking.setCheckIn(TODAY.plusDays(2));
         booking.setCheckOut(TODAY.plusDays(4));
         booking.setRoomChargeAmount(new BigDecimal("258.00"));
-        when(bookingService.createConfirmedBookingWithSource(request, BookingSource.ONLINE)).thenReturn(booking);
+        when(bookingService.createConfirmedBookingWithSource(request.toBookingRequest(), BookingSource.ONLINE, MATCHED))
+                .thenReturn(booking);
         when(roomRepository.findById(roomId)).thenReturn(Optional.of(room(roomId, "102", "STANDARD", "129.00", List.of("Wi-Fi"))));
 
         PublicBookingResponse response = service.book(request, TODAY);
@@ -127,11 +138,33 @@ class OnlineBookingServiceTest {
 
     @Test
     void book_outsideOnlineRules_rejectedBeforeAnyBooking() {
-        BookingRequest request = request(UUID.randomUUID(), TODAY.minusDays(1), TODAY.plusDays(1));
+        PublicBookingRequest request = request(UUID.randomUUID(), TODAY.minusDays(1), TODAY.plusDays(1));
 
         assertThatThrownBy(() -> service.book(request, TODAY)).isInstanceOf(BookingWindowException.class);
 
-        verify(bookingService, never()).createConfirmedBookingWithSource(any(), any());
+        verify(cardValidationService, never()).validate(any());
+        verify(bookingService, never()).createConfirmedBookingWithSource(any(), any(), any());
+    }
+
+    @Test
+    void book_cardNotVerified_rejectsTheBookingAndCreatesNothing() {
+        PublicBookingRequest request = request(UUID.randomUUID(), TODAY.plusDays(1), TODAY.plusDays(2));
+        when(cardValidationService.validate(CARD)).thenThrow(new CardNotVerifiedException());
+
+        assertThatThrownBy(() -> service.book(request, TODAY)).isInstanceOf(CardNotVerifiedException.class)
+                .hasMessageContaining("couldn't verify your card");
+
+        verify(bookingService, never()).createConfirmedBookingWithSource(any(), any(), any());
+    }
+
+    @Test
+    void book_cardCheckUnavailable_failsClosedAndCreatesNothing() {
+        PublicBookingRequest request = request(UUID.randomUUID(), TODAY.plusDays(1), TODAY.plusDays(2));
+        when(cardValidationService.validate(CARD)).thenThrow(new CardValidationUnavailableException());
+
+        assertThatThrownBy(() -> service.book(request, TODAY)).isInstanceOf(CardValidationUnavailableException.class);
+
+        verify(bookingService, never()).createConfirmedBookingWithSource(any(), any(), any());
     }
 
     @Test
@@ -141,8 +174,9 @@ class OnlineBookingServiceTest {
         booking.setRoomId(roomId);
         booking.setCheckIn(TODAY.plusDays(1));
         booking.setCheckOut(TODAY.plusDays(2));
-        when(bookingService.createConfirmedBookingWithSource(eq(request(roomId, TODAY.plusDays(1), TODAY.plusDays(2))),
-                eq(BookingSource.ONLINE))).thenReturn(booking);
+        when(cardValidationService.validate(CARD)).thenReturn(MATCHED);
+        when(bookingService.createConfirmedBookingWithSource(eq(request(roomId, TODAY.plusDays(1), TODAY.plusDays(2)).toBookingRequest()),
+                eq(BookingSource.ONLINE), eq(MATCHED))).thenReturn(booking);
         when(roomRepository.findById(roomId)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.book(request(roomId, TODAY.plusDays(1), TODAY.plusDays(2)), TODAY))

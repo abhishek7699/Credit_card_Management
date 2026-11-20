@@ -72,6 +72,9 @@ idempotency:
 booking:
   merchant-id: ${BOOKING_MERCHANT_ID:HOTEL-001}
   checkout-timeout-minutes: ${BOOKING_CHECKOUT_TIMEOUT_MINUTES:10}
+  # How long a guest's no-charge card check may take. Must stay under the gateway's 10 s booking timeout.
+  card-validation:
+    deadline-seconds: ${BOOKING_CARD_VALIDATION_DEADLINE_SECONDS:8}
   # Guest-made bookings only (public front office). Staff bookings are not limited.
   online:
     max-stay-nights: ${BOOKING_ONLINE_MAX_STAY_NIGHTS:14}
