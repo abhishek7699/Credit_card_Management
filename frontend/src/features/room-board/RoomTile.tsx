@@ -20,6 +20,14 @@ export function RoomTile({ room, onClick }: RoomTileProps) {
       <span className="text-lg font-bold">{room.roomNumber}</span>
       <span className="font-medium">{style.label}</span>
       {room.status === 'OCCUPIED' && room.guestName && <span className="text-sm">{room.guestName}</span>}
+      {(room.bookingSource === 'ONLINE' || room.arrivingBookingSource === 'ONLINE') && (
+        <span
+          className="rounded bg-sky-600 px-2 py-0.5 text-sm font-semibold text-white"
+          data-testid="online-badge"
+        >
+          ONLINE
+        </span>
+      )}
       {room.hasBalanceDue && (
         <span
           className="mt-auto rounded bg-amber-500 px-2 py-0.5 text-sm font-semibold text-white"

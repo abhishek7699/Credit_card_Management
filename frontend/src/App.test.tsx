@@ -21,14 +21,15 @@ beforeEach(() => {
   store.dispatch(logout());
 });
 
-test('/ redirects to /staff and shows the staff login screen', async () => {
+test('/ is the guest front office, with no login', async () => {
   renderAt('/');
-  expect(await screen.findByText(/staff sign in/i)).toBeInTheDocument();
+  expect(await screen.findByRole('heading', { name: /welcome/i })).toBeInTheDocument();
+  expect(screen.queryByText(/staff sign in/i)).not.toBeInTheDocument();
 });
 
-test('an unknown path also redirects to /staff', async () => {
+test('an unknown path redirects to the guest front office', async () => {
   renderAt('/dashboard');
-  expect(await screen.findByText(/staff sign in/i)).toBeInTheDocument();
+  expect(await screen.findByRole('heading', { name: /welcome/i })).toBeInTheDocument();
 });
 
 test('/staff shows the staff login screen when signed out', async () => {

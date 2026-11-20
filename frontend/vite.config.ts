@@ -63,6 +63,7 @@ export default defineConfig({
         'src/features/staff-session/**': { lines: 90, branches: 90, functions: 90, statements: 90 },
         'src/features/room-board/**': { lines: 90, branches: 90, functions: 90, statements: 90 },
         'src/features/booking/**': { lines: 90, branches: 90, functions: 90, statements: 90 },
+        'src/features/front-office/**': { lines: 90, branches: 90, functions: 90, statements: 90 },
         'src/components/RetryBanner.tsx': { lines: 90, branches: 90, functions: 90, statements: 90 },
         'src/components/StaffShell.tsx': { lines: 90, branches: 90, functions: 90, statements: 90 },
       },

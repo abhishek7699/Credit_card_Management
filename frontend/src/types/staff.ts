@@ -16,7 +16,14 @@ export interface RoomBoardEntry {
   /** null when the room has no current occupant (not CHECKED_IN) — only ever
    *  true/false for an occupied room (US2). */
   hasBalanceDue: boolean | null;
+  /** Where the occupant's booking came from; null when the room has no occupant. */
+  bookingSource?: BookingSource | null;
+  /** Where the arriving-today booking came from; null when nothing is arriving. */
+  arrivingBookingSource?: BookingSource | null;
 }
+
+/** STAFF: created by front-desk staff. ONLINE: made by the guest (front office). */
+export type BookingSource = 'STAFF' | 'ONLINE';
 
 export interface RoomBoardFloor {
   floor: number;
